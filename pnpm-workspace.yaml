@@ -11,9 +11,13 @@ catalog:
   '@nestjs/testing': 12.3.3
   '@next/eslint-plugin-next': 16.4.5
   '@swc/core': 1.16.22
+  '@types/better-sqlite3': 9.6.0
   '@types/node': 26.6.6
   '@types/react': 19.3.0
   '@types/react-dom': 19.3.0
+  better-sqlite3: 13.0.3
+  drizzle-kit: 0.31.11
+  drizzle-orm: 0.45.4
   eslint: 10.14.0
   eslint-config-prettier: 10.1.8
   eslint-plugin-react-hooks: 7.1.1
@@ -25,7 +29,6 @@ catalog:
   reflect-metadata: 0.2.2
   rxjs: 7.8.2
   turbo: 2.11.10
-  # typescript-eslint 8.x가 TypeScript <6.1만 지원하므로 6.0에 고정
   typescript: 6.0.3
   typescript-eslint: 8.72.1
   unplugin-swc: 2.0.0
@@ -33,4 +36,5 @@ catalog:
 
 onlyBuiltDependencies:
   - '@swc/core'
+  - better-sqlite3
   - sharp
