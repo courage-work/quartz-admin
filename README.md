@@ -19,6 +19,7 @@
 pnpm install
 pnpm build       # 전체 빌드 (turbo)
 pnpm test        # 단위 테스트
+pnpm test:integration  # 통합 테스트(Docker 필요, Oracle Free 23 + quartz-testbed)
 pnpm lint        # ESLint (타입 기반 규칙 포함)
 pnpm typecheck   # TypeScript 검사
 pnpm format      # Prettier 적용
@@ -41,6 +42,9 @@ packages/
   shared/     API DTO, 공통 상수 (@qa/shared)
   core/       I/O 없는 Quartz 로직: cron 이식, 트리거 계산 (@qa/core)
   store/      대상 DB 접근: QuartzDialect, 자동 감지, 조회·명령 (@qa/store)
+              test/support: Testcontainers 통합 테스트 헬퍼
+tools/
+  quartz-testbed/  Java Quartz 테스트 노드, cron 벡터 생성기 (README 참고)
 docs/         PRD, TRD, BACKLOG
 ```
 

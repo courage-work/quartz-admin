@@ -18,3 +18,6 @@ data/
 *.db
 *.db-wal
 *.db-shm
+
+# Maven 빌드 결과 (tools/quartz-testbed)
+target/

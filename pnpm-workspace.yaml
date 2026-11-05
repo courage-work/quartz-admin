@@ -11,6 +11,7 @@ catalog:
   '@nestjs/testing': 12.3.3
   '@next/eslint-plugin-next': 16.4.5
   '@swc/core': 1.16.22
+  '@types/oracledb': 26.0.0
   '@types/node': 26.6.6
   '@types/react': 19.3.0
   '@types/react-dom': 19.3.0
@@ -19,11 +20,13 @@ catalog:
   eslint-plugin-react-hooks: 7.1.1
   globals: 17.14.0
   next: 16.4.5
+  oracledb: 26.0.0
   prettier: 3.9.10
   react: 19.3.1
   react-dom: 19.3.1
   reflect-metadata: 0.2.2
   rxjs: 7.8.2
+  testcontainers: 12.2.1
   turbo: 2.11.10
   # typescript-eslint 8.x가 TypeScript <6.1만 지원하므로 6.0에 고정
   typescript: 6.0.3
@@ -34,3 +37,10 @@ catalog:
 onlyBuiltDependencies:
   - '@swc/core'
   - sharp
+
+# 설치 스크립트가 필요 없는 의존성(oracledb는 Thin 모드만 쓰고, 나머지는 testcontainers의 선택적 SSH 지원용)
+ignoredBuiltDependencies:
+  - cpu-features
+  - oracledb
+  - protobufjs
+  - ssh2

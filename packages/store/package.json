@@ -17,11 +17,15 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run -c vitest.integration.config.ts"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/oracledb": "catalog:",
     "eslint": "catalog:",
+    "oracledb": "catalog:",
+    "testcontainers": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

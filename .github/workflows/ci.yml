@@ -43,3 +43,40 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  integration-oracle:
+    name: integration (oracle, quartz ${{ matrix.quartz }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        quartz: ['2.3.2', '2.5.2']
+    env:
+      QA_IT_QUARTZ_VERSION: ${{ matrix.quartz }}
+      QA_IT_TESTBED_IMAGE: quartz-testbed:${{ matrix.quartz }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # 빌드 단계에서 testbed의 JUnit 테스트도 함께 돈다
+      - name: Build quartz-testbed image
+        run: >-
+          docker build
+          --build-arg QUARTZ_VERSION=${{ matrix.quartz }}
+          -t "$QA_IT_TESTBED_IMAGE"
+          tools/quartz-testbed
+
+      - name: Pull Oracle Free 23
+        run: docker pull gvenzl/oracle-free:23-slim-faststart
+
+      - name: Integration test
+        run: pnpm turbo run test:integration --filter=@qa/store
