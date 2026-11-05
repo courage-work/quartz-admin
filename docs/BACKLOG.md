@@ -4,7 +4,7 @@
 | --- | --- |
 | 문서 버전 | v0.1 (초안) |
 | 작성일 | 2026-11-05 |
-| 상위 문서 | PRD v0.4(`docs/PRD.md`), TRD v0.1(`docs/TRD.md`) |
+| 상위 문서 | PRD v0.5(`docs/PRD.md`), TRD v0.2(`docs/TRD.md`) |
 | 작업 단위 | 기능 단위. 작업 하나는 API, 화면, 테스트를 모두 포함한 하나의 PR |
 | 추정 | 하지 않음. 순서와 의존성만 관리 |
 | 저장소·CI | GitHub, GitHub Actions |
@@ -104,7 +104,7 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
 | B-05 | 감사 로그 기반 | M0 | P0 | B-02 | 대기 |
 | B-06 | 웹 앱 셸과 관리 화면 | M0 | P0 | B-04, B-05 | 대기 |
 | B-07 | 컨테이너, 로깅, 헬스체크 | M0 | P0 | B-01 | 대기 |
-| B-08 | [스파이크 S1] Quartz 소스 분석과 TRD 확정 | M1 | P0 | B-01 | 대기 |
+| B-08 | [스파이크 S1] Quartz 소스 분석과 TRD 확정 | M1 | P0 | B-01 | 완료 |
 | B-09 | [스파이크 S2] quartz-testbed와 통합 테스트 하네스(Oracle) | M1 | P0 | B-01 | 대기 |
 | B-10 | [스파이크 S4] cron과 트리거 계산 이식(`@qa/core`) | M1 | P0 | B-01 | 대기 |
 | B-11 | [스파이크 S3] `@qa/store` 기반과 Oracle 어댑터 | M1 | P0 | B-03, B-09 | 대기 |
@@ -348,8 +348,10 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
   - `QuartzCommandService`: 사전 검사, 스케줄러 단위 뮤텍스, 감사 pending, 잠금 행 확보(없으면 INSERT), 기대 상태 재확인, 오류 코드(`LOCK_TIMEOUT`, `STATE_CONFLICT`, `READ_ONLY`, `TARGET_ERROR`)
   - 명령 zod 판별 유니온, `commands`와 `commands/preview` 엔드포인트
   - 공통 확인 대화상자(대상, 환경 라벨, 영향 범위, 경고), 결과 알림과 화면 갱신, 읽기 전용 접속의 제어 비활성화
+  - 차등 테스트 기반: TRD §12.1의 S1 항목(기준 인스턴스, 픽스처 SQL, 잠금 점유, 행 스냅샷) 중 B-09에 없는 것을 테스트베드에 추가
 - **완료 기준**
   - Quartz 노드가 잠금 행을 잡고 있으면 5초 후 `LOCK_TIMEOUT`이 나고 대상 DB가 바뀌지 않는다(통합 테스트)
+  - TRD 부록 A.8(X-01~X-05) 케이스가 통과한다
   - 기대 상태가 다르면 409와 함께 최신 상태를 돌려준다
   - 트랜잭션 도중 프로세스를 강제 종료해도 대상 DB에 잠금이 남지 않는다
 
@@ -359,11 +361,13 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
 - **범위**
   - `pause/resumeTrigger`, `pause/resumeJob`, `pause/resumeTriggerGroup`, `pause/resumeJobGroup`
   - `PAUSED_TRIGGER_GRPS` 반영, BLOCKED와 PAUSED_BLOCKED 처리, 재개 시 misfire 위임 안내
+  - 일시정지된 그룹 안의 지난 트리거 개별 재개 거부(`RESUME_IN_PAUSED_GROUP`, TRD §7.4)
   - 트리거·잡 목록과 상세 화면의 실행 버튼
 - **완료 기준**
   - 2노드 클러스터에서 일시정지한 트리거는 발화하지 않고, 재개하면 다시 발화한다
   - 차등 테스트: 같은 초기 상태에서 테스트베드 Quartz API 결과와 도구 결과의 트리거 행과 일시정지 그룹 행이 같다
   - 일시정지한 그룹에 새로 추가된 트리거도 일시정지 상태로 저장된다
+  - TRD 부록 A.2~A.4 케이스가 통과한다(P1인 G-11~G-13은 B-23에서)
 
 #### B-19 즉시 실행
 
@@ -374,7 +378,8 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
   - 잡 목록과 상세 화면의 실행 버튼
 - **완료 기준**
   - 즉시 실행한 잡이 클러스터에서 정확히 한 번 실행되고, 트리거는 실행 후 사라진다
-  - 차등 테스트: Quartz `triggerJob`이 만든 행과 컬럼 값이 같다(이름, 시각 제외)
+  - 차등 테스트: Quartz `triggerJob`이 만든 행과 컬럼 값이 같다(이름, 시각, DESCRIPTION 제외)
+  - TRD 부록 A.5 케이스가 통과한다
 
 #### B-20 스케줄 수정 (CRON, SIMPLE)
 
@@ -386,6 +391,8 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
 - **완료 기준**
   - 수정 후 클러스터의 실제 발화 시각이 미리보기와 같다
   - 일시정지 상태에서 수정해도 일시정지가 유지된다
+  - ACQUIRED 상태에서 수정하면 WAITING으로 바뀌고 옛 스케줄로 발화하지 않는다
+  - TRD 부록 A.6 케이스가 통과한다
 
 #### B-21 트리거·잡 삭제
 
@@ -396,6 +403,7 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
 - **완료 기준**
   - 차등 테스트: Quartz `unscheduleJob`과 `deleteJob` 결과와 남은 행이 같다
   - 실행 중인 잡을 삭제해도 클러스터에 오류가 나지 않는다
+  - TRD 부록 A.7 케이스가 통과한다
   - M2 완료 조건(§2)을 만족한다
 
 #### B-22 일괄 제어 (P1)
@@ -408,7 +416,7 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
 
 - **참조**: FR-CTL-11, TRD §7.3
 - **범위**: `pauseAll`/`resumeAll`, 강화된 확인 절차(스케줄러 이름 입력)
-- **완료 기준**: 차등 테스트로 Quartz `pauseAll`/`resumeAll`과 결과가 같다
+- **완료 기준**: 차등 테스트로 Quartz `pauseAll`/`resumeAll`과 결과가 같다(TRD 부록 A.4의 G-11~G-13)
 
 ### M3 알림
 
@@ -418,6 +426,7 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
 - **범위**
   - 규칙 6종 평가(`OVERDUE`, `TRIGGER_ERROR`, `BLOCKED_LONG`, `NODE_MISSING`, `CLUSTER_DOWN`, `MONITOR_UNREACHABLE`), 적용 범위 반영
   - `trigger_observations` 추적, 알림 수명주기(open/acked/resolved, update/reminder), 억제 규칙
+  - `OVERDUE`에서 도구가 최근 재개한 트리거 제외, `overdue_grace_ms` 기본값을 `misfire_threshold_ms`에 맞춤(TRD §9.2)
   - 스케줄러 등록 시 기본 규칙 세트 생성, 규칙 관리 API와 화면
 - **완료 기준**
   - 테스트베드에서 각 규칙의 발생과 해소를 재현하는 통합 테스트가 있다(노드 중지, 잡 장기 실행, ERROR 상태 유도 등)
