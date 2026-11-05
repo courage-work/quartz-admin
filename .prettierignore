@@ -5,5 +5,7 @@ coverage
 .turbo
 pnpm-lock.yaml
 next-env.d.ts
+# drizzle-kit이 생성하는 마이그레이션
+apps/api/drizzle
 # 기획 문서는 표 정렬을 사람이 관리한다
 docs
