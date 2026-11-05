@@ -2,13 +2,22 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.1 (초안) |
+| 문서 버전 | v0.2 (스파이크 S1 반영) |
 | 작성일 | 2026-11-05 |
 | 상태 | 검토 중 |
-| 상위 문서 | PRD(`docs/PRD.md`) v0.3 |
+| 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
 | 후속 문서 | 백로그(`docs/BACKLOG.md`) |
 
 이 문서는 PRD의 요구사항을 어떻게 구현할지 정합니다. 요구사항 ID(FR-*, NFR-*)는 PRD를 따릅니다.
+
+### 변경 이력
+
+| 버전 | 날짜 | 내용 |
+| --- | --- | --- |
+| v0.1 | 2026-11-05 | 초안 |
+| v0.2 | 2026-11-05 | 스파이크 S1(B-08): Quartz 2.3.2, 2.5.2 소스와 대조해 §5.4, §7.1~7.6, §9.2를 확정하고 부록 A(상태 전이 테스트 케이스)를 추가 |
+
+Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
 ---
 
@@ -223,9 +232,9 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 
 ### 5.4 Quartz 테이블 접근 규칙
 
-- 시각 컬럼(NEXT_FIRE_TIME 등)은 epoch ms입니다. Quartz는 값이 없으면 `NEXT_FIRE_TIME`/`PREV_FIRE_TIME`에 `-1`, `END_TIME`에 `0`을 저장하는데, 읽을 때 이를 `null`로 바꿉니다.
-- 불리언 컬럼은 읽을 때만 정규화합니다. MVP의 쓰기 작업은 불리언 컬럼을 건드리지 않습니다(새로 넣는 행은 `TRIGGERS`와 `SIMPLE_TRIGGERS`뿐이고, 두 테이블에는 불리언 컬럼이 없음).
-- JOB_DATA(BLOB)는 읽기만 합니다. 즉시 실행 트리거의 JOB_DATA는 `NULL`로 넣습니다. Quartz는 NULL을 빈 맵으로 처리합니다(통합 테스트로 확인).
+- 시각 컬럼(NEXT_FIRE_TIME 등)은 epoch ms입니다. 값이 없을 때 Quartz가 저장하는 값은 경로마다 다릅니다. `NEXT_FIRE_TIME`은 INSERT(`Delegate.insertTrigger`)에서는 SQL `NULL`, UPDATE(`Delegate.updateTrigger`)에서는 `-1`이고, `PREV_FIRE_TIME`은 항상 `-1`, `END_TIME`은 `0`입니다. Quartz는 읽을 때 `> 0`인 값만 유효로 봅니다(`Delegate.selectTriggerStatus`). 도구도 `NULL`과 `0` 이하를 모두 `null`로 바꿉니다.
+- 불리언 컬럼은 읽을 때만 정규화합니다. MVP의 쓰기 작업은 불리언 컬럼을 건드리지 않습니다. 새로 넣는 행은 `TRIGGERS`, `SIMPLE_TRIGGERS`, `PAUSED_TRIGGER_GRPS`, `LOCKS`뿐이고, 이 테이블들에는 불리언 컬럼이 없습니다.
+- JOB_DATA(BLOB)는 읽기만 합니다. 즉시 실행 트리거의 JOB_DATA는 `NULL`로 넣습니다. Quartz도 맵이 비어 있으면 `NULL`을 넣습니다(`Delegate.insertTrigger`의 `getJobDataMap().size() > 0` 검사).
 - Oracle에서는 빈 문자열이 NULL이 되므로, DESCRIPTION 비교는 `IS NULL`과 함께 처리합니다.
 
 ### 5.5 자동 감지 (FR-CON-03, FR-CON-04)
@@ -286,8 +295,9 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
    a. dialect.beforeLockedTx (격리 수준, 잠금 타임아웃)
    b. BEGIN
    c. 잠금 행 확보: SELECT * FROM {LOCKS} WHERE SCHED_NAME=? AND LOCK_NAME='TRIGGER_ACCESS' FOR UPDATE [WAIT 5]
-      행이 없으면 INSERT 후 다시 SELECT (Quartz StdRowLockSemaphore와 같은 방식)
-   d. 대상 재조회 후 expected와 비교. 다르면 ROLLBACK, 409 STATE_CONFLICT (FR-CTL-00e)
+      행이 없으면 INSERT. INSERT한 행은 커밋 전까지 이 트랜잭션이 잠그고 있으므로 다시 SELECT하지 않음
+      INSERT가 키 중복으로 실패하면(다른 쪽이 동시에 INSERT) ROLLBACK 후 1회 재시도
+   d. 대상 행을 SELECT … FOR UPDATE [WAIT 5]로 잠그며 재조회하고 expected와 비교. 다르면 ROLLBACK, 409 STATE_CONFLICT (FR-CTL-00e)
    e. 상태 조건부 변경 (§7.3)
    f. 변경 후 상태 조회
    g. COMMIT
@@ -296,86 +306,150 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 ```
 
 - 잠금 범위 안에서는 대상 DB 호출만 하고, 다른 비동기 작업(SQLite, 외부 호출)은 하지 않습니다. Quartz 노드를 기다리게 하는 시간을 최소화하기 위해서입니다(PRD R3).
-- 잠금 대기가 5초를 넘으면 `LOCK_TIMEOUT`, 그 밖의 DB 오류는 `TARGET_ERROR`로 응답합니다. 어떤 실패든 ROLLBACK하므로 대상 DB에는 아무것도 바뀌지 않습니다.
+- 잠금 대기가 5초를 넘으면 `LOCK_TIMEOUT`, 그 밖의 DB 오류(교착 감지로 인한 롤백 포함)는 `TARGET_ERROR`로 응답합니다. Quartz와 같은 결과를 보장할 수 없는 요청은 `RESUME_IN_PAUSED_GROUP`(§7.4) 같은 명령별 오류 코드(409)로 거부합니다. 어떤 실패든 ROLLBACK하므로 대상 DB에는 아무것도 바뀌지 않습니다.
 - 도구 프로세스가 트랜잭션 도중 죽으면 커넥션이 끊기면서 DB가 ROLLBACK합니다(NFR-REL-02). 기동할 때 `pending` 상태로 남은 감사 로그를 `failure(INTERRUPTED)`로 정리하고, 화면에 "결과 확인 필요"를 표시합니다.
 
 ### 7.2 잠금 규약과 동시성 근거
 
-- Quartz는 트리거 상태를 바꾸는 작업(pause/resume, storeTrigger, triggersFired, misfire 처리)을 `TRIGGER_ACCESS` 행 잠금 안에서 합니다. 도구도 같은 잠금을 씁니다.
-- 기본 설정(`acquireTriggersWithinLock=false`, 배치 크기 1)에서는 트리거 획득(WAITING→ACQUIRED)이 잠금 없이 **상태 조건부 UPDATE**로 일어납니다. 그래서 도구의 모든 상태 변경도 반드시 `WHERE TRIGGER_STATE IN (기대 상태들)` 조건을 붙인 UPDATE로 합니다. 경합에서 ACQUIRED가 먼저 되더라도 Quartz와 마찬가지로 ACQUIRED→PAUSED로 처리되고, 이후 `triggersFired`는 상태가 ACQUIRED가 아니면 발화하지 않습니다.
-- 잠금 순서는 항상 "잠금 행 → 대상 행"입니다. Quartz의 잠금 없는 획득 트랜잭션은 잠금 행을 기다리지 않으므로 교착 순환이 생기지 않습니다.
-- 구현 전에 Quartz 2.3.2 `JobStoreSupport`와 `StdJDBCDelegate`를 보고 위 동작을 확인합니다(§12 스파이크 S1).
+S1(B-08)에서 Quartz 2.3.2와 2.5.2 소스로 확인한 내용입니다. 두 버전의 동작은 같습니다.
+
+**Quartz의 잠금 방식**
+
+- 클러스터 모드에서는 항상 DB 행 잠금(`StdRowLockSemaphore`)을 씁니다(`JSS.initialize`에서 `isClustered()`이면 `setUseDBLocks(true)`). 잠금 SQL은 `SELECT * FROM {prefix}LOCKS WHERE SCHED_NAME = '<이름>' AND LOCK_NAME = ? FOR UPDATE`이고, 대기 시간 제한이 없습니다. 행이 없으면 INSERT하고 그대로 진행하며, 실패하면 1초 쉬고 최대 3번까지 다시 시도합니다(`StdRowLockSemaphore.executeSQL`).
+- 잠금 이름은 `TRIGGER_ACCESS`와 `STATE_ACCESS` 두 가지입니다. 도구는 `TRIGGER_ACCESS`만 씁니다. `STATE_ACCESS`는 클러스터 체크인과 복구에만 쓰입니다(§9.2).
+- 트랜잭션 격리 수준은 DB 기본값입니다(`txIsolationLevelSerializable=false`가 기본). Oracle과 PostgreSQL은 READ COMMITTED, MySQL과 MariaDB는 REPEATABLE READ입니다.
+
+**`TRIGGER_ACCESS` 안에서 일어나는 작업** (`JSS`의 각 메서드가 `executeInLock(LOCK_TRIGGER_ACCESS, …)`로 실행)
+
+| 작업 | 메서드 | 비고 |
+| --- | --- | --- |
+| 일시정지와 재개 | `pauseTrigger`, `pauseJob`, `pauseJobs`, `pauseTriggers`, `pauseAll`, `resumeTrigger`, `resumeJob`, `resumeJobs`, `resumeTriggers`, `resumeAll` | |
+| 저장, 교체, 삭제 | `storeTrigger`, `storeJobAndTrigger`, `replaceTrigger`, `removeTrigger`, `removeJob` | `storeTrigger`는 `lockOnInsert=true`(기본) 또는 교체일 때만 잠금 |
+| 발화와 완료 | `triggersFired`, `triggeredJobComplete`, `releaseAcquiredTrigger` | |
+| misfire 처리 | `doRecoverMisfires` (MisfireHandler 스레드) | 잠금 전에 잠금 없이 건수를 먼저 셈(`doubleCheckLockMisfireHandler=true`) |
+| 클러스터 복구 | `doCheckin` → `clusterRecover` | `STATE_ACCESS` 다음에 `TRIGGER_ACCESS` |
+| **트리거 획득** | `acquireNextTriggers` | `acquireTriggersWithinLock=true`이거나 `batchTriggerAcquisitionMaxCount > 1`일 때만 잠금. 기본 설정에서는 **잠금 없음** |
+
+**잠금 없는 트리거 획득** (`JSS.acquireNextTrigger`, 기본 설정)
+
+1. 후보 조회: `TRIGGER_STATE='WAITING' AND NEXT_FIRE_TIME <= noLaterThan AND (MISFIRE_INSTR = -1 OR NEXT_FIRE_TIME >= 노드현재시각 - misfireThreshold)`. `noLaterThan`은 `노드현재시각 + idleWaitTime(기본 30초)`입니다(`QST.run`). 즉 misfire된 트리거는 획득하지 않고 MisfireHandler에 맡깁니다(§7.4).
+2. 후보마다 `retrieveTrigger`로 트리거 전체를 **메모리로 읽습니다.**
+3. `UPDATE … SET TRIGGER_STATE='ACQUIRED' WHERE … AND TRIGGER_STATE='WAITING'`. 0행이면 다음 후보로 넘어갑니다.
+4. `FIRED_TRIGGERS`에 `ENTRY_STATE='ACQUIRED'` 행을 넣습니다. 이 행은 `JOB_NAME`, `JOB_GROUP`이 `NULL`이고 `IS_NONCONCURRENT`가 false입니다(`Delegate.insertFiredTrigger`에 job이 null로 전달됨).
+
+획득한 트리거는 발화 시각까지 최대 `idleWaitTime`(30초) 동안 ACQUIRED로 남습니다. 발화 시각이 되면 `triggersFired`(잠금 안)가 다음을 합니다(`JSS.triggerFired`).
+
+- DB의 상태가 ACQUIRED가 아니면(PAUSED, WAITING, 삭제됨 등) 발화하지 않고 null을 돌려줍니다. 노드는 `releaseAcquiredTrigger`로 `ACQUIRED→WAITING`, `BLOCKED→WAITING`(둘 다 조건부)을 시도하고 `FIRED_TRIGGERS` 행을 지웁니다(`QST.run`).
+- ACQUIRED이면 2단계에서 **메모리에 읽어 둔 트리거 객체**로 `triggered()`를 호출해 다음 실행 시각을 계산하고, `storeTrigger(…, replaceExisting=true)`로 `TRIGGERS` 행 전체와 하위 테이블 행을 덮어씁니다.
+
+**도구의 규약**
+
+- 도구는 Quartz와 같은 `TRIGGER_ACCESS` 행을 잠근 트랜잭션 안에서만 쓰기를 합니다(§7.1 c). 잠금 대기는 5초로 제한합니다(Quartz 노드는 도구를 무기한 기다리지만, 도구의 트랜잭션은 짧음).
+- 잠금을 잡은 뒤 대상 트리거 행을 `SELECT … FOR UPDATE`로 잠그고 상태를 다시 읽습니다(§7.1 d). 잠금 없는 획득의 3단계 UPDATE는 이 행 잠금을 기다렸다가, 도구가 커밋한 뒤 WHERE 조건을 다시 평가합니다. 도구가 PAUSED로 바꿨다면 0행이 되어 획득하지 않습니다.
+- 상태 변경 UPDATE에는 항상 `WHERE TRIGGER_STATE IN (기대 상태들)`을 붙입니다. 행 잠금으로 이미 보호되지만, 잠금이 빠진 경로가 생겨도 잘못 덮어쓰지 않게 하는 이중 안전장치입니다. Quartz의 `pauseTrigger`는 상태를 읽은 뒤 조건 없는 UPDATE를 하는데, 도구의 방식은 그보다 엄격하고 결과는 같습니다.
+- **ACQUIRED 트리거의 스케줄 컬럼을 바꿀 때는 상태도 반드시 ACQUIRED에서 벗어나게 합니다.** ACQUIRED로 남겨 두면 노드가 발화할 때 메모리의 옛 트리거로 행 전체를 덮어써 변경이 사라집니다. Quartz `rescheduleJob`도 트리거를 지우고 WAITING으로 다시 넣으므로 같은 결과입니다(§7.6). 일시정지와 삭제는 상태가 ACQUIRED에서 벗어나므로 문제가 없습니다.
+- 남는 경합 창: 획득 2단계(읽기)와 3단계(UPDATE) 사이에 도구가 스케줄을 바꾸고 커밋하면, 노드는 옛 스케줄로 획득합니다. 이 창은 수 ms이고 Quartz 자체의 `rescheduleJob`에도 똑같이 있습니다(기본 설정의 Quartz가 감수하는 위험). 도구는 이 이상을 보장하지 않습니다.
+- 교착: 도구는 항상 "잠금 행 → 대상 행" 순서로 잠급니다. 잠금 없는 획득은 잠금 행을 기다리지 않고 트리거 행을 하나만 성공적으로 잠그므로, 단일 트리거 명령에서는 교착 순환이 생기지 않습니다. 여러 행을 바꾸는 명령(잡, 그룹)은 MySQL의 REPEATABLE READ에서 획득 쪽의 실패한 UPDATE가 행 잠금을 남길 수 있어 교착이 생길 수 있습니다. Quartz 자체의 `pauseTriggers`도 같은 위험을 가집니다. DB가 교착을 감지하면 한쪽을 롤백합니다. 도구 쪽이 롤백되면 `TARGET_ERROR`(재시도 가능)로 응답하고 대상 DB는 바뀌지 않습니다. Quartz 쪽이 롤백되면 노드가 다음 루프에서 다시 획득합니다(`QST.run`의 `acquiresFailed` 처리).
+- Quartz의 misfire 판정과 노드 장애 판정은 **노드의 시계**(`System.currentTimeMillis()`)를 씁니다. 도구는 DB 시각을 쓰므로, 노드와 DB의 시계 차이만큼 경계값 판정이 어긋날 수 있습니다. 도구는 경계값에 걸리는 판단을 하지 않도록 설계합니다(§7.4의 재개 거부 조건은 "지났는지"만 봄).
 
 ### 7.3 명령별 동작
 
-Quartz 메서드와 같은 결과를 내는 것이 원칙입니다(FR-CTL-00d). 아래는 Quartz 2.3.2 기준이며 S1에서 소스로 다시 확인합니다.
+Quartz 메서드와 같은 결과를 내는 것이 원칙입니다(FR-CTL-00d). 아래는 S1에서 Quartz 2.3.2, 2.5.2 소스로 확인한 동작입니다. 표에 적지 않은 상태(예: ERROR, COMPLETE)는 바꾸지 않습니다. 테스트 케이스는 부록 A에 있습니다.
 
-| 명령 | 대응 Quartz API | 동작 |
+| 명령 | 대응 Quartz API (근거) | 동작 |
 | --- | --- | --- |
-| `pauseTrigger` | `pauseTrigger` | WAITING/ACQUIRED → PAUSED, BLOCKED → PAUSED_BLOCKED |
-| `resumeTrigger` | `resumeTrigger` | PAUSED → WAITING, PAUSED_BLOCKED → BLOCKED. 같은 잡에 `IS_NONCONCURRENT` 실행 기록(FIRED_TRIGGERS)이 있으면 BLOCKED로 둠. NEXT_FIRE_TIME은 바꾸지 않음(§7.4) |
-| `pauseJob` / `resumeJob` | `pauseJob` / `resumeJob` | 잡의 모든 트리거에 위 동작 적용 |
-| `pauseTriggerGroup` | `pauseTriggers(GroupMatcher.equals)` | 그룹 트리거 일괄 상태 전이 후 `PAUSED_TRIGGER_GRPS`에 INSERT(없을 때) |
-| `resumeTriggerGroup` | `resumeTriggers(...)` | `PAUSED_TRIGGER_GRPS`에서 DELETE 후 그룹 트리거 각각 resume |
-| `pauseJobGroup` / `resumeJobGroup` | `pauseJobs` / `resumeJobs` | 그룹 내 잡별 pause/resume. JDBC JobStore는 잡 그룹 일시정지를 저장하지 않으므로, 이후 추가되는 잡에는 적용되지 않음(화면에 안내) |
-| `pauseAll` / `resumeAll` (P1) | `pauseAll` / `resumeAll` | 모든 트리거 그룹 pause와 `_$_ALL_GROUPS_PAUSED_$_` INSERT. 재개는 그 역순 |
-| `triggerJob` | `triggerJob(jobKey)` | §7.5 |
-| `updateCronSchedule` | `rescheduleJob` 상당 | §7.6 |
+| `pauseTrigger` | `pauseTrigger` (`JSS.pauseTrigger`) | WAITING/ACQUIRED → PAUSED, BLOCKED → PAUSED_BLOCKED. `PAUSED_TRIGGER_GRPS`는 건드리지 않음 |
+| `resumeTrigger` | `resumeTrigger` (`JSS.resumeTrigger`, `JSS.checkBlockedState`) | 행이 없거나 NEXT_FIRE_TIME이 없으면(`<= 0` 또는 NULL) 아무것도 하지 않음. 아니면 새 상태 = 같은 잡의 `FIRED_TRIGGERS` 행 중 `IS_NONCONCURRENT`가 참인 행이 있으면 BLOCKED, 없으면 WAITING. 이 값으로 PAUSED → 새 상태, PAUSED_BLOCKED → 새 상태(둘 다 조건부 UPDATE). 트리거 그룹이 일시정지 상태인지는 보지 않음. NEXT_FIRE_TIME은 바꾸지 않음(§7.4) |
+| `pauseJob` / `resumeJob` | `pauseJob` / `resumeJob` (`JSS.pauseJob`, `JSS.resumeJob`) | 잡의 모든 트리거에 위 동작을 각각 적용 |
+| `pauseTriggerGroup` | `pauseTriggers(GroupMatcher.groupEquals)` (`JSS.pauseTriggerGroup`) | 그룹의 WAITING/ACQUIRED → PAUSED, BLOCKED → PAUSED_BLOCKED 일괄 UPDATE. 그 뒤 `PAUSED_TRIGGER_GRPS`에 그룹 행이 없으면 INSERT. 트리거가 하나도 없는 그룹이어도 INSERT함 |
+| `resumeTriggerGroup` | `resumeTriggers(GroupMatcher.groupEquals)` (`JSS.resumeTriggerGroup`) | `PAUSED_TRIGGER_GRPS`에서 그룹 행 DELETE 후, 그룹의 모든 트리거에 `resumeTrigger` 적용. 그룹이 일시정지 상태가 아니었어도 개별로 일시정지된 트리거까지 모두 재개됨 |
+| `pauseJobGroup` / `resumeJobGroup` | `pauseJobs` / `resumeJobs` (`JSS.pauseJobs`, `JSS.resumeJobs`) | 잡 그룹(`JOB_GROUP = ?`)의 잡마다 pauseJob/resumeJob. JDBC JobStore는 잡 그룹 일시정지를 저장하지 않으므로(`RAMJobStore`와 다름) 이후 추가되는 잡에는 적용되지 않음(화면에 안내) |
+| `pauseAll` / `resumeAll` (P1) | `pauseAll` / `resumeAll` (`JSS.pauseAll`, `JSS.resumeAll`) | pauseAll: `TRIGGERS`에 있는 DISTINCT 그룹마다 pauseTriggerGroup 후 `_$_ALL_GROUPS_PAUSED_$_` INSERT(없을 때). resumeAll: `TRIGGERS`에 있는 그룹마다 resumeTriggerGroup 후 `_$_ALL_GROUPS_PAUSED_$_` DELETE. 트리거가 없는 그룹의 `PAUSED_TRIGGER_GRPS` 행은 resumeAll 뒤에도 남음 |
+| `triggerJob` | `triggerJob(jobKey)` (`QS.triggerJob`) | §7.5 |
+| `updateCronSchedule` | `rescheduleJob` 상당 (`QS.rescheduleJob`, `JSS.replaceTrigger`) | §7.6 |
 | `updateSimpleSchedule` | `rescheduleJob` 상당 | §7.6 |
-| `deleteTrigger` | `unscheduleJob` | 하위 테이블(SIMPLE/CRON/SIMPROP/BLOB) 행과 TRIGGERS 행 삭제. 잡이 durable이 아니고 남은 트리거가 0개면 잡도 삭제 |
-| `deleteJob` | `deleteJob` | 잡의 모든 트리거와 하위 행, JOB_DETAILS 삭제. 삭제 전 스냅샷을 감사 로그 `before_json`에 저장(JOB_DATA는 64KB까지 base64) |
+| `deleteTrigger` | `unscheduleJob` (`JSS.removeTrigger`) | 하위 테이블 행(SIMPLE/CRON/SIMPROP 중 하나, 없으면 BLOB)과 TRIGGERS 행 삭제. 잡이 durable이 아니고 남은 트리거가 0개면 JOB_DETAILS도 삭제. 실행 중인 트리거를 지워도 노드는 실행 완료 처리(`triggeredJobComplete`)에서 0행 UPDATE만 하고 오류 없이 끝남 |
+| `deleteJob` | `deleteJob` (`QS.deleteJob` → 트리거마다 `removeTrigger`, 마지막에 `JSS.removeJob`) | 잡의 모든 트리거와 하위 행, JOB_DETAILS 삭제. Quartz는 트리거마다 트랜잭션을 나누지만 도구는 한 트랜잭션으로 처리. 최종 상태는 같음. `FIRED_TRIGGERS`는 건드리지 않음(실행 중이면 노드가 완료 후 지움). 삭제 전 스냅샷을 감사 로그 `before_json`에 저장(JOB_DATA는 64KB까지 base64) |
 
-명령 요청 형식(zod 판별 유니온):
+**확인된 세부 규칙**
 
-```ts
-type Command =
-  | { type: 'pauseTrigger' | 'resumeTrigger' | 'deleteTrigger'; trigger: Key; expected: TriggerExpect }
-  | { type: 'pauseJob' | 'resumeJob' | 'deleteJob' | 'triggerJob'; job: Key; expected: JobExpect }
-  | { type: 'pauseTriggerGroup' | 'resumeTriggerGroup'; group: string }
-  | { type: 'pauseJobGroup' | 'resumeJobGroup'; group: string }
-  | { type: 'updateCronSchedule'; trigger: Key; cron: string; timeZone: string; expected: TriggerExpect }
-  | { type: 'updateSimpleSchedule'; trigger: Key; repeatIntervalMs: number; repeatCount: number; startAt?: number; expected: TriggerExpect };
-// Key = { group: string; name: string }
-// TriggerExpect = { state: TriggerState; nextFireTime: number | null }
-```
-
-- `POST /schedulers/:id/commands/preview`: 같은 요청을 받아 영향 범위(대상 트리거 목록과 개수, 경고)만 계산하고 아무것도 바꾸지 않습니다. 확인 대화상자가 이 응답을 표시합니다(FR-CTL-00b).
-- 경고 예: 동시 실행 금지 잡이 실행 중, 활성 노드 0개, 마지막 트리거 삭제로 잡도 삭제됨, 실행 중인 잡 삭제
+- **BLOCKED 판정**(`JSS.checkBlockedState`): 현재 상태가 WAITING이나 PAUSED일 때만 BLOCKED/PAUSED_BLOCKED로 바뀝니다. 획득 단계의 ACQUIRED 행은 `JOB_NAME`이 NULL이라 조회되지 않으므로, 실제로는 **실행 중(EXECUTING)인 행**만 판정에 쓰입니다. Quartz는 조회된 첫 행의 `IS_NONCONCURRENT`만 보지만, 같은 잡의 행은 모두 같은 값이므로 도구는 `EXISTS (… AND IS_NONCONCURRENT = 참)`으로 판정합니다.
+- **그룹 이름 비교 방식(의도된 차이)**: Quartz는 `GroupMatcher.groupEquals`를 넘겨도 일괄 UPDATE(`UPDATE_TRIGGER_GROUP_STATE_FROM_STATES`), 그룹 목록 조회(`SELECT_TRIGGER_GROUPS_FILTERED`), `PAUSED_TRIGGER_GRPS` 삭제(`DELETE_PAUSED_TRIGGER_GROUP`)에서 `TRIGGER_GROUP LIKE ?`를 이스케이프 없이 씁니다(`Delegate.toSqlLikeClause`). 그래서 그룹 이름에 `_`나 `%`가 있으면 다른 그룹까지 일시정지될 수 있습니다(예: `A_B`를 일시정지하면 `AXB`도 일시정지). 반면 트리거 목록 조회(`SELECT_TRIGGERS_IN_GROUP`)는 `=`를 씁니다. 도구는 모든 곳에서 `=`로 비교합니다. 이름이 와일드카드로 겹치는 그룹이 있을 때만 결과가 다르며, PRD FR-CTL-00d의 예외로 명시합니다.
+- **트리거 저장 시 상태 결정**(`JSS.storeTrigger`, `forceState=false`일 때): 트리거 그룹이 `PAUSED_TRIGGER_GRPS`에 있으면 PAUSED. 없더라도 `_$_ALL_GROUPS_PAUSED_$_`가 있으면 **그 그룹 행을 `PAUSED_TRIGGER_GRPS`에 INSERT하고** PAUSED. 그 뒤 잡이 동시 실행 금지(`JOB_DETAILS.IS_NONCONCURRENT`)이면 BLOCKED 판정을 적용합니다. 이 규칙은 즉시 실행(§7.5), 스케줄 수정(§7.6), misfire 처리(§7.4)에 쓰입니다.
 
 ### 7.4 재개 시 misfire 처리 (FR-CTL-04)
 
-재개할 때 NEXT_FIRE_TIME이 이미 지났더라도, 도구는 상태만 바꾸고 다음 실행 시각은 다시 계산하지 않습니다.
+재개할 때 NEXT_FIRE_TIME이 이미 지났더라도, 도구는 상태만 바꾸고 다음 실행 시각은 다시 계산하지 않습니다. 이렇게 하면 misfire 처리 방식(SimpleTrigger만 6종)과 Java 직렬화된 캘린더를 이식하지 않아도 됩니다.
 
-- Quartz 노드의 MisfireHandler가 `NEXT_FIRE_TIME < now - misfireThreshold`인 WAITING 트리거를 주기적으로 찾아, 각 트리거의 misfire 처리 방식과 캘린더를 반영해 다시 계산합니다.
-- 임계값 안이면 일반 획득 경로로 바로 발화합니다. 결과는 Quartz `resumeTrigger`와 같고, 차이는 적용 시점이 수 초 늦을 수 있다는 것뿐입니다.
-- 이렇게 하면 misfire 처리 방식(SimpleTrigger만 6종)과 Java 직렬화된 캘린더를 이식하지 않아도 됩니다.
-- 활성 노드가 없으면 노드가 다시 뜰 때까지 반영되지 않습니다. Quartz도 스케줄러가 멈춰 있으면 misfire를 처리하지 않으므로 같은 결과입니다.
-- 화면에는 "재개됨. 지난 실행은 Quartz 노드가 misfire 정책에 따라 처리합니다"라고 안내합니다.
-- PRD v0.3 FR-CTL-04에 반영했습니다(§13 제안 1).
+**Quartz `resumeTrigger`의 실제 동작** (`JSS.resumeTrigger`, `JSS.updateMisfiredTrigger`)
+
+호출한 스케줄러 인스턴스가 실행 중(`schedulerRunning`)이고 NEXT_FIRE_TIME이 현재보다 과거이면, `NEXT_FIRE_TIME <= 노드현재시각 - misfireThreshold`인지 봅니다. 그렇다면 **같은 트랜잭션 안에서** `updateAfterMisfire(캘린더)`로 다음 실행 시각을 다시 계산하고, `storeTrigger(…, forceState=true)`로 저장합니다(그룹 일시정지는 보지 않음). 임계값 안이면 상태만 바꿉니다. 스탠바이 상태인 인스턴스로 호출하면 misfire 처리를 하지 않습니다.
+
+**도구에 위임했을 때 일어나는 일**
+
+- 재개된 트리거는 WAITING이고 NEXT_FIRE_TIME이 지난 값입니다. 획득 조회는 `NEXT_FIRE_TIME >= 노드현재시각 - misfireThreshold` 조건 때문에 이 트리거를 집지 않습니다(§7.2). 그래서 잘못 발화하지 않습니다.
+- 각 노드의 MisfireHandler가 `misfireThreshold`(기본 60초) 간격으로 `TRIGGER_STATE='WAITING' AND MISFIRE_INSTR <> -1 AND NEXT_FIRE_TIME < 노드현재시각 - misfireThreshold`인 트리거를 찾아(`SELECT_HAS_MISFIRED_TRIGGERS_IN_STATE`, 한 번에 최대 20개), Quartz `resumeTrigger`와 같은 `updateAfterMisfire`를 적용합니다(`JSS.recoverMisfiredJobs`, `doUpdateOfMisfiredTrigger`). 다음 실행 시각이 없으면 COMPLETE로 저장합니다.
+- 임계값 안이면 일반 획득 경로로 바로 발화합니다. Quartz도 이 경우 상태만 바꾸므로 같습니다.
+- `MISFIRE_INSTR = -1`(IGNORE_MISFIRE_POLICY)은 MisfireHandler 대상이 아니고 획득 조회에 바로 잡힙니다. Quartz `resumeTrigger`도 `updateAfterMisfire`가 아무것도 바꾸지 않으므로 같습니다.
+- **적용 시점**: 최대 `misfireThreshold`(기본 60초)만큼 늦을 수 있습니다. 노드가 여러 대면 각자 MisfireHandler를 돌리므로 대개 더 빠릅니다. 노드가 스탠바이여도 MisfireHandler는 돕니다. 활성 노드가 없으면 노드가 다시 뜰 때까지 반영되지 않습니다.
+- **BLOCKED로 재개된 경우**: MisfireHandler는 WAITING만 보므로, 실행 중인 잡이 끝나 BLOCKED → WAITING이 된 뒤(`JSS.triggeredJobComplete`) 처리됩니다. Quartz는 BLOCKED로 두면서 시각을 바로 다시 계산합니다. 어느 쪽이든 잡이 끝나기 전에는 발화하지 않으므로 최종 결과는 같습니다.
+
+**결과가 달라지는 경우와 대응**
+
+MisfireHandler는 `storeTrigger(…, forceState=false)`로 저장하므로 그룹 일시정지를 다시 적용합니다. 그래서 **일시정지된 그룹(또는 전체 일시정지) 안의 트리거를 개별로 재개하고 그 트리거의 실행 시각이 misfire 임계값보다 지나 있으면**, Quartz는 WAITING으로 두지만 위임 방식에서는 MisfireHandler가 다시 PAUSED로 만듭니다. 도구는 이 경우 결과가 Quartz와 같다고 보장할 수 없으므로 **명령을 거부합니다**.
+
+- 거부 조건: 재개 대상 트리거의 그룹이 `PAUSED_TRIGGER_GRPS`에 있거나 `_$_ALL_GROUPS_PAUSED_$_`가 있고, NEXT_FIRE_TIME이 dbNow보다 과거. 시계 차이 때문에 임계값 경계를 정확히 판정할 수 없으므로 "지났는지"만 봅니다.
+- 오류 코드 `RESUME_IN_PAUSED_GROUP`(409). `resumeJob`, `resumeJobGroup`은 대상 중 하나라도 해당하면 전체를 거부하고, 미리보기에서 해당 트리거 목록과 "그룹을 먼저 재개하세요"를 보여줍니다.
+- `resumeTriggerGroup`과 `resumeAll`은 그룹 행을 먼저 지우므로 해당하지 않습니다.
+
+화면에는 "재개됨. 지난 실행은 Quartz 노드가 misfire 정책에 따라 최대 1분(misfireThreshold) 안에 처리합니다"라고 안내합니다. PRD FR-CTL-04에 반영했습니다(§13 제안 1은 PRD v0.3, 제안 7은 PRD v0.5).
 
 ### 7.5 즉시 실행 (FR-CTL-05)
 
-Quartz `triggerJob`과 같은 형태의 일회성 트리거를 INSERT합니다.
+Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. 근거는 `QS.triggerJob`(이름과 저장), `TriggerBuilder.build`와 `SimpleScheduleBuilder`(기본값), `Delegate.insertTrigger`(컬럼 값), `JSS.storeTrigger`(상태)입니다. Quartz는 `storeTrigger(trig, false)`를 `lockOnInsert=true`(기본)이면 `TRIGGER_ACCESS` 안에서 실행합니다.
 
-| 컬럼 | 값 |
-| --- | --- |
-| TRIGGER_NAME | `MT_` + 난수(Quartz와 같은 접두어). 충돌하면 다시 생성 |
-| TRIGGER_GROUP | `DEFAULT` |
-| DESCRIPTION | `quartz-admin: <사용자명>` (추적용) |
-| TRIGGER_TYPE | `SIMPLE` (+ `SIMPLE_TRIGGERS`: REPEAT_COUNT 0, REPEAT_INTERVAL 0, TIMES_TRIGGERED 0) |
-| START_TIME, NEXT_FIRE_TIME | 대상 DB 현재 시각 |
-| PREV_FIRE_TIME / END_TIME | -1 / 0 |
-| PRIORITY / MISFIRE_INSTR | 5 / 0 |
-| JOB_DATA, CALENDAR_NAME | NULL |
-| TRIGGER_STATE | Quartz `storeTrigger` 규칙: 기본 WAITING. `DEFAULT` 그룹이나 전체 일시정지가 걸려 있으면 PAUSED, 동시 실행 금지 잡이 실행 중이면 BLOCKED/PAUSED_BLOCKED |
+| 컬럼 | Quartz 값 | 도구 값 |
+| --- | --- | --- |
+| TRIGGER_NAME | `MT_` + `Long.toString(\|난수 long\|, 30~36진법)`. 키가 겹치면 이름을 다시 만들어 재시도 | 같은 형식. 겹치면 다시 생성 |
+| TRIGGER_GROUP | `DEFAULT` | 같음 |
+| DESCRIPTION | NULL | `quartz-admin: <사용자명>` (추적용, **의도된 차이**) |
+| TRIGGER_TYPE | `SIMPLE` (+ `SIMPLE_TRIGGERS`: REPEAT_COUNT 0, REPEAT_INTERVAL 0, TIMES_TRIGGERED 0) | 같음 |
+| START_TIME, NEXT_FIRE_TIME | 노드 현재 시각(`TriggerBuilder`의 기본 `startTime = new Date()`, `computeFirstFireTime`은 START_TIME) | 대상 DB 현재 시각 |
+| PREV_FIRE_TIME / END_TIME | -1 / 0 | 같음 |
+| PRIORITY / MISFIRE_INSTR | 5 / 0(SMART_POLICY. 반복 0회 SimpleTrigger에서는 FIRE_NOW로 동작) | 같음 |
+| JOB_DATA, CALENDAR_NAME | NULL(빈 맵이면 NULL) / NULL | 같음 |
+| TRIGGER_STATE | §7.3 "트리거 저장 시 상태 결정" 규칙 | 같은 규칙. 기본 WAITING. `DEFAULT` 그룹이 일시정지면 PAUSED. 전체 일시정지만 걸려 있으면 `PAUSED_TRIGGER_GRPS`에 `DEFAULT` 행을 INSERT하고 PAUSED. 잡이 동시 실행 금지이고 실행 중이면 BLOCKED(또는 PAUSED_BLOCKED) |
 
-트리거는 한 번 발화하면 Quartz가 COMPLETE로 처리하고 삭제합니다.
+- 잡이 없으면 Quartz는 `JobPersistenceException`을 냅니다. 도구는 404 `NOT_FOUND`로 응답하고 아무것도 넣지 않습니다.
+- 발화 후 처리(`JSS.triggerFired`, `JSS.triggeredJobComplete`): 발화할 때 다음 실행 시각이 없으므로 COMPLETE로 저장되고, 실행이 끝나면 `DELETE_TRIGGER` 지시로 삭제됩니다. 실행 도중 노드가 죽으면 살아남은 노드의 `clusterRecover`가 실행 기록이 남지 않은 COMPLETE 트리거를 지웁니다.
+- 도구와 노드의 시계가 misfireThreshold 이상 어긋나 있으면(DB 시각이 노드보다 늦으면) 넣자마자 misfire로 보일 수 있습니다. 이때도 MisfireHandler가 FIRE_NOW로 처리하므로 한 번 실행됩니다(최대 1분 지연). 시계 차이 경고(§8.4)가 이 상황을 알려 줍니다.
+- 차등 테스트(B-19)는 TRIGGER_NAME, START_TIME, NEXT_FIRE_TIME, DESCRIPTION을 빼고 비교합니다.
 
 ### 7.6 스케줄 수정 (FR-CTL-06, FR-CTL-07)
 
-- **CRON**: `CRON_TRIGGERS`의 CRON_EXPRESSION과 TIME_ZONE_ID를 바꾸고, `TRIGGERS.NEXT_FIRE_TIME`을 `getFireTimeAfter(max(dbNow, START_TIME - 1000))`으로 다시 계산합니다(END_TIME 반영). 결과가 null이면(더 이상 발화하지 않음) 거부합니다.
+**Quartz `rescheduleJob`의 실제 동작** (`QS.rescheduleJob`, `JSS.replaceTrigger`)
+
+새 트리거의 `validate()`와 `computeFirstFireTime(캘린더)`를 실행해 null이면 거부합니다. 그 뒤 `replaceTrigger`가 잠금 안에서 기존 트리거와 하위 행을 지우고, 새 트리거를 `storeTrigger(…, state=WAITING, forceState=false)`로 넣습니다. 그 결과는 다음과 같습니다.
+
+- 개별 일시정지(PAUSED, PAUSED_BLOCKED)가 풀립니다(**확인됨**). 그룹 일시정지와 전체 일시정지는 §7.3 저장 규칙으로 다시 적용됩니다.
+- ACQUIRED, ERROR, COMPLETE도 모두 WAITING(또는 그룹 규칙에 따라 PAUSED, BLOCKED)으로 바뀝니다. ACQUIRED였던 트리거는 노드의 `triggersFired`에서 상태가 맞지 않아 발화하지 않고 해제됩니다.
+- PREV_FIRE_TIME, TIMES_TRIGGERED 같은 값은 넘긴 새 트리거 객체의 값이 됩니다(보통 -1, 0).
+
+**도구의 동작**
+
+새 행을 넣지 않고 기존 행을 UPDATE합니다. 키, 잡, DESCRIPTION, PRIORITY, MISFIRE_INSTR, CALENDAR_NAME, JOB_DATA, END_TIME, PREV_FIRE_TIME은 그대로 둡니다.
+
+- **CRON**: `CRON_TRIGGERS`의 CRON_EXPRESSION과 TIME_ZONE_ID를 바꾸고, `TRIGGERS.NEXT_FIRE_TIME`을 `getFireTimeAfter(max(dbNow, START_TIME - 1000))`으로 다시 계산합니다(END_TIME 반영. `CronTriggerImpl.computeFirstFireTime`의 `startTime - 1000` 규칙과 같음). START_TIME은 바꾸지 않습니다. 결과가 null이면(더 이상 발화하지 않음) 거부합니다.
+  - Quartz 대응: `rescheduleJob(key, old.getTriggerBuilder().withSchedule(cronSchedule(expr).inTimeZone(tz)).startAt(max(now, START_TIME)).build())`에 MISFIRE_INSTR을 기존 값으로 둔 것. 차이는 START_TIME 컬럼(과거 값이면 Quartz는 now)과 PREV_FIRE_TIME뿐이며, 두 값은 CronTrigger의 이후 계산에 쓰이지 않습니다.
 - **SIMPLE**: REPEAT_INTERVAL과 REPEAT_COUNT를 바꾸고, TIMES_TRIGGERED=0, START_TIME=`startAt`(기본은 DB 현재 시각), NEXT_FIRE_TIME=START_TIME으로 둡니다. "지금부터 새 간격으로 다시 시작"하는 의미입니다.
-- **상태 유지**: 트리거 상태는 바꾸지 않습니다. 개별로 일시정지된 트리거는 수정 후에도 PAUSED입니다. Quartz `rescheduleJob`은 트리거를 지우고 새로 저장하므로 개별 일시정지가 풀리는 것으로 알려져 있습니다(S1에서 확인). 운영자의 기대에 맞추기 위한 **의도된 차이**이며, §13 제안 5입니다.
+  - 검증은 Quartz와 같게 합니다: REPEAT_COUNT ≥ -1(-1은 무한), REPEAT_COUNT ≠ 0이면 REPEAT_INTERVAL ≥ 1(`SimpleTriggerImpl.validate`), END_TIME이 있으면 START_TIME < END_TIME. 추가로 `startAt`이 dbNow보다 과거면 거부합니다(넣자마자 misfire가 되는 것을 막음).
+  - Quartz 대응: `rescheduleJob(key, old.getTriggerBuilder().withSchedule(simpleSchedule().withIntervalInMilliseconds(i).withRepeatCount(c)).startAt(startAt).build())`에 MISFIRE_INSTR을 기존 값으로 둔 것. 차이는 PREV_FIRE_TIME뿐입니다(SimpleTrigger의 이후 계산은 START_TIME과 TIMES_TRIGGERED만 씀).
+- **상태 결정**: Quartz `replaceTrigger`의 저장 규칙을 따르되, 개별 일시정지만 유지합니다.
+  1. 현재 상태가 PAUSED나 PAUSED_BLOCKED이면 기준 상태를 PAUSED로, 아니면 WAITING으로 둡니다.
+  2. 기준 상태가 WAITING이면 §7.3 "트리거 저장 시 상태 결정"의 그룹 규칙을 적용합니다(전체 일시정지면 그룹 행 INSERT 포함).
+  3. 잡이 동시 실행 금지이면 BLOCKED 판정을 적용합니다.
+  - 그래서 ACQUIRED → WAITING이 됩니다. §7.2의 규약대로 노드가 옛 스케줄로 덮어쓰는 것을 막는 핵심 규칙입니다. ERROR → WAITING도 Quartz와 같습니다(미리보기에서 "오류 상태가 해제됩니다"라고 경고). COMPLETE 트리거는 곧 삭제될 트리거이므로 거부합니다.
+- **개별 일시정지 유지**: 개별로 일시정지된 트리거는 수정 후에도 PAUSED입니다. Quartz `rescheduleJob`은 이를 해제하므로 운영자의 기대에 맞추기 위한 **의도된 차이**입니다(§13 제안 5, PRD FR-CTL-00d).
 - **캘린더 연결 트리거**: CALENDAR_NAME이 있는 트리거는 수정할 수 없습니다. 캘린더는 Java 직렬화 BLOB이라 제외 시간을 계산할 수 없기 때문입니다(§13 제안 2).
 - **미리보기**: `POST /cron/preview { expression, timeZone, count: 5 }`가 `@qa/core`로 계산합니다. 화면은 입력할 때마다(300ms 디바운스) 호출합니다.
 
@@ -445,7 +519,15 @@ Quartz `triggerJob`과 같은 형태의 일회성 트리거를 INSERT합니다.
 | `MONITOR_UNREACHABLE` (FR-ALT-05) | 감시가 연속 `params.failures`(기본 3)회 실패 | 스케줄러 단위 | critical |
 
 - **노드 이탈을 기대 노드 수로 판정하는 이유**: 클러스터에 살아남은 노드가 있으면, 그 노드의 ClusterManager가 죽은 노드를 복구한 뒤 `SCHEDULER_STATE`에서 해당 행을 지웁니다. 그러면 체크인 시각만 보는 방식은 감시 주기(60초) 안에 사라진 행을 놓칩니다. 또 `instanceId=AUTO`를 쓰면 재시작할 때마다 인스턴스명이 바뀝니다. 그래서 "기대 노드 수보다 적음"을 기본 신호로 쓰고, 체크인이 오래된 행은 보조 신호로 affected에 표시합니다. 기대 노드 수는 스케줄러 설정에서 바꿀 수 있습니다(§13 제안 4).
-- **연체 판정**: 정상 클러스터에서는 MisfireHandler가 misfire된 트리거의 NEXT_FIRE_TIME을 곧 갱신합니다. 따라서 연체 상태가 이어진다는 것은 클러스터가 트리거를 처리하지 못한다는 뜻입니다(노드 다운, 스레드 풀 고갈 등). "misfire가 처리되어 실행을 건너뛴 경우"는 DB에 흔적이 남지 않아 MVP에서 감지하지 못합니다. 스냅샷 비교 방식은 Phase 2에서 검토합니다.
+  - S1에서 확인한 Quartz 동작(**확인됨**, `JSS.ClusterManager`, `doCheckin`, `findFailedInstances`, `calcFailedIfAfter`, `clusterRecover`):
+    - 각 노드는 `clusterCheckinInterval`(기본 7.5초)마다 체크인합니다. 먼저 잠금 없이 자기 행의 LAST_CHECKIN_TIME을 갱신하면서 다른 노드를 검사하고, 장애 노드가 보이면 `STATE_ACCESS`와 `TRIGGER_ACCESS`를 차례로 잠근 뒤 다시 확인하고 복구합니다.
+    - 장애 판정: `노드현재시각 > LAST_CHECKIN_TIME + max(CHECKIN_INTERVAL, 노드현재시각 - 자기 마지막 체크인) + 7500ms`. 기본값이면 죽은 노드의 마지막 체크인 뒤 약 15초가 지나면 장애로 보고, 그다음 체크인(최대 7.5초 뒤)에서 복구합니다. 따라서 행은 대개 15~23초 안에 사라집니다.
+    - 복구 내용: 죽은 노드의 `FIRED_TRIGGERS` 행마다 ACQUIRED 트리거를 WAITING으로 되돌리고, 동시 실행 금지 잡의 BLOCKED → WAITING, PAUSED_BLOCKED → PAUSED로 풀고, `REQUESTS_RECOVERY`가 참인 잡에는 복구 트리거(그룹 `RECOVERING_JOBS`, 이름 `recover_<인스턴스>_<번호>`, MISFIRE_INSTR -1)를 넣습니다. 그 뒤 그 노드의 `FIRED_TRIGGERS` 행을 지우고, 실행 기록이 남지 않은 COMPLETE 트리거를 지우고, **그 노드의 `SCHEDULER_STATE` 행을 DELETE**합니다.
+    - 같은 인스턴스 ID로 재시작한 노드는 첫 체크인에서 자기 기록을 스스로 복구하고 행을 지우지 않고 갱신합니다. 첫 체크인 때는 `SCHEDULER_STATE` 행 없이 `FIRED_TRIGGERS`만 남은 인스턴스(고아 기록)도 복구합니다(`findOrphanedFailedInstances`).
+    - 살아남은 노드가 없으면 행은 지워지지 않고 체크인 시각만 멈춥니다. 이때는 `CLUSTER_DOWN`이 잡힙니다.
+- **연체 판정**: 정상 클러스터에서는 각 노드의 MisfireHandler가 `misfireThreshold`(기본 60초) 간격으로 misfire된 WAITING 트리거의 NEXT_FIRE_TIME을 갱신합니다(§7.4). 따라서 연체 상태가 이어진다는 것은 클러스터가 트리거를 처리하지 못한다는 뜻입니다(노드 다운, 스레드 풀 고갈 등). "misfire가 처리되어 실행을 건너뛴 경우"는 DB에 흔적이 남지 않아 MVP에서 감지하지 못합니다. 스냅샷 비교 방식은 Phase 2에서 검토합니다.
+  - 트리거는 `misfireThreshold`가 지나야 misfire가 되고, MisfireHandler가 처리하기까지 최대 한 주기(`misfireThreshold`)가 더 걸립니다. 그래서 `overdue_grace_ms`는 `misfire_threshold_ms` 이상이어야 정상 클러스터에서 오탐이 나지 않습니다. 기본값(둘 다 60000)은 이 조건을 겨우 만족하므로, 스케줄러 설정에서 `misfire_threshold_ms`를 바꾸면 `overdue_grace_ms`의 기본값도 같은 값으로 맞춥니다.
+  - 도구가 재개한 트리거는 MisfireHandler가 처리할 때까지 지난 NEXT_FIRE_TIME을 가진 WAITING으로 남으므로 연체로 보일 수 있습니다. 감사 로그에서 `misfire_threshold_ms + overdue_grace_ms` 안에 도구가 재개한 트리거는 `OVERDUE` 판정에서 뺍니다.
 - **적용 범위**: 규칙의 `scope_json`(`all` | `groups[]` | `triggers[]`)을 쿼리 조건에 반영합니다.
 - **기본 규칙 세트**: 스케줄러를 등록하면 위 6종을 기본값으로 만들고, 인앱 채널에 연결합니다.
 
@@ -528,6 +610,11 @@ Quartz `triggerJob`과 같은 형태의 일회성 트리거를 INSERT합니다.
   - `NonConcurrentSleepJob`: `@DisallowConcurrentExecution`을 붙이고 N초 동안 실행
   - `LongJob`: 오래 실행되는 잡
 - `GET/POST /control/*` HTTP API: Quartz `Scheduler` 메서드를 그대로 호출합니다. 차등 테스트의 기준값을 만드는 데 씁니다.
+- S1 결과로 정한 차등 테스트용 기능(부록 A.1):
+  - **기준 인스턴스**: `start()`하지 않은 Quartz 인스턴스로 명령을 실행합니다. 획득, MisfireHandler, ClusterManager가 돌지 않으므로 결과 행이 결정적입니다. misfire 케이스(부록 A.3의 R-2x)만 `start()`한 인스턴스로 실행하고 수렴한 뒤 비교합니다.
+  - **픽스처 SQL**: ACQUIRED, ERROR, COMPLETE 상태와 `FIRED_TRIGGERS` 행(ACQUIRED, EXECUTING)처럼 API로 만들 수 없는 초기 상태를 직접 SQL로 만듭니다.
+  - **잠금 점유**: `TRIGGER_ACCESS` 행을 N초 동안 잡고 있는 엔드포인트(`LOCK_TIMEOUT` 검증용)
+  - **행 스냅샷**: SCHED_NAME 하나의 `TRIGGERS`, 하위 4개 테이블, `PAUSED_TRIGGER_GRPS`, `JOB_DETAILS`(키, IS_DURABLE), `FIRED_TRIGGERS`를 정렬된 JSON으로 내보냅니다.
 - 스키마 초기화는 Quartz 배포본의 `tables_*.sql`을 씁니다. 변형 시나리오로 사용자 지정 prefix, 대문자와 소문자 테이블명, MySQL `lower_case_table_names=1`, 한 DB 안의 여러 SCHED_NAME을 둡니다.
 - `cron-vectors` 서브커맨드로 §6.2의 벡터를 만듭니다.
 
@@ -540,14 +627,14 @@ Quartz `triggerJob`과 같은 형태의 일회성 트리거를 INSERT합니다.
 
 | ID | 내용 | 결과물 |
 | --- | --- | --- |
-| S1 | Quartz 2.3.2 `JobStoreSupport`, `StdJDBCDelegate`, `StdRowLockSemaphore`를 읽고 §7.2와 §7.3의 상태 전이, 잠금, `rescheduleJob` 동작을 확인 | 확인 결과를 TRD에 반영 |
+| S1 | Quartz 2.3.2 `JobStoreSupport`, `StdJDBCDelegate`, `StdRowLockSemaphore`를 읽고 §7.2와 §7.3의 상태 전이, 잠금, `rescheduleJob` 동작을 확인 | **완료**(B-08). §5.4, §7.1~7.6, §9.2, 부록 A에 반영. 2.5.2도 같은 동작 |
 | S2 | quartz-testbed와 Testcontainers 4종 DB 골격. 2노드 클러스터 기동 확인 | `tools/quartz-testbed`, 테스트 헬퍼 |
 | S3 | `oracledb` Thin 모드로 Oracle XE 21과 Free 23에 접속하고 BLOB과 NUMBER 매핑 확인 | 어댑터 프로토타입 |
 | S4 | `CronExpression` 이식 범위와 Luxon으로 Java Calendar의 DST 처리(존재하지 않는 시각, 중복 시각)를 재현할 수 있는지 확인 | 벡터 50개 통과 프로토타입 |
 
 ## 13. PRD 변경 제안
 
-TRD를 쓰면서 Quartz 동작 방식 때문에 PRD를 조정해야 하는 항목입니다. 2026-11-05에 6건 모두 승인되어 PRD v0.3에 반영했습니다.
+TRD를 쓰면서 Quartz 동작 방식 때문에 PRD를 조정해야 하는 항목입니다. 2026-11-05에 1~6번이 승인되어 PRD v0.3에 반영했습니다. 7~8번은 스파이크 S1(B-08)에서 소스를 확인한 결과이며 PRD v0.5에 반영했습니다.
 
 | # | 대상 | 제안 | 이유 |
 | --- | --- | --- | --- |
@@ -557,3 +644,144 @@ TRD를 쓰면서 Quartz 동작 방식 때문에 PRD를 조정해야 하는 항�
 | 4 | FR-ALT-04 | 노드 이탈 판정 기준을 "체크인 시각"에서 "활성 노드 수 < 기대 노드 수"로 변경(기대 노드 수는 설정값) | 살아남은 노드가 죽은 노드의 행을 곧바로 삭제하고, AUTO 인스턴스 ID는 재시작마다 바뀜(§9.2) |
 | 5 | FR-CTL-00d | 스케줄 수정 시 개별 일시정지 상태를 유지하는 것을 Quartz와의 의도된 차이로 명시 | Quartz `rescheduleJob`은 일시정지를 해제함 |
 | 6 | NFR-REL-04 | 다중 인스턴스를 감지하면 "경고"가 아니라 "기동 거부" | SQLite 파일 하나를 두 프로세스가 쓰면 감시와 발송이 중복됨 |
+| 7 | FR-CTL-04 | 재개 후 misfire 반영은 "즉시"가 아니라 "최대 misfireThreshold(기본 60초) 안"임을 명시. 일시정지된 그룹 안의 트리거를 개별 재개할 때 실행 시각이 지났으면 거부 | Quartz `resumeTrigger`는 같은 트랜잭션에서 misfire를 처리하지만 MisfireHandler는 주기적으로 돌고, 그룹 일시정지를 다시 적용함(§7.4) |
+| 8 | FR-CTL-00d | 그룹 단위 명령의 그룹 이름을 정확히 일치로 비교하는 것을 의도된 차이로 명시 | Quartz는 그룹 일시정지와 재개에서 그룹 이름을 이스케이프 없는 `LIKE`로 비교해 `_`, `%`가 든 이름이 다른 그룹과 겹칠 수 있음(§7.3) |
+
+## 부록 A. 상태 전이 테스트 케이스
+
+B-17~B-21의 통합 테스트와 차등 테스트가 이 목록을 씁니다. 각 케이스는 4종 DB와 Quartz 2.3.2/2.5.x 매트릭스에서 같은 기대 결과를 가져야 합니다. 근거 약칭은 문서 앞머리를 따릅니다.
+
+### A.1 공통 규칙
+
+- **표기**: 상태는 `W`=WAITING, `A`=ACQUIRED, `B`=BLOCKED, `P`=PAUSED, `PB`=PAUSED_BLOCKED, `E`=ERROR, `C`=COMPLETE로 줄여 씁니다. `PTG`=`PAUSED_TRIGGER_GRPS`, `ALL`=`_$_ALL_GROUPS_PAUSED_$_` 행, `FT`=`FIRED_TRIGGERS`, `NFT`=NEXT_FIRE_TIME입니다.
+- **잡 종류**: `J`=일반 잡(동시 실행 허용, durable), `JN`=`@DisallowConcurrentExecution` 잡, `JV`=durable이 아닌 잡.
+- **"실행 중"**: 같은 잡의 `FT` 행이 `ENTRY_STATE='EXECUTING'`이고 `JOB_NAME`, `JOB_GROUP`이 채워진 상태. `FT(ACQ)`는 획득만 된 행(`JOB_NAME` NULL).
+- **비교 방식**
+  - `차등`: 같은 초기 상태에서 기준 인스턴스(§12.1, `start()`하지 않음)로 Quartz API를 실행한 결과와 도구 결과의 행 스냅샷이 같아야 합니다. 비교에서 빼는 컬럼은 케이스에 적습니다.
+  - `수렴`: `start()`한 클러스터에서 실행하고, 지정한 조건이 될 때까지(최대 `misfireThreshold × 2`) 기다린 뒤 비교합니다.
+  - `도구`: Quartz와 일부러 다르거나(Δ) 도구만 거부하는 경우. 기대 결과만 확인합니다.
+  - `통합`: 2노드 클러스터에서 실제 발화 여부(`TESTBED_EXECUTIONS`)를 확인합니다.
+- **공통 사후 조건**: 모든 케이스에서 명령이 끝나면 `LOCKS`의 `TRIGGER_ACCESS` 행 잠금이 풀려 있어야 하고, 실패한 명령은 대상 DB의 행을 하나도 바꾸지 않아야 합니다.
+
+### A.2 일시정지 (`pauseTrigger`, `pauseJob`) — 근거 `JSS.pauseTrigger`
+
+| ID | 초기 상태 | 명령 | 기대 결과 | 비교 |
+| --- | --- | --- | --- | --- |
+| P-01 | T1(J) `W` | pauseTrigger T1 | T1 `P`. NFT 그대로. `PTG` 변화 없음 | 차등 |
+| P-02 | T1(J) `A`, `FT(ACQ)` 있음 | pauseTrigger T1 | T1 `P`. `FT` 행은 그대로(노드가 해제할 때 지움) | 차등 |
+| P-03 | T1(JN) `B`, JN 실행 중 | pauseTrigger T1 | T1 `PB` | 차등 |
+| P-04 | T1 `P` / `PB` / `E` / `C` 각각 | pauseTrigger T1 | 변화 없음. 도구는 "변경 없음"으로 응답 | 차등 |
+| P-05 | J에 T1 `W`, T2 `B`(JN일 때), T3 `P`, T4 `E` | pauseJob | T1 `P`, T2 `PB`, T3 `P`, T4 `E` | 차등 |
+| P-06 | T1(J) 다음 발화 2초 전(`A`가 됨) | pauseTrigger T1 | 발화하지 않음. 노드의 `releaseAcquiredTrigger` 뒤 T1 `P` 유지, `FT` 행 삭제 | 통합 |
+| P-07 | P-06을 200회 반복(발화 시각 직전 무작위 시점) | pauseTrigger T1 | 커밋 이후 시각의 실행 기록 0건 | 통합 |
+
+### A.3 재개 (`resumeTrigger`, `resumeJob`) — 근거 `JSS.resumeTrigger`, `JSS.checkBlockedState`, `JSS.recoverMisfiredJobs`
+
+| ID | 초기 상태 | 명령 | 기대 결과 | 비교 |
+| --- | --- | --- | --- | --- |
+| R-01 | T1(J) `P`, NFT 미래 | resumeTrigger T1 | T1 `W`, NFT 그대로 | 차등 |
+| R-02 | T1(JN) `P`, JN 실행 중(`FT` EXECUTING, IS_NONCONCURRENT 참) | resumeTrigger T1 | T1 `B` | 차등 |
+| R-03 | T1(JN) `PB`, JN 실행 중 | resumeTrigger T1 | T1 `B` | 차등 |
+| R-04 | T1(JN) `PB`, `FT` 행 없음 | resumeTrigger T1 | T1 `W` (PB라도 실행 중이 아니면 W) | 차등 |
+| R-05 | T1(J) `P`, J 실행 중(`FT` IS_NONCONCURRENT 거짓) | resumeTrigger T1 | T1 `W` | 차등 |
+| R-06 | T1(JN) `P`, 같은 잡 T2의 `FT(ACQ)`만 있음 | resumeTrigger T1 | T1 `W` (ACQUIRED 행은 판정에 안 쓰임) | 차등 |
+| R-07 | T1 `W` / `B` / `E` / `C` 각각 | resumeTrigger T1 | 변화 없음 | 차등 |
+| R-08 | T1 `P`, NFT가 `-1` 또는 NULL | resumeTrigger T1 | 변화 없음(T1 `P` 유지) | 차등 |
+| R-09 | T1 `P`, 그룹 G가 `PTG`에 있음, NFT 미래 | resumeTrigger T1 | T1 `W`, `PTG`의 G 행 유지 | 차등 |
+| R-10 | J에 T1 `P`, T2 `PB`(JN 실행 중), T3 `E` | resumeJob | T1 `W`(JN이면 `B`), T2 `B`, T3 `E` | 차등 |
+| R-11 | T1 `P`, NFT가 dbNow − 10초(임계값 안) | resumeTrigger T1 | T1 `W`, NFT 그대로. 곧 발화 | 차등 + 통합 |
+| R-21 | CRON T1 `P`, MISFIRE_INSTR 0 또는 1(FIRE_ONCE_NOW), NFT가 dbNow − 5분 | resumeTrigger T1 | 도구 직후: T1 `W`, NFT 옛 값. 수렴 후: 한 번 실행되고 NFT가 Quartz 결과와 같음 | 수렴(조건: NFT ≥ dbNow − 임계값) |
+| R-22 | R-21과 같되 MISFIRE_INSTR 2(DO_NOTHING) | resumeTrigger T1 | 수렴 후: 실행 없음, NFT = 지금 이후 첫 cron 시각 | 수렴 |
+| R-23 | SIMPLE T1 `P`, 무한 반복 10초 간격, MISFIRE_INSTR 각각 0~5, NFT가 dbNow − 5분 | resumeTrigger T1 | 수렴 후 NFT, TIMES_TRIGGERED, REPEAT_COUNT가 Quartz 결과와 같음 | 수렴 |
+| R-24 | SIMPLE T1 `P`, MISFIRE_INSTR −1(IGNORE), 10초 간격, NFT가 dbNow − 60초 | resumeTrigger T1 | MisfireHandler를 거치지 않고 곧바로 획득되어 놓친 실행을 연속으로 따라잡음. Quartz와 실행 횟수 같음 | 수렴 + 통합 |
+| R-25 | SIMPLE T1 `P`, 10초 간격, REPEAT_COUNT 2, TIMES_TRIGGERED 1, MISFIRE_INSTR 4(RESCHEDULE_NEXT_WITH_REMAINING_COUNT), NFT가 dbNow − 5분 | resumeTrigger T1 | 수렴 후 T1 `C`, NFT 없음(마지막 실행 시각이 지나 더 발화하지 않음). 클러스터 모드에서는 행이 삭제되지 않고 남음(Quartz와 같음) | 수렴 |
+| R-26 | CRON T1(JN) `P`, JN 실행 중(30초 잡), NFT가 dbNow − 5분 | resumeTrigger T1 | 도구 직후 T1 `B`, NFT 옛 값. 잡이 끝나 `W`가 된 뒤 수렴 후 Quartz 결과와 같음 | 수렴 |
+| R-31 | T1 `P`, 그룹 G가 `PTG`에 있음, NFT 과거 | resumeTrigger T1 | 409 `RESUME_IN_PAUSED_GROUP`, 변화 없음 (Δ: Quartz는 `W`로 바꾸고 바로 misfire 처리) | 도구 |
+| R-32 | T1 `P`, `ALL`만 있음(G 행 없음), NFT 과거 | resumeTrigger T1 | 409 `RESUME_IN_PAUSED_GROUP`, 변화 없음 | 도구 |
+| R-33 | 잡 J의 T1이 R-31 조건, T2는 정상 `P` | resumeJob J | 409, T1·T2 모두 변화 없음. 미리보기에 T1 표시 | 도구 |
+
+### A.4 그룹과 전체 (`pause/resumeTriggerGroup`, `pause/resumeJobGroup`, `pauseAll`/`resumeAll`) — 근거 `JSS.pauseTriggerGroup`, `JSS.resumeTriggerGroup`, `JSS.pauseJobs`, `JSS.pauseAll`, `JSS.resumeAll`, `JSS.storeTrigger`
+
+| ID | 초기 상태 | 명령 | 기대 결과 | 비교 |
+| --- | --- | --- | --- | --- |
+| G-01 | 그룹 G에 `W`, `A`, `B`, `P`, `PB`, `E`, `C` 트리거 각 1개 | pauseTriggerGroup G | `P`, `P`, `PB`, `P`, `PB`, `E`, `C`. `PTG`에 G 행 1개 | 차등 |
+| G-02 | 트리거가 없는 그룹 G | pauseTriggerGroup G | `PTG`에 G 행 INSERT | 차등 |
+| G-03 | G가 이미 `PTG`에 있음 | pauseTriggerGroup G | `PTG`의 G 행 1개(중복 없음) | 차등 |
+| G-04 | G-01 뒤 | 테스트베드로 G에 새 트리거 `scheduleJob` | 새 트리거 `P` (일시정지된 그룹은 이후 추가 트리거에도 적용) | 통합 |
+| G-05 | G-01 결과 상태 | resumeTriggerGroup G | `PTG`의 G 행 삭제. 각 트리거에 A.3 규칙(`P`→`W`, `PB`→`B`/`W`), `E`·`C` 그대로 | 차등 |
+| G-06 | G가 `PTG`에 없음. G의 T1만 개별로 `P` | resumeTriggerGroup G | T1 `W` (그룹 재개는 개별 일시정지도 풂) | 차등 |
+| G-07 | 그룹 `A_B`와 `AXB`가 모두 있고 각자 `W` 트리거 보유 | pauseTriggerGroup `A_B` | `A_B`의 트리거만 `P`, `PTG`에 `A_B`만 (Δ: Quartz는 `AXB`도 일시정지하고 `PTG`에 둘 다 넣음) | 도구 |
+| G-08 | 잡 그룹 JG에 잡 2개, 각 트리거 `W` | pauseJobGroup JG | 모든 트리거 `P`. `PTG` 변화 없음 | 차등 |
+| G-09 | G-08 뒤 | 테스트베드로 JG에 새 잡과 트리거 추가 | 새 트리거 `W` (잡 그룹 일시정지는 저장되지 않음) | 통합 |
+| G-10 | G-08 결과 상태 | resumeJobGroup JG | 모든 트리거 `W` | 차등 |
+| G-11 (P1) | 그룹 G1(`W`), G2(`B`, JN 실행 중), `PTG`에 트리거 없는 그룹 G9 | pauseAll | G1 `P`, G2 `PB`. `PTG`에 G1, G2, G9, `ALL` | 차등 |
+| G-12 (P1) | G-11 뒤 | 테스트베드로 새 그룹 G3에 트리거 추가 | 새 트리거 `P`, `PTG`에 G3 행 추가 | 통합 |
+| G-13 (P1) | G-11 결과 상태 | resumeAll | G1 `W`, G2 `B`. `PTG`의 G1, G2, `ALL` 삭제, **G9 행은 남음** | 차등 |
+
+### A.5 즉시 실행 (`triggerJob`) — 근거 `QS.triggerJob`, `Delegate.insertTrigger`, `JSS.storeTrigger`, `JSS.triggeredJobComplete`
+
+비교에서 TRIGGER_NAME, START_TIME, NEXT_FIRE_TIME, DESCRIPTION을 뺍니다.
+
+| ID | 초기 상태 | 명령 | 기대 결과 | 비교 |
+| --- | --- | --- | --- | --- |
+| T-01 | 잡 J, 일시정지 없음 | triggerJob J | 새 TRIGGERS 행: 그룹 `DEFAULT`, 이름 `MT_`로 시작, TYPE `SIMPLE`, 상태 `W`, PREV −1, END 0, PRIORITY 5, MISFIRE_INSTR 0, JOB_DATA NULL, CALENDAR NULL. SIMPLE_TRIGGERS (0, 0, 0). START_TIME = NFT ≈ dbNow | 차등 |
+| T-02 | `PTG`에 `DEFAULT` | triggerJob J | 상태 `P`. `PTG` 변화 없음 | 차등 |
+| T-03 | `PTG`에 `ALL`만 | triggerJob J | 상태 `P`. `PTG`에 `DEFAULT` 행 INSERT | 차등 |
+| T-04 | JN 실행 중 | triggerJob JN | 상태 `B` | 차등 |
+| T-05 | JN 실행 중, `PTG`에 `DEFAULT` | triggerJob JN | 상태 `PB` | 차등 |
+| T-06 | J 실행 중(동시 실행 허용) | triggerJob J | 상태 `W` | 차등 |
+| T-07 | 잡이 없음 | triggerJob X | 404, 행 변화 없음 | 도구 |
+| T-08 | 2노드 클러스터, 잡 J | triggerJob J | 정확히 1회 실행. 실행이 끝나면 새 트리거의 TRIGGERS·SIMPLE_TRIGGERS·`FT` 행이 모두 사라짐 | 통합 |
+| T-09 | T-08 실행 도중 실행 노드를 강제 종료 | — | 살아남은 노드의 복구 뒤 새 트리거(`C`) 행이 사라짐 | 통합 |
+
+### A.6 스케줄 수정 (`updateCronSchedule`, `updateSimpleSchedule`) — 근거 `QS.rescheduleJob`, `JSS.replaceTrigger`, `JSS.triggerFired`
+
+차등 비교의 Quartz 기준 호출은 §7.6의 "Quartz 대응"입니다. 비교에서 PREV_FIRE_TIME과(CRON이면) START_TIME을 빼고, NEXT_FIRE_TIME은 같은 기준 시각으로 계산한 값끼리 비교합니다.
+
+| ID | 초기 상태 | 명령 | 기대 결과 | 비교 |
+| --- | --- | --- | --- | --- |
+| C-01 | CRON T1 `W` | updateCron T1 새 식, 새 TZ | 식·TZ 변경, NFT = `getFireTimeAfter(max(dbNow, START−1000))`, 상태 `W`. 다른 컬럼 그대로 | 차등 |
+| C-02 | CRON T1 `P` | updateCron T1 | 상태 `P` 유지 (Δ: Quartz는 `W`) | 도구 |
+| C-03 | CRON T1(JN) `PB`, JN 실행 중 / 실행 아님 | updateCron T1 | 각각 `PB` / `P` (Δ) | 도구 |
+| C-04 | CRON T1(JN) `B`, JN 실행 중 | updateCron T1 | 상태 `B` | 차등 |
+| C-05 | CRON T1 `A` (발화 10초 전에 획득됨) | updateCron T1 (첫 실행이 1분 뒤인 식) | 상태 `W`. 옛 시각에 발화하지 않음. 이후 새 식의 시각에 발화하고 NFT가 옛 식으로 되돌아가지 않음 | 차등 + 통합 |
+| C-06 | CRON T1 `E` | updateCron T1 | 상태 `W` (Quartz와 같음, 미리보기 경고) | 차등 |
+| C-07 | CRON T1 `W`인데 그룹 G가 `PTG`에 있음(개별 재개 후) | updateCron T1 | 상태 `P` | 차등 |
+| C-08 | CRON T1 `W`, `PTG`에 `ALL`만 | updateCron T1 | 상태 `P`, `PTG`에 G 행 INSERT | 차등 |
+| C-09 | CRON T1 `C` | updateCron T1 | 409, 변화 없음 (Δ: Quartz는 `W`로 다시 넣음) | 도구 |
+| C-10 | CRON T1에 CALENDAR_NAME 있음 | updateCron T1 | 409, 변화 없음 | 도구 |
+| C-11 | CRON T1, END_TIME이 지남 | updateCron T1 | 400(더 이상 발화하지 않음), 변화 없음 | 차등(Quartz도 예외) |
+| C-12 | CRON T1, START_TIME이 1시간 뒤 | updateCron T1 | NFT ≥ START_TIME | 차등 |
+| C-13 | 2노드 클러스터, CRON T1 `W` | updateCron T1 `*/10 * * * * ?` | 실제 발화 시각이 미리보기 5개와 같음 | 통합 |
+| S-01 | SIMPLE T1 `W`, TIMES_TRIGGERED 7 | updateSimple T1 간격 5초, 횟수 3 | INTERVAL 5000, COUNT 3, TIMES 0, START = NFT ≈ dbNow, 상태 `W` | 차등 |
+| S-02 | SIMPLE T1 `W` | updateSimple startAt = dbNow + 1시간 | START = NFT = startAt | 차등 |
+| S-03 | SIMPLE T1 | startAt = dbNow − 1분 | 400, 변화 없음 | 도구 |
+| S-04 | SIMPLE T1 | 횟수 3, 간격 0 | 400, 변화 없음 (Quartz `validate`도 거부) | 차등 |
+| S-05 | SIMPLE T1, END_TIME = dbNow + 1분 | startAt = dbNow + 2분 | 400, 변화 없음 | 차등 |
+| S-06 | SIMPLE T1 `P` | updateSimple T1 | 상태 `P` 유지 (Δ) | 도구 |
+| S-07 | SIMPLE T1 `A` | updateSimple T1 | 상태 `W` (C-05와 같은 이유) | 차등 + 통합 |
+
+### A.7 삭제 (`deleteTrigger`, `deleteJob`) — 근거 `JSS.removeTrigger`, `JSS.removeJob`, `QS.deleteJob`, `JSS.triggeredJobComplete`
+
+| ID | 초기 상태 | 명령 | 기대 결과 | 비교 |
+| --- | --- | --- | --- | --- |
+| D-01 | durable 잡 J의 유일한 CRON T1 | deleteTrigger T1 | TRIGGERS, CRON_TRIGGERS 행 삭제. JOB_DETAILS J 유지 | 차등 |
+| D-02 | JV의 유일한 SIMPLE T1 | deleteTrigger T1 | T1과 하위 행 삭제, JOB_DETAILS JV도 삭제 | 차등 |
+| D-03 | JV에 T1, T2 | deleteTrigger T1 | T1만 삭제, JV 유지 | 차등 |
+| D-04 | 트리거 종류별(CRON, SIMPLE, CAL_INT→SIMPROP, 사용자 정의→BLOB) | deleteTrigger | 해당 하위 테이블 행과 TRIGGERS 행이 모두 삭제 | 차등 |
+| D-05 | T1 `A`, `FT(ACQ)` 있음 | deleteTrigger T1 | T1 삭제. 노드가 발화하지 않고 `FT` 행을 지움 | 통합 |
+| D-06 | T1으로 J 실행 중(`FT` EXECUTING) | deleteTrigger T1 | T1 삭제. 실행은 끝까지 진행되고 노드 로그에 오류 없음. 완료 후 `FT` 행 삭제 | 통합 |
+| D-07 | 그룹 G가 `PTG`에 있음 | G의 마지막 트리거 deleteTrigger | `PTG`의 G 행 유지 | 차등 |
+| DJ-01 | J에 CRON T1, SIMPLE T2 | deleteJob J | T1, T2, 하위 행, JOB_DETAILS 모두 삭제 | 차등 |
+| DJ-02 | JN 실행 중, 다른 트리거 `B` | deleteJob JN | 모든 트리거와 잡 삭제. 실행은 오류 없이 끝나고 `FT` 행 삭제 | 통합 |
+| DJ-03 | 트리거 없는 durable 잡 J | deleteJob J | JOB_DETAILS 삭제 | 차등 |
+
+### A.8 잠금과 경합 (B-17) — 근거 `StdRowLockSemaphore`, `JSS.acquireNextTrigger`
+
+| ID | 초기 상태 | 명령 | 기대 결과 | 비교 |
+| --- | --- | --- | --- | --- |
+| X-01 | 테스트베드가 `TRIGGER_ACCESS`를 10초 점유 | 아무 쓰기 명령 | 약 5초 후 `LOCK_TIMEOUT`, 행 변화 없음 | 도구 |
+| X-02 | `LOCKS`에 `TRIGGER_ACCESS` 행 없음 | pauseTrigger T1 | 도구가 행을 INSERT하고 성공. 이후 Quartz 노드가 정상 동작 | 통합 |
+| X-03 | 도구 트랜잭션 도중(잠금 확보 후) 프로세스 강제 종료 | — | 잠금이 풀리고 Quartz 노드가 계속 발화. 대상 행 변화 없음 | 통합 |
+| X-04 | 화면에서 본 상태와 다름(expected `W`, 실제 `P`) | pauseTrigger T1 | 409 `STATE_CONFLICT`, 최신 상태 반환 | 도구 |
+| X-05 | 그룹 G의 트리거 50개가 1초 간격으로 계속 발화하는 중 | pauseTriggerGroup G 20회 반복 | 매번 성공하거나 `TARGET_ERROR`(교착 롤백)이며, 실패한 회차는 행 변화 없음. 성공 뒤 G 트리거 발화 0건 | 통합 |
