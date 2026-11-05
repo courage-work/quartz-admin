@@ -15,6 +15,11 @@
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"]
     },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": ["QA_IT_*", "DOCKER_HOST", "TESTCONTAINERS_*"]
+    },
     "dev": {
       "cache": false,
       "persistent": true

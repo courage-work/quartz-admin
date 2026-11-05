@@ -613,31 +613,51 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 ### 12.1 quartz-testbed
 
-- Java 17과 Quartz(빌드 인자로 2.3.2 또는 2.5.x 선택)를 쓰는 단독 실행 앱입니다. JDBC JobStore 클러스터 모드이며, DB와 테이블 prefix는 환경변수로 받습니다.
-- 테스트 잡 세 종류:
-  - `RecordingJob`: 실행 기록을 `TESTBED_EXECUTIONS` 테이블에 남김
-  - `NonConcurrentSleepJob`: `@DisallowConcurrentExecution`을 붙이고 N초 동안 실행
-  - `LongJob`: 오래 실행되는 잡
-- `GET/POST /control/*` HTTP API: Quartz `Scheduler` 메서드를 그대로 호출합니다. 차등 테스트의 기준값을 만드는 데 씁니다.
-- S1 결과로 정한 차등 테스트용 기능(부록 A.1):
+`tools/quartz-testbed`. 환경변수, API 명세, 실행 기록 컬럼은 `tools/quartz-testbed/README.md`에 있습니다.
+
+- Java 17과 Quartz(빌드 인자 `QUARTZ_VERSION`으로 2.3.2 또는 2.5.x 선택)를 쓰는 단독 실행 앱입니다. Maven으로 빌드하며, Dockerfile이 빌드와 JUnit 테스트를 함께 돌립니다.
+- JDBC JobStore(`JobStoreTX`) 클러스터 모드입니다. DB 접속, `SCHED_NAME`, 테이블 prefix, instanceId, 체크인 간격을 환경변수로 받습니다. 커넥션 풀은 Quartz 버전마다 기본 제공 풀이 달라 HikariCP를 `ConnectionProvider`로 직접 붙입니다.
+- 테스트 잡 세 종류. 모두 시작과 종료를 `TESTBED_EXECUTIONS` 테이블에 남깁니다(노드가 기동할 때 없으면 생성).
+  - `RecordingJob`: 실행 기록만 남기고 끝남
+  - `NonConcurrentSleepJob`: `@DisallowConcurrentExecution`을 붙이고 `sleepSeconds`초 동안 실행
+  - `LongJob`: `durationSeconds`초(기본 600) 실행. `/control/interrupt`로 멈춤
+- `GET/POST /control/*` HTTP API: Quartz `Scheduler` 메서드(pause/resume trigger·job·group, `pauseAll`/`resumeAll`, `triggerJob`, `rescheduleJob`, `unscheduleJob`, `deleteJob`, `scheduleJob`, `addJob`, 상태 조회)를 그대로 호출합니다. 차등 테스트의 기준값을 만드는 데 씁니다.
+- S1 결과로 정한 차등 테스트용 기능(부록 A.1). B-09에는 없고 B-17에서 추가합니다(지금 노드는 기동하면 항상 `start()`합니다):
   - **기준 인스턴스**: `start()`하지 않은 Quartz 인스턴스로 명령을 실행합니다. 획득, MisfireHandler, ClusterManager가 돌지 않으므로 결과 행이 결정적입니다. misfire 케이스(부록 A.3의 R-2x)만 `start()`한 인스턴스로 실행하고 수렴한 뒤 비교합니다.
   - **픽스처 SQL**: ACQUIRED, ERROR, COMPLETE 상태와 `FIRED_TRIGGERS` 행(ACQUIRED, EXECUTING)처럼 API로 만들 수 없는 초기 상태를 직접 SQL로 만듭니다.
   - **잠금 점유**: `TRIGGER_ACCESS` 행을 N초 동안 잡고 있는 엔드포인트(`LOCK_TIMEOUT` 검증용)
   - **행 스냅샷**: SCHED_NAME 하나의 `TRIGGERS`, 하위 4개 테이블, `PAUSED_TRIGGER_GRPS`, `JOB_DETAILS`(키, IS_DURABLE), `FIRED_TRIGGERS`를 정렬된 JSON으로 내보냅니다.
-- 스키마 초기화는 Quartz 배포본의 `tables_*.sql`을 씁니다. 변형 시나리오로 사용자 지정 prefix, 대문자와 소문자 테이블명, MySQL `lower_case_table_names=1`, 한 DB 안의 여러 SCHED_NAME을 둡니다.
-- `cron-vectors` 서브커맨드로 §6.2의 벡터를 만듭니다.
+- 스키마 초기화는 Quartz 배포본의 `tables_*.sql`을 씁니다(`tools/quartz-testbed/schema/`에 2.5.2 jar의 파일을 그대로 둠). 헬퍼가 CREATE 문만 골라 prefix와 대소문자를 바꿉니다. 테이블뿐 아니라 제약 조건과 인덱스 이름의 prefix도 바꾸므로 한 스키마에 prefix 여러 개를 둘 수 있습니다. 변형 시나리오로 사용자 지정 prefix, 대문자와 소문자 테이블명, Oracle 23 `BOOLEAN` 스키마(`tables_oracle23.sql`), MySQL `lower_case_table_names=1`(B-28), 한 DB 안의 여러 SCHED_NAME을 둡니다.
+  - Quartz는 테이블명을 따옴표 없이 쓰므로 Oracle의 소문자(따옴표) 테이블에는 Quartz 노드를 붙일 수 없습니다. 이 변형은 자동 감지 테스트에만 씁니다.
+- `cron-vectors` 서브커맨드로 §6.2의 벡터를 만듭니다. 입력은 (cron, 타임존, 기준 시각 목록), 출력은 조합마다 다음 실행 시각 20개(epoch ms와 해당 타임존 ISO-8601)입니다. 잘못된 표현식은 Quartz 오류 메시지를, 모르는 타임존은 Java가 실제로 쓴 ID(`GMT`)를 함께 남깁니다.
+
+통합 테스트 헬퍼는 `packages/store/test/support/`에 있고 `pnpm test:integration`(Docker 필요)으로 돕니다. 단위 테스트(`pnpm test`)와는 분리돼 있습니다.
+
+| 헬퍼 | 내용 |
+| --- | --- |
+| `startOracle` | Oracle Free 23(`gvenzl/oracle-free:23-slim-faststart`) 기동, 앱 계정, SYSTEM 접속, 추가 계정 생성 |
+| `initQuartzSchema` / `dropQuartzSchema` | Quartz 스키마 생성·삭제(prefix, 대소문자, `oracle`/`oracle23` 변형) |
+| `startTestbedNode` / `startOracleQuartzCluster` | 테스트베드 노드 기동, Oracle + 스키마 + N노드 클러스터(기본 2) 기동과 체크인 대기 |
+| `TestbedClient` | `/control/*` API 클라이언트 |
+| `listExecutions` / `waitForExecutions` / `clearExecutions` | 실행 기록 조회·대기·삭제 |
+
+S2에서 확인한 사항:
+
+- ojdbc 23은 Oracle 23에 접속하면 `setBoolean`을 네이티브 BOOLEAN으로 보냅니다. Quartz 기본 Oracle 스키마의 불리언 컬럼은 `VARCHAR2(1)`이라 잡 저장이 `ORA-12899`로 실패합니다. 테스트베드는 Oracle에서 `oracle.jdbc.sendBooleanAsNativeBoolean=false`를 기본으로 둬 운영(19c 이하, 이전 드라이버)과 같은 `'1'`/`'0'`을 저장합니다. 사내에서 Oracle 23으로 올리면서 드라이버도 23으로 바꾸면 Quartz 자체가 같은 문제를 겪으므로, 자동 감지(§5.5 4단계)는 `BOOLEAN` 컬럼 타입(`tables_oracle23.sql`)도 `native`로 판정해야 합니다.
+- Quartz 2.3.2와 2.5.2의 `tables_oracle.sql`은 주석 오타 하나 말고는 같습니다.
+- `JobDetail.isConcurrentExectionDisallowed()`는 2.5에서 이름이 바뀌었습니다. 두 버전에서 같이 도는 Java 코드는 `@DisallowConcurrentExecution` 애너테이션을 직접 확인합니다.
 
 ### 12.2 환경 메모
 
-- Apple Silicon: Oracle XE 21과 MySQL 5.7 이미지는 amd64 전용이라 로컬에서는 에뮬레이션으로 느리게 돕니다. 로컬 기본값은 Oracle Free 23과 각 DB 최신 버전으로 두고, 전체 매트릭스는 CI(x64 러너)에서 돌립니다.
-- CI는 GitHub Actions를 가정합니다. DB별로 잡을 나눠 병렬로 실행합니다.
+- Apple Silicon: Oracle XE 21과 MySQL 5.7 이미지는 amd64 전용이라 로컬에서는 에뮬레이션으로 느리게 돕니다. 로컬 기본값은 Oracle Free 23과 각 DB 최신 버전으로 두고, 전체 매트릭스는 CI(x64 러너)에서 돌립니다. `gvenzl/oracle-free:23-slim-faststart`와 테스트베드 베이스 이미지는 arm64를 제공합니다.
+- CI는 GitHub Actions를 가정합니다. DB별로 잡을 나눠 병렬로 실행합니다. 지금은 `integration-oracle` 잡이 Quartz 2.3.2와 2.5.2 매트릭스로 테스트베드 이미지를 빌드하고(`QA_IT_TESTBED_IMAGE`) 통합 테스트를 돌립니다.
 
 ### 12.3 구현 전 확인 항목 (스파이크)
 
 | ID | 내용 | 결과물 |
 | --- | --- | --- |
 | S1 | Quartz 2.3.2 `JobStoreSupport`, `StdJDBCDelegate`, `StdRowLockSemaphore`를 읽고 §7.2와 §7.3의 상태 전이, 잠금, `rescheduleJob` 동작을 확인 | **완료**(B-08). §5.4, §7.1~7.6, §9.2, 부록 A에 반영. 2.5.2도 같은 동작 |
-| S2 | quartz-testbed와 Testcontainers 4종 DB 골격. 2노드 클러스터 기동 확인 | `tools/quartz-testbed`, 테스트 헬퍼 |
+| S2 | quartz-testbed와 Testcontainers 4종 DB 골격. 2노드 클러스터 기동 확인 | **완료**(B-09, Oracle). `tools/quartz-testbed`, `packages/store/test/support/`, §12.1. 나머지 3종 DB는 B-27~B-29 |
 | S3 | `oracledb` Thin 모드로 Oracle XE 21과 Free 23에 접속하고 BLOB과 NUMBER 매핑 확인 | 어댑터 프로토타입 |
 | S4 | `CronExpression` 이식 범위와 Luxon으로 Java Calendar의 DST 처리(존재하지 않는 시각, 중복 시각)를 재현할 수 있는지 확인 | 벡터 50개 통과 프로토타입 |
 
