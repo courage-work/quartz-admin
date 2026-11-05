@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "nest build",
-    "dev": "QA_DATA_DIR=${QA_DATA_DIR:-./data} nest start --watch",
-    "start": "node dist/main.js",
-    "cli": "node dist/cli.js",
+    "dev": "nest start --watch --exec \"node --env-file-if-exists=.env\"",
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "cli": "node --env-file-if-exists=.env dist/cli.js",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
@@ -22,7 +22,8 @@
     "better-sqlite3": "catalog:",
     "drizzle-orm": "catalog:",
     "reflect-metadata": "catalog:",
-    "rxjs": "catalog:"
+    "rxjs": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@nestjs/cli": "catalog:",

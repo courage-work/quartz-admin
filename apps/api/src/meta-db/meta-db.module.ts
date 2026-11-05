@@ -1,17 +1,20 @@
 import { Global, Module, type DynamicModule } from '@nestjs/common';
 import { MaintenanceService } from './maintenance.service.js';
 import { MetaDbService } from './meta-db.service.js';
-import { META_DB_OPTIONS, resolveMetaDbOptions, type MetaDbOptions } from './tokens.js';
+import { DEFAULT_MAINTENANCE_HOUR, META_DB_OPTIONS, type MetaDbOptions } from './tokens.js';
 
 @Global()
 @Module({})
 export class MetaDbModule {
-  /** 옵션은 모듈 초기화 시점에 읽는다(테스트가 import 이후에 환경변수를 바꿀 수 있도록) */
-  static forRoot(overrides: Partial<MetaDbOptions> = {}): DynamicModule {
+  static forRoot(options: Pick<MetaDbOptions, 'dataDir'> & Partial<MetaDbOptions>): DynamicModule {
+    const resolved: MetaDbOptions = {
+      maintenanceHour: DEFAULT_MAINTENANCE_HOUR,
+      ...options,
+    };
     return {
       module: MetaDbModule,
       providers: [
-        { provide: META_DB_OPTIONS, useFactory: () => resolveMetaDbOptions(overrides) },
+        { provide: META_DB_OPTIONS, useValue: resolved },
         MetaDbService,
         MaintenanceService,
       ],

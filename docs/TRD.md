@@ -148,6 +148,14 @@ quartz-admin/
 - 키는 `QA_ENCRYPTION_KEYS=k1:<base64 32바이트>[,k2:...]`로 주입하고, `QA_ENCRYPTION_ACTIVE_KEY=k1`로 암호화에 쓸 키를 지정합니다. 키를 교체하면 CLI(`rotate-keys`)로 일괄 재암호화합니다.
 - 키가 없거나 길이가 맞지 않으면 기동하지 않습니다.
 - API 응답에는 비밀번호 필드가 아예 없습니다. 수정 요청에서 `password`를 빼면 기존 값을 유지합니다(FR-CON-05).
+- 구현: `SecretBox`(`apps/api/src/crypto/secret-box.ts`). 복호화할 때도 인증 태그 길이를 16바이트로 고정해, 잘린 태그로 검증을 약하게 만드는 공격을 막습니다. 실패 원인은 `format`, `unknown-key`, `auth`로 구분합니다.
+- AAD에 행 ID가 들어가므로, 새 행은 비밀값 칸을 비운 채 INSERT한 뒤 **같은 트랜잭션에서** 받은 ID로 암호화해 UPDATE합니다.
+- 키 교체 절차:
+  1. `cli gen-key --id k2`로 새 키를 만듭니다.
+  2. `QA_ENCRYPTION_KEYS`에 k1과 k2를 함께 넣고, `QA_ENCRYPTION_ACTIVE_KEY=k2`로 바꿉니다.
+  3. 도구를 멈추고 `cli rotate-keys`를 실행합니다. 한 트랜잭션에서 처리하므로 하나라도 복호화하지 못하면 아무것도 바꾸지 않으며, `--dry-run`으로 미리 확인할 수 있습니다.
+  4. 도구를 다시 시작하고, 정상 동작을 확인한 뒤 k1을 키 목록에서 뺍니다.
+  - `rotate-keys`는 단일 인스턴스 락을 잡으므로, 도구가 실행 중이면 거부됩니다.
 
 ### 4.2 인증과 세션 (FR-USR)
 
@@ -594,6 +602,12 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 | `QA_MONITOR_CONCURRENCY` | | 기본 8 |
 | `QA_SMTP_HOST`, `QA_SMTP_PORT`, `QA_SMTP_USER`, `QA_SMTP_PASSWORD`, `QA_SMTP_FROM`, `QA_SMTP_SECURE` | 이메일 사용 시 | |
 | `QA_LOG_LEVEL` | | 기본 info |
+
+- 검증은 `apps/api/src/config/env.ts`(zod)가 기동 시 한 번 합니다. 결과 `AppConfig`는 DI(`APP_CONFIG`)로만 전달하고, 모듈은 `process.env`를 직접 읽지 않습니다.
+- 잘못된 값은 변수별 원인을 모아 한 번에 출력하고 종료합니다(exit 1, 스택 트레이스 없음). 메시지에 키 값은 넣지 않습니다.
+- 빈 문자열은 지정하지 않은 것으로 봅니다. `QA_ADMIN_USERNAME`과 `QA_ADMIN_PASSWORD`는 함께 지정해야 합니다. `QA_SMTP_*`를 하나라도 쓰면 `QA_SMTP_HOST`와 `QA_SMTP_FROM`이 필요합니다(포트 기본값 587).
+- `start`, `dev`, `cli` 스크립트는 `node --env-file-if-exists=.env`로 실행합니다. 로컬 개발에서는 `apps/api/.env`를 쓰고(`.env.example` 참고), 이미 설정된 환경변수가 우선합니다.
+- `cli backup`은 암호화 키 없이 `QA_DATA_DIR`만 읽습니다.
 
 ### 11.3 로깅
 
