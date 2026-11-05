@@ -2,12 +2,23 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.1 (초안) |
+| 문서 버전 | v0.4 |
 | 작성일 | 2026-11-05 |
 | 상위 문서 | PRD v0.5(`docs/PRD.md`), TRD v0.2(`docs/TRD.md`) |
 | 작업 단위 | 기능 단위. 작업 하나는 API, 화면, 테스트를 모두 포함한 하나의 PR |
 | 추정 | 하지 않음. 순서와 의존성만 관리 |
-| 저장소·CI | GitHub, GitHub Actions |
+| 저장소·CI | GitHub(`courage-work/quartz-admin`, 공개), GitHub Actions |
+
+### 변경 이력
+
+작업 상태(§3 표의 상태 열) 변경은 이력에 남기지 않습니다. 각 작업의 PR이 기록입니다.
+
+| 버전 | 날짜 | 내용 |
+| --- | --- | --- |
+| v0.1 | 2026-11-05 | 초안: 마일스톤 M0~M5, 작업 36개, Oracle 수직 슬라이스 우선 |
+| v0.2 | 2026-11-05 | B-02 PR(#2): B-10 의존성을 B-01에서 B-09로 수정, B-07에 배포 주의점 추가 |
+| v0.3 | 2026-11-05 | B-08 PR(#3): B-17~B-24 완료 기준에 TRD 부록 A 케이스 연결, 상위 문서 버전 갱신 |
+| v0.4 | 2026-11-06 | 변경 이력 추가, B-01 저장소 문구를 실제(공개 저장소)에 맞춤, §1.1 상태 변경 시점과 브랜치 자동 삭제 반영 |
 
 ---
 
@@ -19,7 +30,10 @@
 2. 작업마다 브랜치를 만듭니다. 이름은 `feat/B-12-auto-detect` 형식입니다.
 3. 작업 하나를 PR 하나로 올리고, CI가 통과하면 머지합니다.
 4. 구현하다가 PRD나 TRD와 다른 결정을 하게 되면 같은 PR에서 해당 문서를 고칩니다.
-5. 머지하면 §3 개요 표의 상태를 `완료`로 바꿉니다.
+5. 같은 PR 안에서 §3 개요 표의 해당 작업 상태를 `완료`로 바꿉니다. 머지되면 그대로 반영됩니다.
+6. 상태 외에 백로그 내용을 고치면 위 변경 이력에 한 줄을 추가합니다.
+
+PR을 머지하면 GitHub이 원격 브랜치를 자동으로 지웁니다. 로컬 브랜치는 `git fetch --prune` 후 `git branch -d`로 정리합니다.
 
 상태 값은 `대기`, `진행`, `완료`, `보류` 네 가지입니다.
 
@@ -146,7 +160,7 @@ M1의 B-08과 B-09는 서로 의존하지 않아 M0 작업과 함께 AI 세션 �
 
 - **참조**: TRD §1, §2.1, §12.2
 - **범위**
-  - `git init`과 GitHub 비공개 저장소 생성(사용자 확인 후 진행), 기본 브랜치 보호(CI 통과 필수)
+  - `git init`과 GitHub 저장소 연결(`courage-work/quartz-admin`, 공개), 기본 브랜치 보호(CI `verify` 통과 필수, 관리자 포함)
   - pnpm workspace, Turborepo, TypeScript strict, ESLint, Prettier, Vitest 공통 설정
   - 빈 패키지 골격: `apps/web`(Next.js, `output: 'export'`), `apps/api`(NestJS 12), `packages/shared`, `packages/core`, `packages/store`
   - GitHub Actions: lint, typecheck, unit test, build
