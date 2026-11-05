@@ -1,0 +1,12 @@
+quartz-admin
+Copyright (c) 2026 courage-work
+
+This product is licensed under the MIT License (see LICENSE).
+
+Third-party notices
+-------------------
+Files ported from third-party projects keep their original copyright and
+license headers. Each such project is listed below with its license.
+
+(No ported third-party code yet. Quartz Scheduler, Apache License 2.0, will
+be listed here when packages/core ports CronExpression; see docs/BACKLOG.md B-10.)

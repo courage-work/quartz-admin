@@ -97,7 +97,7 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
 
 | ID | 작업 | 마일스톤 | 우선순위 | 의존 | 상태 |
 | --- | --- | --- | --- | --- | --- |
-| B-01 | 모노레포와 개발 도구 체인 | M0 | P0 | - | 대기 |
+| B-01 | 모노레포와 개발 도구 체인 | M0 | P0 | - | 완료 |
 | B-02 | 메타데이터 저장소(SQLite) | M0 | P0 | B-01 | 대기 |
 | B-03 | 설정 로딩과 자격증명 암호화 | M0 | P0 | B-01 | 대기 |
 | B-04 | 인증, 세션, 사용자 관리 API | M0 | P0 | B-02, B-03 | 대기 |
@@ -148,7 +148,7 @@ M0의 B-08, B-09, B-10은 서로 의존하지 않습니다. AI 세션을 여러 
 - **범위**
   - `git init`과 GitHub 비공개 저장소 생성(사용자 확인 후 진행), 기본 브랜치 보호(CI 통과 필수)
   - pnpm workspace, Turborepo, TypeScript strict, ESLint, Prettier, Vitest 공통 설정
-  - 빈 패키지 골격: `apps/web`(Next.js, `output: 'export'`), `apps/api`(NestJS 11), `packages/shared`, `packages/core`, `packages/store`
+  - 빈 패키지 골격: `apps/web`(Next.js, `output: 'export'`), `apps/api`(NestJS 12), `packages/shared`, `packages/core`, `packages/store`
   - GitHub Actions: lint, typecheck, unit test, build
   - `.nvmrc`(Node 24), `NOTICE`(Quartz 이식 고지용), `README` 골격
 - **완료 기준**
