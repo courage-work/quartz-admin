@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "nest build",
-    "dev": "nest start --watch",
+    "dev": "QA_DATA_DIR=${QA_DATA_DIR:-./data} nest start --watch",
     "start": "node dist/main.js",
+    "cli": "node dist/cli.js",
+    "db:generate": "drizzle-kit generate",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run"
@@ -16,6 +18,9 @@
     "@nestjs/core": "catalog:",
     "@nestjs/platform-express": "catalog:",
     "@qa/shared": "workspace:*",
+    "@qa/store": "workspace:*",
+    "better-sqlite3": "catalog:",
+    "drizzle-orm": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:"
   },
@@ -23,7 +28,9 @@
     "@nestjs/cli": "catalog:",
     "@nestjs/testing": "catalog:",
     "@swc/core": "catalog:",
+    "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
+    "drizzle-kit": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "unplugin-swc": "catalog:",

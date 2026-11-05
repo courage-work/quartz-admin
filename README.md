@@ -28,9 +28,26 @@ pnpm format      # Prettier 적용
 개별 앱 실행:
 
 ```bash
-pnpm --filter @qa/api dev   # NestJS, http://localhost:3000/api/v1
+pnpm --filter @qa/api dev   # NestJS, http://localhost:3000/api/v1 (데이터: apps/api/data/)
 pnpm --filter @qa/web dev   # Next.js 개발 서버
 ```
+
+## 메타데이터 저장소 (SQLite)
+
+- 파일 위치는 `$QA_DATA_DIR/quartz-admin.db`입니다(기본 `/data`, 개발 서버는 `./data`). 기동할 때 마이그레이션을 자동 적용합니다.
+- 같은 데이터 디렉터리로 두 번째 인스턴스를 띄우면 기동을 거부합니다.
+- 매일 03시(로컬)에 `$QA_DATA_DIR/backups/`로 온라인 백업하고 최신 7개를 남깁니다.
+
+```bash
+# 스키마 변경 후 마이그레이션 생성 (apps/api/drizzle/에 커밋)
+pnpm --filter @qa/api db:generate --name <변경-이름>
+
+# 수동 백업 (기본 위치 또는 --out 경로)
+QA_DATA_DIR=/data pnpm --filter @qa/api cli backup
+QA_DATA_DIR=/data pnpm --filter @qa/api cli backup --out /tmp/qa-backup.db
+```
+
+복원: 도구를 멈추고, 백업 파일을 `$QA_DATA_DIR/quartz-admin.db`로 복사한 뒤(남아 있는 `-wal`, `-shm` 파일은 삭제) 다시 기동합니다.
 
 ## 구조
 

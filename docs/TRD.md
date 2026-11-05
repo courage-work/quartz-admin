@@ -97,7 +97,11 @@ quartz-admin/
 - PRAGMA: `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`, `busy_timeout=5000`
 - 마이그레이션: `drizzle-kit generate`로 SQL을 만들어 레포에 커밋하고, 기동할 때 `migrate()`로 적용합니다(NFR-OPS-04).
 - 백업: better-sqlite3 온라인 백업 API(`db.backup()`)를 매일 실행해 `/data/backups/`에 7개까지 보관합니다. 수동 백업 CLI(`node dist/cli backup`)도 제공합니다(NFR-REL-03).
-- 단일 인스턴스 보장: 기동 시 `instance_lock` 행에 인스턴스 ID와 하트비트(10초 주기)를 기록합니다. 최근 30초 안에 갱신된 다른 인스턴스의 하트비트가 있으면 **기동을 거부**합니다(NFR-REL-04, §13 제안 6).
+- 단일 인스턴스 보장: 기동 시 전용 `instance_lock` 테이블(행 1개)에 인스턴스 ID, 호스트, pid, 하트비트(10초 주기)를 기록합니다. 최근 30초 안에 갱신된 다른 인스턴스의 하트비트가 있으면 **기동을 거부**합니다(NFR-REL-04, §13 제안 6).
+  - 락은 마이그레이션보다 먼저 확보해야 하므로(동시 마이그레이션 방지) drizzle 스키마가 아니라 락 코드가 직접 만듭니다. 확보는 `BEGIN IMMEDIATE` 트랜잭션으로 합니다.
+  - 같은 호스트에서 보유 pid가 죽었거나 내 pid와 같으면(컨테이너 재시작) 30초를 기다리지 않고 인수합니다.
+  - `main.ts`는 Nest 초기화 전에 기록 없이 락 상태만 먼저 확인해, 거부 사유를 스택 트레이스 없이 한 줄로 출력합니다.
+  - 하트비트 갱신에 실패하면(다른 인스턴스가 락을 가져감) 중복 실행을 막기 위해 프로세스를 종료합니다.
 
 ### 3.2 스키마
 
@@ -117,7 +121,12 @@ quartz-admin/
 | `alert_reads` | alert_id, user_id, read_at | 인앱 읽음 처리 |
 | `notifications` | id, alert_id, channel_id, event(`fire`/`update`/`resolve`/`reminder`), status, attempts, next_attempt_at, last_error, created_at | 발송 큐(outbox) |
 | `audit_logs` | id, at, user_id, username, ip, request_id, action, target_type, target_json, connection_id, scheduler_id, before_json, after_json, result(`pending`/`success`/`failure`), error_code, error_message, reason | 앱에서는 INSERT와 result 갱신만 수행 |
-| `settings` | key, value | 내부 설정값, 인스턴스 락 |
+| `settings` | key, value, updated_at | 내부 설정값 |
+| `instance_lock` | id(=1), instance_id, host, pid, started_at, heartbeat_at | 단일 인스턴스 락. 마이그레이션 밖에서 생성(§3.1) |
+
+- 컬럼명은 drizzle `casing: 'snake_case'`로 변환하고, 시각은 모두 epoch ms 정수, JSON은 TEXT로 저장합니다.
+- 감사 로그의 `connection_id`, `scheduler_id`에는 외래키를 걸지 않습니다. 대상이 삭제돼도 기록이 남아야 하기 때문입니다.
+- `alerts`의 "열린 알림은 (rule_id, fingerprint)당 하나"는 부분 고유 인덱스(`WHERE status <> 'resolved'`)로 보장합니다.
 
 ### 3.3 보존 정책
 
