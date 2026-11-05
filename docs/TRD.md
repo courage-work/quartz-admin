@@ -16,11 +16,12 @@
 
 | 영역 | 결정 | 근거 |
 | --- | --- | --- |
-| 런타임 | Node.js 24 LTS, TypeScript 5.x (strict) | better-sqlite3 같은 네이티브 모듈의 사전 빌드 지원이 안정적 |
-| 레포 구조 | pnpm workspace 모노레포 + Turborepo | UI, API, 공유 타입, Quartz 로직을 패키지로 분리해 단독 테스트 |
-| 관리 UI | Next.js(App Router) 정적 export(SPA) | 단일 컨테이너, 같은 오리진 |
+| 런타임 | Node.js 24 LTS, TypeScript 6.0 (strict) | better-sqlite3 같은 네이티브 모듈의 사전 빌드 지원이 안정적. TypeScript 7은 typescript-eslint 8.x가 지원하지 않아(<6.1) 보류 |
+| 모듈 방식 | 전체 ESM (`"type": "module"`, `module: NodeNext`) | NestJS 12가 ESM 전용. 상대 import에는 `.js` 확장자를 붙임 |
+| 레포 구조 | pnpm workspace 모노레포 + Turborepo, 버전은 pnpm catalog로 한 곳에서 관리 | UI, API, 공유 타입, Quartz 로직을 패키지로 분리해 단독 테스트 |
+| 관리 UI | Next.js 16(App Router) 정적 export(SPA) | 단일 컨테이너, 같은 오리진 |
 | UI 구성 | shadcn/ui(Radix + Tailwind), TanStack Query, TanStack Table(가상 스크롤), react-hook-form + zod | 관리 화면에 필요한 표, 폼, 대화상자를 빠르게 구성 |
-| API | NestJS 11, REST(`/api/v1`), zod 스키마 공유(nestjs-zod), OpenAPI 자동 생성 | 1인 개발에서 타입을 한 곳에서만 관리 |
+| API | NestJS 12, REST(`/api/v1`), zod 스키마 공유(nestjs-zod), OpenAPI 자동 생성 | 1인 개발에서 타입을 한 곳에서만 관리 |
 | 메타데이터 저장소 | SQLite(better-sqlite3) + Drizzle ORM, drizzle-kit 마이그레이션 | 설계 검토 결정. 나중에 PostgreSQL로 전환 가능 |
 | 대상 DB 드라이버 | `oracledb`(Thin 모드), `pg`, `mysql2`(MySQL과 MariaDB 공용) | ORM을 쓰지 않고 `QuartzDialect`로 차이를 흡수 |
 | cron 계산 | Quartz `CronExpression`을 TypeScript로 이식, 타임존은 Luxon | Quartz와 결과가 같아야 함(PRD R2) |
@@ -28,7 +29,7 @@
 | 인증 | 로컬 계정, argon2id(`@node-rs/argon2`), 서버 측 세션 | PRD FR-USR |
 | 알림 채널 | 인앱, Slack Incoming Webhook, SMTP(nodemailer) | PRD Q6 |
 | 로깅 | pino(nestjs-pino), JSON, 민감 필드 마스킹 | NFR-OPS-03, NFR-SEC-03 |
-| 테스트 | Vitest(단위), Testcontainers + Java Quartz 테스트베드(통합), Playwright(E2E) | 실제 Quartz 클러스터에서 제어 결과 검증 |
+| 테스트 | Vitest 5(단위, API는 데코레이터 메타데이터를 위해 unplugin-swc 사용), Testcontainers + Java Quartz 테스트베드(통합), Playwright(E2E) | 실제 Quartz 클러스터에서 제어 결과 검증 |
 | 배포 | Docker 단일 컨테이너, Docker Compose, `/data` 볼륨 | NFR-OPS-01 |
 
 ## 2. 시스템 구성
