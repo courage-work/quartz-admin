@@ -36,15 +36,15 @@ catalog:
   typescript-eslint: 8.72.1
   unplugin-swc: 2.0.0
   vitest: 5.1.0
+  zod: 4.6.7
 
-onlyBuiltDependencies:
-  - '@swc/core'
-  - better-sqlite3
-  - sharp
-
-# 설치 스크립트가 필요 없는 의존성(oracledb는 Thin 모드만 쓰고, 나머지는 testcontainers의 선택적 SSH 지원용)
 ignoredBuiltDependencies:
   - cpu-features
   - oracledb
   - protobufjs
   - ssh2
+
+onlyBuiltDependencies:
+  - '@swc/core'
+  - better-sqlite3
+  - sharp

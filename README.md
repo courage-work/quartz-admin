@@ -32,6 +32,25 @@ pnpm --filter @qa/api dev   # NestJS, http://localhost:3000/api/v1 (데이터: a
 pnpm --filter @qa/web dev   # Next.js 개발 서버
 ```
 
+API는 처음 실행하기 전에 `apps/api/.env`가 필요합니다. 암호화 키는 필수입니다.
+
+```bash
+cp apps/api/.env.example apps/api/.env
+pnpm --filter @qa/api build
+pnpm --filter @qa/api cli gen-key   # 출력값을 .env의 QA_ENCRYPTION_KEYS에 넣는다
+```
+
+환경변수 전체 목록은 [TRD §11.2](docs/TRD.md)에 있습니다. 값이 잘못되면 어떤 변수가 왜 틀렸는지 출력하고 기동하지 않습니다.
+
+## 암호화 키 교체
+
+대상 DB 비밀번호와 알림 웹훅 URL은 `QA_ENCRYPTION_KEYS`의 키로 AES-256-GCM 암호화해 저장합니다.
+
+1. `pnpm --filter @qa/api cli gen-key --id k2`로 새 키를 만듭니다.
+2. `QA_ENCRYPTION_KEYS=k1:...,k2:...`, `QA_ENCRYPTION_ACTIVE_KEY=k2`로 바꿉니다.
+3. 도구를 멈추고 `pnpm --filter @qa/api cli rotate-keys`를 실행합니다(`--dry-run`으로 미리 확인 가능).
+4. 도구를 다시 시작해 확인한 뒤, k1을 키 목록에서 뺍니다.
+
 ## 메타데이터 저장소 (SQLite)
 
 - 파일 위치는 `$QA_DATA_DIR/quartz-admin.db`입니다(기본 `/data`, 개발 서버는 `./data`). 기동할 때 마이그레이션을 자동 적용합니다.
