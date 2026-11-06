@@ -50,6 +50,6 @@ describe('작업 종류 라벨', () => {
   });
 
   it('모르는 작업 종류는 원래 값을 보여 준다', () => {
-    expect(auditActionLabel('connection.create')).toBe('connection.create');
+    expect(auditActionLabel('trigger.pause')).toBe('trigger.pause');
   });
 });

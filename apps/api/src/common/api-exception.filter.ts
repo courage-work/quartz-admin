@@ -7,7 +7,9 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { ApiErrorBody, ApiErrorCode } from '@qa/shared';
+import { TargetError } from '@qa/store';
 import type { Response } from 'express';
+import { targetApiError } from '../targets/target-api-error.js';
 import { ApiError } from './api-error.js';
 
 const CODE_BY_STATUS: Partial<Record<number, ApiErrorCode>> = {
@@ -48,6 +50,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
     body: ApiErrorBody;
     headers: Record<string, string>;
   } {
+    // 대상 DB 오류는 고정 문구와 TRD §5.6의 상태 코드로 응답한다. 원문은 TargetsService가 로그에 남긴다
+    if (exception instanceof TargetError) {
+      const err = targetApiError(exception);
+      return { status: err.getStatus(), body: err.body, headers: {} };
+    }
     if (exception instanceof ApiError) {
       return { status: exception.getStatus(), body: exception.body, headers: exception.headers };
     }

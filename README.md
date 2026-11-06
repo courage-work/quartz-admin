@@ -21,6 +21,7 @@ pnpm install
 pnpm build       # 전체 빌드 (turbo)
 pnpm test        # 단위 테스트
 pnpm test:integration  # 통합 테스트(Docker 필요, Oracle Free 23 + quartz-testbed)
+pnpm --filter @qa/store testbed:up  # 손 확인용 Oracle + Quartz 2노드 클러스터(Docker 필요, 접속 정보: packages/store/.testbed.json)
 pnpm lint        # ESLint (타입 기반 규칙, 웹 화면은 @shadcn/lint 디자인 규칙 포함)
 pnpm typecheck   # TypeScript 검사
 pnpm format      # Prettier 적용

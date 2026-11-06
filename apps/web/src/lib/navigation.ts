@@ -18,3 +18,9 @@ export function loginHref(pathname: string, search = ''): string {
   const next = safeNextPath(current);
   return next === '/' ? LOGIN_PATH : `${LOGIN_PATH}?next=${encodeURIComponent(next)}`;
 }
+
+/** `?id=` 값. 양의 정수가 아니면 null (정적 export라 상세 화면 ID를 쿼리로 받는다, TRD §2.2) */
+export function parseId(raw: string | null): number | null {
+  if (!raw || !/^[1-9]\d{0,15}$/.test(raw)) return null;
+  return Number(raw);
+}

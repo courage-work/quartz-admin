@@ -37,15 +37,31 @@ function field(target: unknown, key: string): unknown {
     : undefined;
 }
 
-/** 목록에 보여 줄 대상 요약. 사용자는 아이디, 없으면 `#id` */
+/** 목록에 보여 줄 대상 요약. 사용자는 아이디, 접속은 이름, 스케줄러는 표시 이름이나 SCHED_NAME, 없으면 `#id` */
 export function describeTarget(log: Pick<AuditLogDto, 'targetType' | 'target'>): string {
-  if (log.targetType === 'user') {
-    const username = field(log.target, 'username');
-    const id = field(log.target, 'id');
-    if (typeof username === 'string') return username;
-    if (typeof id === 'number') return `#${id}`;
+  const nameKey: Record<string, string[]> = {
+    user: ['username'],
+    connection: ['name'],
+    scheduler: ['displayName', 'schedName'],
+  };
+  const keys = log.targetType ? nameKey[log.targetType] : undefined;
+  if (!keys) return '-';
+  for (const key of keys) {
+    const value = field(log.target, key);
+    if (typeof value === 'string') return value;
   }
-  return '-';
+  // 스케줄러 등록은 여러 개를 한 번에 기록한다. 실패한 등록은 고른 후보(selections)만 남는다
+  for (const listKey of ['schedulers', 'selections']) {
+    const list = field(log.target, listKey);
+    if (Array.isArray(list) && list.length > 0) {
+      return list
+        .map((s) => field(s, 'displayName') ?? field(s, 'schedName'))
+        .filter((v): v is string => typeof v === 'string')
+        .join(', ');
+    }
+  }
+  const id = field(log.target, 'id');
+  return typeof id === 'number' ? `#${id}` : '-';
 }
 
 /** 사용자를 시스템 작업과 구분해 보여 준다 */

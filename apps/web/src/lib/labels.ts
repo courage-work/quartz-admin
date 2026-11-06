@@ -9,6 +9,13 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   'user.activate': '사용자 활성화',
   'user.deactivate': '사용자 비활성화',
   'user.password_reset': '비밀번호 초기화',
+  'connection.create': '접속 추가',
+  'connection.update': '접속 수정',
+  'connection.delete': '접속 삭제',
+  'connection.detect': '스케줄러 감지',
+  'scheduler.register': '스케줄러 등록',
+  'scheduler.update': '스케줄러 설정 변경',
+  'scheduler.delete': '스케줄러 등록 해제',
 };
 
 export function auditActionLabel(action: string): string {

@@ -10,6 +10,11 @@ const alertVariants = cva(
         default: 'bg-card text-card-foreground',
         destructive:
           'bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current',
+        // 상태 톤 (docs/DESIGN.md §3.2). 결과 안내(연결 테스트 등)에 쓴다
+        success:
+          'border-transparent bg-success-subtle text-success-subtle-foreground *:data-[slot=alert-description]:text-success-subtle-foreground *:[svg]:text-current',
+        warning:
+          'border-transparent bg-warning-subtle text-warning-subtle-foreground *:data-[slot=alert-description]:text-warning-subtle-foreground *:[svg]:text-current',
       },
     },
     defaultVariants: {

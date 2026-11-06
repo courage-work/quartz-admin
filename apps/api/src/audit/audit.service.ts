@@ -7,6 +7,7 @@ import {
   type AuditLogQuery,
   type AuditTargetType,
 } from '@qa/shared';
+import { TargetError } from '@qa/store';
 import { and, desc, eq, gte, lt, type SQL } from 'drizzle-orm';
 import { ApiError } from '../common/api-error.js';
 import { CLOCK, type Clock } from '../common/clock.js';
@@ -52,6 +53,7 @@ export interface AuditOutcome {
 /** 오류를 감사 기록용 코드와 메시지로 바꾼다. 처리하지 못한 예외의 내부 메시지는 남기지 않는다 */
 export function describeError(err: unknown): { code: string; message: string } {
   if (err instanceof ApiError) return { code: err.code, message: err.body.message };
+  if (err instanceof TargetError) return { code: err.code, message: err.message };
   return { code: 'INTERNAL_ERROR', message: '처리하지 못한 서버 오류' };
 }
 

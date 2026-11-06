@@ -5,5 +5,7 @@ export const API_PREFIX = 'api/v1';
 
 export * from './audit.js';
 export * from './auth.js';
+export * from './connections.js';
 export * from './domain.js';
 export * from './errors.js';
+export * from './quartz.js';
