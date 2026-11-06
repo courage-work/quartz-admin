@@ -4,6 +4,7 @@
  * 기동 시 한 번 검증해 `AppConfig`로 만들고, 이후에는 DI로만 전달한다.
  * 오류 메시지에는 어떤 변수가 왜 잘못됐는지만 담고 값(특히 키)은 절대 넣지 않는다.
  */
+import { passwordSchema, usernameSchema } from '@qa/shared';
 import { z } from 'zod';
 
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'] as const;
@@ -135,8 +136,9 @@ const envSchema = z
     QA_LOG_LEVEL: z
       .enum(LOG_LEVELS, { error: `${LOG_LEVELS.join(', ')} 중 하나여야 합니다` })
       .default('info'),
-    QA_ADMIN_USERNAME: z.string().optional(),
-    QA_ADMIN_PASSWORD: z.string().optional(),
+    // 화면에서 만드는 계정과 같은 규칙을 적용한다. 아이디는 소문자로 맞춘다
+    QA_ADMIN_USERNAME: usernameSchema.optional(),
+    QA_ADMIN_PASSWORD: passwordSchema.optional(),
     QA_SMTP_HOST: z.string().optional(),
     QA_SMTP_PORT: int(1, 65_535).optional(),
     QA_SMTP_USER: z.string().optional(),

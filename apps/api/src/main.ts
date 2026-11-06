@@ -1,10 +1,12 @@
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { API_PREFIX, APP_NAME } from '@qa/shared';
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 import { AppModule } from './app.module.js';
+import { configureApp } from './app.setup.js';
 import { ConfigError, loadConfig } from './config/env.js';
 import { InstanceLock, InstanceLockError } from './meta-db/instance-lock.js';
 import { metaDbPath } from './meta-db/meta-db.js';
@@ -29,8 +31,10 @@ async function bootstrap(): Promise<void> {
   const config = loadConfig(process.env);
   assertSingleInstance(config.dataDir);
 
-  const app = await NestFactory.create(AppModule.forRoot(config), { abortOnError: false });
-  app.setGlobalPrefix(API_PREFIX);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config), {
+    abortOnError: false,
+  });
+  configureApp(app, config);
   app.enableShutdownHooks();
 
   await app.listen(config.port);

@@ -10,12 +10,15 @@ catalog:
   '@nestjs/platform-express': 12.3.3
   '@nestjs/testing': 12.3.3
   '@next/eslint-plugin-next': 16.4.5
+  '@node-rs/argon2': 2.2.2
   '@swc/core': 1.16.22
   '@types/better-sqlite3': 9.6.0
+  '@types/express': 5.0.6
   '@types/node': 26.6.6
   '@types/oracledb': 26.0.0
   '@types/react': 19.3.0
   '@types/react-dom': 19.3.0
+  '@types/supertest': 7.2.1
   better-sqlite3: 13.0.3
   drizzle-kit: 0.31.11
   drizzle-orm: 0.45.4
@@ -23,6 +26,7 @@ catalog:
   eslint-config-prettier: 10.1.8
   eslint-plugin-react-hooks: 7.1.1
   globals: 17.14.0
+  helmet: 8.3.0
   next: 16.4.5
   oracledb: 26.0.0
   prettier: 3.9.10
@@ -30,6 +34,7 @@ catalog:
   react-dom: 19.3.1
   reflect-metadata: 0.2.2
   rxjs: 7.8.2
+  supertest: 7.3.1
   testcontainers: 12.2.1
   turbo: 2.11.10
   typescript: 6.0.3
