@@ -19,6 +19,7 @@ import Link from 'next/link';
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
 
 import { FormAlert } from '@/components/form/form-alert';
+import { TableFrame } from '@/components/table-frame';
 import { PaginationBar } from '@/components/schedulers/pagination-bar';
 import { TimeCell } from '@/components/schedulers/time-cell';
 import { jobHref, TriggerTable } from '@/components/schedulers/trigger-table';
@@ -104,58 +105,60 @@ export function NodesTab({ schedulerId, refreshMs }: TabProps) {
   return (
     <div className="flex flex-col gap-2">
       <DbTime dbNow={res.data?.dbNow} />
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>인스턴스</TableHead>
-            <TableHead>판정</TableHead>
-            <TableHead>마지막 체크인</TableHead>
-            <TableHead>체크인 간격</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {!res.data ? (
-            <LoadingRows columns={4} />
-          ) : res.data.nodes.length === 0 ? (
-            <EmptyRow columns={4}>
-              체크인한 노드가 없습니다. 클러스터가 내려가 있을 수 있습니다.
-            </EmptyRow>
-          ) : (
-            res.data.nodes.map((n) => (
-              <TableRow key={n.instanceName}>
-                <TableCell>
-                  <span className="font-mono">{n.instanceName}</span>
-                </TableCell>
-                <TableCell>
-                  {n.active ? (
-                    <Badge variant="success">
-                      <CircleCheckIcon data-icon="inline-start" aria-hidden />
-                      활성
-                    </Badge>
-                  ) : (
-                    <Badge
-                      variant="warning"
-                      title={`체크인 간격 × ${res.data.checkinMultiplier}을 넘겼습니다`}
-                    >
-                      <UnplugIcon data-icon="inline-start" aria-hidden />
-                      체크인 지연
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <span className="flex flex-col">
-                    <TimeCell ms={n.lastCheckinTime} />
-                    <span className="text-xs text-muted-foreground">
-                      {formatAgo(n.sinceCheckinMs)}
+      <TableFrame>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>인스턴스</TableHead>
+              <TableHead>판정</TableHead>
+              <TableHead>마지막 체크인</TableHead>
+              <TableHead>체크인 간격</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {!res.data ? (
+              <LoadingRows columns={4} />
+            ) : res.data.nodes.length === 0 ? (
+              <EmptyRow columns={4}>
+                체크인한 노드가 없습니다. 클러스터가 내려가 있을 수 있습니다.
+              </EmptyRow>
+            ) : (
+              res.data.nodes.map((n) => (
+                <TableRow key={n.instanceName}>
+                  <TableCell>
+                    <span className="font-mono">{n.instanceName}</span>
+                  </TableCell>
+                  <TableCell>
+                    {n.active ? (
+                      <Badge variant="success">
+                        <CircleCheckIcon data-icon="inline-start" aria-hidden />
+                        활성
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="warning"
+                        title={`체크인 간격 × ${res.data.checkinMultiplier}을 넘겼습니다`}
+                      >
+                        <UnplugIcon data-icon="inline-start" aria-hidden />
+                        체크인 지연
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <span className="flex flex-col">
+                      <TimeCell ms={n.lastCheckinTime} />
+                      <span className="text-xs text-muted-foreground">
+                        {formatAgo(n.sinceCheckinMs)}
+                      </span>
                     </span>
-                  </span>
-                </TableCell>
-                <TableCell>{formatInterval(n.checkinInterval)}</TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+                  </TableCell>
+                  <TableCell>{formatInterval(n.checkinInterval)}</TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableFrame>
     </div>
   );
 }
@@ -203,12 +206,13 @@ function SearchForm({
   group,
   q,
   onSubmit,
-  qPlaceholder,
+  qScope,
 }: {
   group: string;
   q: string;
   onSubmit: (group: string, q: string) => void;
-  qPlaceholder: string;
+  /** 검색어가 걸리는 컬럼. 라벨에 함께 쓴다(placeholder는 형식 예시에만 쓴다) */
+  qScope: string;
 }) {
   const [g, setG] = useState(group);
   const [text, setText] = useState(q);
@@ -224,13 +228,8 @@ function SearchForm({
         <Input id={`${id}-group`} value={g} onChange={(e) => setG(e.target.value)} />
       </Field>
       <Field className="w-64">
-        <FieldLabel htmlFor={`${id}-q`}>검색어</FieldLabel>
-        <Input
-          id={`${id}-q`}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={qPlaceholder}
-        />
+        <FieldLabel htmlFor={`${id}-q`}>검색어({qScope})</FieldLabel>
+        <Input id={`${id}-q`} value={text} onChange={(e) => setText(e.target.value)} />
       </Field>
       <Button type="submit" variant="outline">
         <SearchIcon data-icon="inline-start" aria-hidden />
@@ -253,9 +252,10 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
   return (
     <div className="flex flex-col gap-3">
       <SearchForm
+        key={JSON.stringify(filter)}
         group={filter.group ?? ''}
         q={filter.q ?? ''}
-        qPlaceholder="잡 이름, 그룹, 클래스"
+        qScope="이름·그룹·클래스"
         onSubmit={(group, q) => {
           setFilter({ group: group || undefined, q: q.trim() || undefined });
           setPage(1);
@@ -263,50 +263,59 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
       />
       {res.isError ? <FormAlert message={res.error.message} /> : null}
       <DbTime dbNow={res.data?.dbNow} />
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>그룹 / 이름</TableHead>
-            <TableHead>잡 클래스</TableHead>
-            <TableHead>설명</TableHead>
-            <TableHead>durable</TableHead>
-            <TableHead>동시 실행 금지</TableHead>
-            <TableHead>복구 요청</TableHead>
-            <TableHead className="text-right">트리거</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {!res.data ? (
-            <LoadingRows columns={7} />
-          ) : res.data.items.length === 0 ? (
-            <EmptyRow columns={7}>조건에 맞는 잡이 없습니다.</EmptyRow>
-          ) : (
-            res.data.items.map((j) => (
-              <TableRow key={`${j.group}\u0000${j.name}`}>
-                <TableCell>
-                  <Link
-                    href={jobHref(schedulerId, j.group, j.name)}
-                    className="flex flex-col underline-offset-4 hover:underline"
-                  >
-                    <span className="text-xs text-muted-foreground">{j.group}</span>
-                    <span className="font-mono">{j.name}</span>
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  <span className="font-mono text-xs">{j.jobClass}</span>
-                </TableCell>
-                <TableCell>{j.description ?? '-'}</TableCell>
-                <TableCell>{yesNo(j.durable)}</TableCell>
-                <TableCell>{yesNo(j.nonConcurrent)}</TableCell>
-                <TableCell>{yesNo(j.requestsRecovery)}</TableCell>
-                <TableCell className="text-right">
-                  <span className="tabular-nums">{j.triggerCount}</span>
-                </TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+      <TableFrame>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>그룹 / 이름</TableHead>
+              <TableHead>잡 클래스</TableHead>
+              <TableHead>설명</TableHead>
+              <TableHead>durable</TableHead>
+              <TableHead>동시 실행 금지</TableHead>
+              <TableHead>복구 요청</TableHead>
+              <TableHead className="text-right">트리거</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {!res.data ? (
+              <LoadingRows columns={7} />
+            ) : res.data.items.length === 0 ? (
+              <EmptyRow columns={7}>
+                조건에 맞는 잡이 없습니다.
+                {filter.group || filter.q ? (
+                  <Button variant="link" onClick={() => setFilter({})}>
+                    필터 모두 지우기
+                  </Button>
+                ) : null}
+              </EmptyRow>
+            ) : (
+              res.data.items.map((j) => (
+                <TableRow key={`${j.group}\u0000${j.name}`}>
+                  <TableCell>
+                    <Link
+                      href={jobHref(schedulerId, j.group, j.name)}
+                      className="flex flex-col underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
+                    >
+                      <span className="text-xs text-muted-foreground">{j.group}</span>
+                      <span className="font-mono">{j.name}</span>
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-mono text-xs">{j.jobClass}</span>
+                  </TableCell>
+                  <TableCell>{j.description ?? '-'}</TableCell>
+                  <TableCell>{yesNo(j.durable)}</TableCell>
+                  <TableCell>{yesNo(j.nonConcurrent)}</TableCell>
+                  <TableCell>{yesNo(j.requestsRecovery)}</TableCell>
+                  <TableCell className="text-right">
+                    <span className="tabular-nums">{j.triggerCount}</span>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableFrame>
       {res.data ? (
         <PaginationBar page={page} size={PAGE_SIZE} total={res.data.total} onPageChange={setPage} />
       ) : null}
@@ -332,6 +341,7 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
     size: PAGE_SIZE,
   };
   const res = useView<Page<TriggerDto>>(schedulerId, 'triggers', 'triggers', refreshMs, query);
+  const filtered = states.length > 0 || types.length > 0 || !!text.group || !!text.q;
 
   return (
     <div className="flex flex-col gap-3">
@@ -377,9 +387,10 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <SearchForm
+          key={JSON.stringify(text)}
           group={text.group ?? ''}
           q={text.q ?? ''}
-          qPlaceholder="트리거 이름, 그룹, 잡 이름"
+          qScope="이름·그룹·잡"
           onSubmit={(group, q) => {
             setText({ group: group || undefined, q: q.trim() || undefined });
             setPage(1);
@@ -398,9 +409,31 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
           </Select>
         </Field>
       </div>
+      {filtered ? (
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setStates([]);
+              setTypes([]);
+              setText({});
+              setPage(1);
+            }}
+          >
+            필터 모두 지우기
+          </Button>
+        </div>
+      ) : null}
       {res.isError ? <FormAlert message={res.error.message} /> : null}
       <DbTime dbNow={res.data?.dbNow} />
-      <TriggerTable schedulerId={schedulerId} triggers={res.data?.items} loading={res.isFetching} />
+      <TableFrame>
+        <TriggerTable
+          schedulerId={schedulerId}
+          triggers={res.data?.items}
+          loading={res.isFetching}
+        />
+      </TableFrame>
       {res.data ? (
         <PaginationBar page={page} size={PAGE_SIZE} total={res.data.total} onPageChange={setPage} />
       ) : null}
@@ -428,67 +461,69 @@ export function ExecutingTab({ schedulerId, refreshMs }: TabProps) {
         </Alert>
       ) : null}
       <DbTime dbNow={res.data?.dbNow} />
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>트리거</TableHead>
-            <TableHead>잡</TableHead>
-            <TableHead>상태</TableHead>
-            <TableHead>인스턴스</TableHead>
-            <TableHead>실행 시각</TableHead>
-            <TableHead>경과</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {!res.data ? (
-            <LoadingRows columns={6} />
-          ) : res.data.items.length === 0 ? (
-            <EmptyRow columns={6}>지금 실행 중이거나 획득된 트리거가 없습니다.</EmptyRow>
-          ) : (
-            res.data.items.map((e) => (
-              <TableRow key={e.entryId}>
-                <TableCell>
-                  <span className="flex flex-col">
-                    <span className="text-xs text-muted-foreground">{e.triggerGroup}</span>
-                    <span className="font-mono">{e.triggerName}</span>
-                  </span>
-                </TableCell>
-                <TableCell>
-                  {e.jobGroup && e.jobName ? (
-                    <Link
-                      href={jobHref(schedulerId, e.jobGroup, e.jobName)}
-                      className="flex flex-col underline-offset-4 hover:underline"
-                    >
-                      <span className="text-xs text-muted-foreground">{e.jobGroup}</span>
-                      <span className="font-mono">{e.jobName}</span>
-                    </Link>
-                  ) : (
-                    '-'
-                  )}
-                </TableCell>
-                <TableCell>
-                  <span className="flex flex-wrap gap-1">
-                    <TriggerStateBadge state={e.state} />
-                    {e.stale ? (
-                      <Badge variant="warning">
-                        <HistoryIcon data-icon="inline-start" aria-hidden />
-                        오래된 실행 기록
-                      </Badge>
-                    ) : null}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <span className="font-mono">{e.instanceName}</span>
-                </TableCell>
-                <TableCell>
-                  <TimeCell ms={e.firedTime} />
-                </TableCell>
-                <TableCell>{e.elapsedMs === null ? '-' : formatInterval(e.elapsedMs)}</TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+      <TableFrame>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>트리거</TableHead>
+              <TableHead>잡</TableHead>
+              <TableHead>상태</TableHead>
+              <TableHead>인스턴스</TableHead>
+              <TableHead>실행 시각</TableHead>
+              <TableHead>경과</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {!res.data ? (
+              <LoadingRows columns={6} />
+            ) : res.data.items.length === 0 ? (
+              <EmptyRow columns={6}>지금 실행 중이거나 획득된 트리거가 없습니다.</EmptyRow>
+            ) : (
+              res.data.items.map((e) => (
+                <TableRow key={e.entryId}>
+                  <TableCell>
+                    <span className="flex flex-col">
+                      <span className="text-xs text-muted-foreground">{e.triggerGroup}</span>
+                      <span className="font-mono">{e.triggerName}</span>
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    {e.jobGroup && e.jobName ? (
+                      <Link
+                        href={jobHref(schedulerId, e.jobGroup, e.jobName)}
+                        className="flex flex-col underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
+                      >
+                        <span className="text-xs text-muted-foreground">{e.jobGroup}</span>
+                        <span className="font-mono">{e.jobName}</span>
+                      </Link>
+                    ) : (
+                      '-'
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <span className="flex flex-wrap gap-1">
+                      <TriggerStateBadge state={e.state} />
+                      {e.stale ? (
+                        <Badge variant="warning">
+                          <HistoryIcon data-icon="inline-start" aria-hidden />
+                          오래된 실행 기록
+                        </Badge>
+                      ) : null}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-mono">{e.instanceName}</span>
+                  </TableCell>
+                  <TableCell>
+                    <TimeCell ms={e.firedTime} />
+                  </TableCell>
+                  <TableCell>{e.elapsedMs === null ? '-' : formatInterval(e.elapsedMs)}</TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableFrame>
     </div>
   );
 }

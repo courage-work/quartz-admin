@@ -74,7 +74,7 @@ function Summary({ s }: { s: SchedulerDetailDto }) {
         접속{' '}
         <Link
           href={`/connection?id=${s.connection.id}`}
-          className="underline-offset-4 hover:underline"
+          className="underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
         >
           {s.connection.name}
         </Link>
@@ -174,7 +174,7 @@ export function SchedulerView() {
       />
       <Summary s={s} />
       <Tabs value={tab} onValueChange={setTab}>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-hidden pb-2">
           <TabsList>
             {TABS.map((t) => (
               <TabsTrigger key={t.value} value={t.value}>

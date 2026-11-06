@@ -20,7 +20,7 @@ import { type FormEvent, useState } from 'react';
 import { FormAlert } from '@/components/form/form-alert';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
 import { PageHeader } from '@/components/shell/page-header';
-import { EnvBadge, isProd } from '@/components/status/environment';
+import { EnvBadge } from '@/components/status/environment';
 import { SchedulerHealthBadge } from '@/components/status/status-badge';
 import { TRIGGER_STATE_META } from '@/components/status/tones';
 import { Badge } from '@/components/ui/badge';
@@ -78,11 +78,13 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
 
   return (
     <Card>
-      {isProd(item.connection.envLabel) ? <div className="h-1 bg-destructive" aria-hidden /> : null}
       <CardHeader>
         <CardTitle>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Link href={`/scheduler?id=${item.id}`} className="underline-offset-4 hover:underline">
+            <Link
+              href={`/scheduler?id=${item.id}`}
+              className="underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
+            >
               {item.displayName}
             </Link>
             {snap ? (
@@ -211,13 +213,8 @@ function Filters({
         </Select>
       </Field>
       <Field className="w-64">
-        <FieldLabel htmlFor="dash-q">이름</FieldLabel>
-        <Input
-          id="dash-q"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="스케줄러·접속 이름"
-        />
+        <FieldLabel htmlFor="dash-q">이름(스케줄러·접속)</FieldLabel>
+        <Input id="dash-q" value={q} onChange={(e) => setQ(e.target.value)} />
       </Field>
       <Button type="submit" variant="outline">
         <SearchIcon data-icon="inline-start" aria-hidden />
@@ -279,7 +276,19 @@ export function DashboardView() {
     );
   else if (dashboard.data.items.length === 0 && !filtered) body = <NoSchedulers />;
   else if (dashboard.data.items.length === 0)
-    body = <p className="text-sm text-muted-foreground">조건에 맞는 스케줄러가 없습니다.</p>;
+    body = (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>조건에 맞는 스케줄러가 없습니다</EmptyTitle>
+          <EmptyDescription>환경, 태그, 이름 조건을 바꾸거나 모두 지우세요.</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button variant="outline" onClick={() => setFilter({})}>
+            필터 모두 지우기
+          </Button>
+        </EmptyContent>
+      </Empty>
+    );
   else
     body = (
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -305,7 +314,13 @@ export function DashboardView() {
           />
         }
       />
-      <Filters data={dashboard.data} value={filter} onChange={setFilter} />
+      {/* 필터를 지우면 입력칸도 비우도록 다시 만든다 */}
+      <Filters
+        key={JSON.stringify(filter)}
+        data={dashboard.data}
+        value={filter}
+        onChange={setFilter}
+      />
       {body}
     </>
   );

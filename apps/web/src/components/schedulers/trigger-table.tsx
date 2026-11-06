@@ -85,7 +85,7 @@ export function TriggerTable({
                 <TableCell>
                   <Link
                     href={jobHref(schedulerId, t.jobGroup, t.jobName)}
-                    className="flex flex-col underline-offset-4 hover:underline"
+                    className="flex flex-col underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
                   >
                     <span className="text-xs text-muted-foreground">{t.jobGroup}</span>
                     <span className="font-mono">{t.jobName}</span>

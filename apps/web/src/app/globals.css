@@ -215,3 +215,15 @@
     @apply tabular-nums;
   }
 }
+
+/* 동작 줄이기 설정을 따른다(애니메이션·전환을 즉시 끝냄). 의미는 아이콘과 글자로 함께 전한다 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

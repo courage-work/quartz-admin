@@ -30,6 +30,7 @@ export function DeleteImpactDialog({
   pending,
   onConfirm,
   onClose,
+  returnFocus,
 }: {
   open: boolean;
   title: string;
@@ -39,6 +40,11 @@ export function DeleteImpactDialog({
   pending: boolean;
   onConfirm: () => void;
   onClose: () => void;
+  /**
+   * 닫힌 뒤 포커스를 돌려줄 요소. 대화상자를 Radix Trigger가 아닌 버튼·메뉴 항목이 열기 때문에
+   * 직접 알려 줘야 연 자리로 돌아간다(키보드 사용자).
+   */
+  returnFocus?: () => HTMLElement | null;
 }) {
   const impact = useQuery({
     queryKey: ['delete-impact', impactPath],
@@ -50,7 +56,15 @@ export function DeleteImpactDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <AlertDialogContent>
+      <AlertDialogContent
+        onCloseAutoFocus={(e) => {
+          const target = returnFocus?.();
+          if (target) {
+            e.preventDefault();
+            target.focus();
+          }
+        }}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>

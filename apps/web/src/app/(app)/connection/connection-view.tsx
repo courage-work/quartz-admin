@@ -40,6 +40,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Table,
   TableBody,
@@ -80,7 +81,11 @@ function InfoCard({ connection }: { connection: ConnectionDto }) {
             <span className="font-mono">{describeAddress(connection)}</span>
           </Row>
           <Row label="스키마">
-            <span className="font-mono">{connection.schemaName ?? '(계정 기본 스키마)'}</span>
+            {connection.schemaName ? (
+              <span className="font-mono">{connection.schemaName}</span>
+            ) : (
+              <span className="text-muted-foreground">계정 기본 스키마</span>
+            )}
           </Row>
           <Row label="계정">
             <span className="font-mono">{connection.username}</span>
@@ -175,15 +180,21 @@ function SchedulersCard({
                   <TableCell>
                     <div className="flex justify-end">
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`${s.displayName} 관리 메뉴`}
-                          >
-                            <MoreHorizontalIcon aria-hidden />
-                          </Button>
-                        </DropdownMenuTrigger>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`${s.displayName} 관리하기`}
+                                data-menu-for={s.id}
+                              >
+                                <MoreHorizontalIcon aria-hidden />
+                              </Button>
+                            </DropdownMenuTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent>{s.displayName} 관리하기</TooltipContent>
+                        </Tooltip>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onSelect={() => onSettings(s)}>
                             <Settings2Icon aria-hidden />
@@ -303,7 +314,7 @@ export function ConnectionView() {
                 수정
               </Link>
             </Button>
-            <Button variant="outline" onClick={() => setDeleting(true)}>
+            <Button variant="outline" data-delete-connection onClick={() => setDeleting(true)}>
               <Trash2Icon data-icon="inline-start" aria-hidden />
               삭제
             </Button>
@@ -335,6 +346,11 @@ export function ConnectionView() {
         pending={unregister.isPending}
         onConfirm={() => unregistering && unregister.mutate(unregistering)}
         onClose={() => setUnregistering(null)}
+        returnFocus={() =>
+          unregistering
+            ? document.querySelector<HTMLElement>(`[data-menu-for="${unregistering.id}"]`)
+            : null
+        }
       />
       <DeleteImpactDialog
         open={deleting}
@@ -345,6 +361,7 @@ export function ConnectionView() {
         pending={remove.isPending}
         onConfirm={() => remove.mutate()}
         onClose={() => setDeleting(false)}
+        returnFocus={() => document.querySelector<HTMLElement>('[data-delete-connection]')}
       />
     </>
   );

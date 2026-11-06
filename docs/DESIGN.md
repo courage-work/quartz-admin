@@ -168,6 +168,13 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - 로그인 후 화면은 `app/(app)/` 아래에 둡니다. 레이아웃이 로그인 확인과 사이드바를 맡습니다.
 - 상세 화면은 정적 export 제약 때문에 ID를 쿼리로 받습니다(`/audit-log?id=3`). `useSearchParams`를 쓰는 컴포넌트는 `Suspense`로 감쌉니다.
 - 조회 화면 공통 부품(B-16, `components/schedulers/`): 새로고침 주기·수동 새로고침·데이터 기준 시각(`RefreshControls`, 주기는 `useSyncExternalStore`로 브라우저 저장값을 읽음), 트리거 표(`TriggerTable`), 사용자·트리거 타임존 시각(`TimeCell`), 이전·다음 페이지(`PaginationBar`). 필터 토글 줄(`ToggleGroup`)과 탭 목록은 좁은 화면에서 넘치지 않게 줄바꿈하거나 가로 스크롤 영역에 둡니다.
+- 화면에 바로 놓이는 목록 표는 `components/table-frame.tsx`(테두리 + `bg-card`)로 감쌉니다. 카드 안의 표는 감싸지 않습니다(이중 테두리). 표가 넓으면 틀 안에서 가로로 스크롤하며, 이를 위해 본문(`SidebarInset`)에 `min-w-0`을 둡니다(B-16 UX 점검).
+- 표·카드 안의 이동 링크는 평소에도 밑줄(`underline decoration-muted-foreground`)을 그어 눌러지는 곳임을 보이고, 올리면 밑줄을 진하게 합니다.
+- 폼은 `mode: 'onTouched'`로 처음 벗어날 때 검사하고 그 뒤로는 고칠 때마다 다시 검사합니다. 입력 중인 칸에는 오류를 띄우지 않습니다. 제출 버튼은 입력이 덜 됐다고 막지 않고, 누르면 무엇이 필요한지 알려 줍니다.
+- 새 접속 폼은 입력을 1초 뒤 브라우저에 임시 저장하고(비밀번호 제외) 다시 열면 불러옵니다. 배너에서 버릴 수 있고, 저장에 성공하면 지웁니다.
+- 대화상자를 Radix Trigger가 아닌 버튼·메뉴 항목으로 열면 닫힌 뒤 포커스를 연 자리로 직접 돌려줍니다(`DeleteImpactDialog`의 `returnFocus`).
+- 필터 결과가 비면 "필터 모두 지우기"를 함께 보여 줍니다. placeholder는 형식 예시에만 쓰고, 검색 범위는 라벨에 씁니다(예: `검색어(이름·그룹·잡)`).
+- `prefers-reduced-motion: reduce`이면 애니메이션·전환을 즉시 끝냅니다(`globals.css`). 새로고침 스피너는 100ms 넘게 걸릴 때만 보입니다.
 - 폼은 `@qa/shared`의 zod 스키마를 `zodResolver`로 그대로 씁니다. 서버와 같은 규칙으로 검증하기 위해서입니다. 폼 값과 요청 형태가 다르면(접속 폼: 포트 문자열, 쉼표 태그, Oracle 접속 방식) 값을 요청 형태로 바꾼 뒤 같은 스키마로 검사하는 resolver를 씁니다(`components/connections/connection-form.tsx`).
 
 ### 8.2 추가하는 방법

@@ -10,9 +10,15 @@ import {
   updateConnectionRequestSchema,
 } from '@qa/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CircleCheckIcon, CircleXIcon, PlugZapIcon, TriangleAlertIcon } from 'lucide-react';
+import {
+  CircleCheckIcon,
+  CircleXIcon,
+  HistoryIcon,
+  PlugZapIcon,
+  TriangleAlertIcon,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 import { Controller, type Resolver, useForm, type UseFormReturn } from 'react-hook-form';
 import { toast } from 'sonner';
 import type { z } from 'zod';
@@ -53,7 +59,15 @@ import {
   TEST_FAILURE_HINTS,
   toConnectionRequest,
 } from '@/lib/connections';
+import {
+  clearConnectionDraft,
+  connectionDraftSavedAt,
+  isBlankDraft,
+  loadConnectionDraft,
+  saveConnectionDraft,
+} from '@/lib/connection-draft';
 import { applyApiError } from '@/lib/form-errors';
+import { formatDateTime } from '@/lib/format';
 
 const FORM_FIELDS: (keyof ConnectionFormValues)[] = [
   'name',
@@ -237,11 +251,45 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
 
   const form = useForm<ConnectionFormValues>({
+    // 처음 벗어날 때 검사하고, 그 뒤로는 고칠 때마다 다시 검사해 오류를 바로 지운다
+    mode: 'onTouched',
     resolver: schemaResolver(
       editing ? updateConnectionRequestSchema : createConnectionRequestSchema,
     ),
     defaultValues: connection ? connectionFormValues(connection) : EMPTY_CONNECTION_FORM,
   });
+
+  // 새 접속 폼은 입력을 1초 뒤에 임시 저장하고(비밀번호 제외), 다시 열면 불러온다
+  const draftSavedAt = useSyncExternalStore(
+    () => () => undefined,
+    () => (editing ? null : connectionDraftSavedAt()),
+    () => null,
+  );
+  const [draftDismissed, setDraftDismissed] = useState(false);
+  useEffect(() => {
+    if (editing) return;
+    const draft = loadConnectionDraft();
+    if (draft) form.reset({ ...EMPTY_CONNECTION_FORM, ...draft.values, password: '' });
+  }, [editing, form]);
+  useEffect(() => {
+    if (editing) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = form.subscribe({
+      formState: { values: true },
+      callback: ({ values }) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const v = { ...EMPTY_CONNECTION_FORM, ...values };
+          if (isBlankDraft(v, EMPTY_CONNECTION_FORM)) clearConnectionDraft();
+          else saveConnectionDraft(v);
+        }, 1_000);
+      },
+    });
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [editing, form]);
 
   const save = useMutation({
     mutationFn: (values: ConnectionFormValues) =>
@@ -256,6 +304,7 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
       toast.success(
         editing ? `${saved.name} 접속을 저장했습니다` : `${saved.name} 접속을 추가했습니다`,
       );
+      if (!editing) clearConnectionDraft();
       // 새 접속은 바로 스케줄러를 감지한다
       router.push(`/connection?id=${saved.id}${editing ? '' : '&detect=1'}`);
     },
@@ -302,6 +351,30 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
       onSubmit={(e) => void form.handleSubmit((values) => save.mutate(values))(e)}
     >
       <FormAlert message={form.formState.errors.root?.message} />
+      {draftSavedAt !== null && !draftDismissed ? (
+        <Alert>
+          <HistoryIcon aria-hidden />
+          <AlertTitle>
+            임시 저장한 입력을 불러왔습니다({formatDateTime(draftSavedAt)} 저장)
+          </AlertTitle>
+          <AlertDescription>
+            <span className="flex flex-wrap items-center gap-2">
+              비밀번호는 저장하지 않으니 다시 입력하세요.
+              <Button
+                type="button"
+                variant="link"
+                onClick={() => {
+                  clearConnectionDraft();
+                  form.reset(EMPTY_CONNECTION_FORM);
+                  setDraftDismissed(true);
+                }}
+              >
+                임시 저장 버리기
+              </Button>
+            </span>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <Card>
         <CardHeader>
           <CardTitle>대상 DB</CardTitle>

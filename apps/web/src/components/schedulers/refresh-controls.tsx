@@ -1,7 +1,7 @@
 'use client';
 
 import { RefreshCwIcon } from 'lucide-react';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -46,6 +46,16 @@ export function useRefreshInterval(): [number, (ms: number) => void] {
   ];
 }
 
+/** 100ms 넘게 이어질 때만 true. 금방 끝나는 새로고침에 스피너가 깜빡이지 않게 한다 */
+function useDelayedFlag(flag: boolean, delayMs = 100): boolean {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setShown(flag), flag ? delayMs : 0);
+    return () => clearTimeout(timer);
+  }, [flag, delayMs]);
+  return flag && shown;
+}
+
 /** 데이터 기준 시각, 자동 새로고침 주기, 수동 새로고침 버튼 */
 export function RefreshControls({
   dataTime,
@@ -62,6 +72,7 @@ export function RefreshControls({
   onRefresh: () => void;
   refreshing: boolean;
 }) {
+  const busy = useDelayedFlag(refreshing);
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-sm text-muted-foreground">
@@ -79,8 +90,8 @@ export function RefreshControls({
           ))}
         </SelectContent>
       </Select>
-      <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
-        {refreshing ? (
+      <Button variant="outline" onClick={onRefresh} aria-busy={busy}>
+        {busy ? (
           <Spinner data-icon="inline-start" />
         ) : (
           <RefreshCwIcon data-icon="inline-start" aria-hidden />
