@@ -119,6 +119,8 @@ export const schedulers = sqliteTable(
       .notNull()
       .references(() => connections.id, { onDelete: 'cascade' }),
     tablePrefix: text().notNull(),
+    /** 감지한 테이블 소유 스키마(Oracle OWNER). 조회 SQL이 `"스키마"."테이블"`로 쓴다. 0001 이전 행은 null */
+    tableSchema: text(),
     /** 논리 테이블명(TRIGGERS 등) → 감지한 실제 테이블명 */
     tableNames: text({ mode: 'json' }).$type<Partial<Record<QuartzTableKey, string>>>().notNull(),
     schedName: text().notNull(),

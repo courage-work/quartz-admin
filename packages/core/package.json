@@ -21,6 +21,7 @@
     "vectors": "node scripts/generate-vectors.mjs"
   },
   "dependencies": {
+    "@qa/shared": "workspace:*",
     "luxon": "catalog:"
   },
   "devDependencies": {

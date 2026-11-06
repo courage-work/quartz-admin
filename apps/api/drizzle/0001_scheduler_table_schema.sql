@@ -1,0 +1,1 @@
+ALTER TABLE `schedulers` ADD `table_schema` text;

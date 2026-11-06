@@ -319,6 +319,8 @@ export interface SchedulerDto extends SchedulerSettings {
   id: number;
   connectionId: number;
   tablePrefix: string;
+  /** 감지한 테이블 소유 스키마. 이 필드가 생기기 전에 등록한 스케줄러는 다시 감지하기 전까지 null */
+  tableSchema: string | null;
   schedName: string;
   tableNames: Partial<Record<QuartzTableKey, string>>;
   features: QuartzFeatures;

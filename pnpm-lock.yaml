@@ -248,6 +248,9 @@ importers:
       '@node-rs/argon2':
         specifier: 'catalog:'
         version: 2.2.2
+      '@qa/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@qa/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -409,6 +412,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@qa/shared':
+        specifier: workspace:*
+        version: link:../shared
       luxon:
         specifier: 'catalog:'
         version: 3.7.2

@@ -9,3 +9,4 @@ export * from './connections.js';
 export * from './domain.js';
 export * from './errors.js';
 export * from './quartz.js';
+export * from './views.js';
