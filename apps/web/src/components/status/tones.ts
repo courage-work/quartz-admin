@@ -1,4 +1,4 @@
-import type { SchedulerHealth, Severity } from '@qa/shared';
+import type { AuditResult, SchedulerHealth, Severity } from '@qa/shared';
 import {
   BanIcon,
   CircleCheckIcon,
@@ -6,6 +6,7 @@ import {
   CircleXIcon,
   ClockIcon,
   InfoIcon,
+  LoaderIcon,
   type LucideIcon,
   OctagonAlertIcon,
   PauseIcon,
@@ -59,3 +60,10 @@ export const SEVERITY_META = {
   warning: { tone: 'warning', label: '경고', icon: TriangleAlertIcon },
   critical: { tone: 'destructive', label: '심각', icon: OctagonAlertIcon },
 } as const satisfies Record<Severity, StatusMeta>;
+
+/** 감사 로그 결과 (TRD §10) */
+export const AUDIT_RESULT_META = {
+  success: { tone: 'success', label: '성공', icon: CircleCheckIcon },
+  failure: { tone: 'destructive', label: '실패', icon: CircleXIcon },
+  pending: { tone: 'info', label: '진행 중', icon: LoaderIcon },
+} as const satisfies Record<AuditResult, StatusMeta>;

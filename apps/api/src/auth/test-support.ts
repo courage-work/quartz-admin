@@ -38,6 +38,8 @@ export async function createTestApp(
     config?: Partial<AppConfig>;
     dataDir?: string;
     loginRateLimit?: number;
+    /** 화면 정적 파일 디렉터리 (web/web-assets.ts) */
+    webDir?: string;
   } = {},
 ): Promise<TestApp> {
   const tmp = options.dataDir ? undefined : tempDataDir();
@@ -61,7 +63,7 @@ export async function createTestApp(
     .useValue(new FixedWindowRateLimiter(options.loginRateLimit ?? 1_000, 60_000))
     .compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
-  configureApp(app, config);
+  configureApp(app, config, { webDir: options.webDir ?? null });
   await app.init();
   const server = app.getHttpServer();
 

@@ -23,6 +23,10 @@
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "@qa/api#build": {
+      "dependsOn": ["^build", "@qa/web#build"],
+      "outputs": ["dist/**", "public/**"]
     }
   }
 }

@@ -215,6 +215,11 @@ export class AuditService implements OnModuleInit {
     return { items, nextCursor: hasMore ? items[items.length - 1]!.id : null };
   }
 
+  get(id: number): AuditLogDto | null {
+    const row = this.metaDb.db.select().from(auditLogs).where(eq(auditLogs.id, id)).get();
+    return row ? toDto(row) : null;
+  }
+
   /** 보존 기간(`QA_AUDIT_RETENTION_DAYS`)이 지난 기록을 지운다 (FR-AUD-04) */
   prune(now: number): number {
     const cutoff = now - this.config.auditRetentionDays * DAY_MS;

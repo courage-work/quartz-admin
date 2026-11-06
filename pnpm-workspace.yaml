@@ -4,6 +4,7 @@ packages:
 
 catalog:
   '@eslint/js': 10.0.1
+  '@hookform/resolvers': 7.0.3
   '@nestjs/cli': 12.0.11
   '@nestjs/common': 12.3.3
   '@nestjs/core': 12.3.3
@@ -13,6 +14,7 @@ catalog:
   '@node-rs/argon2': 2.2.2
   '@shadcn/lint': 0.2.5
   '@swc/core': 1.16.22
+  '@tanstack/react-query': 5.106.1
   '@tailwindcss/postcss': 4.3.4
   '@types/better-sqlite3': 9.6.0
   '@types/express': 5.0.6
@@ -43,6 +45,7 @@ catalog:
   radix-ui: 1.8.1
   react: 19.3.1
   react-dom: 19.3.1
+  react-hook-form: 7.91.0
   reflect-metadata: 0.2.2
   rxjs: 7.8.2
   shadcn: 4.23.0

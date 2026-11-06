@@ -10,6 +10,7 @@ import { configureApp } from './app.setup.js';
 import { ConfigError, loadConfig } from './config/env.js';
 import { InstanceLock, InstanceLockError } from './meta-db/instance-lock.js';
 import { metaDbPath } from './meta-db/meta-db.js';
+import { defaultWebDir } from './web/web-assets.js';
 
 /**
  * Nest 초기화 전에 다른 인스턴스가 있는지 먼저 본다.
@@ -34,7 +35,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config), {
     abortOnError: false,
   });
-  configureApp(app, config);
+  configureApp(app, config, { webDir: defaultWebDir() });
   app.enableShutdownHooks();
 
   await app.listen(config.port);

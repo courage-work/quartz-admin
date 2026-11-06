@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && node scripts/copy-web.mjs",
     "dev": "nest start --watch --exec \"node --env-file-if-exists=.env\"",
     "start": "node --env-file-if-exists=.env dist/main.js",
     "cli": "node --env-file-if-exists=.env dist/cli.js",

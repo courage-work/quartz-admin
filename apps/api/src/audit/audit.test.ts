@@ -298,8 +298,18 @@ describe('무결성 (FR-AUD-04)', () => {
         expect(res.status, `${method} ${path}`).toBe(404);
       }
     }
-    await app.get('/audit-logs/1', admin).expect(404);
     expect(rawRows(app)).toHaveLength(2);
+  });
+
+  it('기록 하나를 id로 조회하고, 없으면 404를 준다', async () => {
+    const app = await start();
+    const admin = await app.login(ADMIN.username, ADMIN.password);
+    const res = await app.get('/audit-logs/1', admin).expect(200);
+    expect(res.body).toMatchObject({ id: 1, action: 'user.create', result: 'success' });
+    const missing = await app.get('/audit-logs/999', admin).expect(404);
+    expect(missing.body).toMatchObject({ code: 'NOT_FOUND' });
+    await app.get('/audit-logs/abc', admin).expect(400);
+    await app.get('/audit-logs/1').expect(401);
   });
 
   it('앱 코드에서 audit_logs를 바꾸는 곳은 AuditService뿐이다', () => {

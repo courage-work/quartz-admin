@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.1 |
+| 문서 버전 | v0.2 |
 | 작성일 | 2026-11-06 |
 | 관련 작업 | B-37(`docs/BACKLOG.md`) |
 | 확인 화면 | `/design` (`apps/web/src/app/design/`) |
@@ -140,15 +140,33 @@ D2Coding은 KS X 1001 서브셋을 씁니다. 서브셋에 없는 한글은 Pret
 
 - `next-themes`가 `<html>`에 `light`/`dark` 클래스를 붙입니다. 기본값은 `system`이고 선택값은 `localStorage`의 `theme`에 남습니다.
 - 다크 전용 스타일이 필요하면 `dark:` 접두어를 쓰되, 가능하면 토큰 값으로 해결합니다.
-- `next-themes`는 첫 화면 깜빡임을 막으려고 인라인 스크립트를 넣습니다. NestJS가 화면을 서빙할 때의 CSP 조정(B-06, TRD §4.3)에 이 스크립트도 포함해야 합니다.
+- `next-themes`는 첫 화면 깜빡임을 막으려고 인라인 스크립트를 넣습니다. NestJS는 HTML마다 인라인 스크립트의 해시를 CSP에 넣어 서빙하므로(TRD §4.3) 따로 할 일은 없습니다. 화면 코드에서 인라인 스크립트를 직접 추가하지 않습니다.
 
 ## 8. 컴포넌트
 
 ### 8.1 설치된 컴포넌트
 
-alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown-menu, empty, field, input, input-group, kbd, label, pagination, popover, radio-group, scroll-area, select, separator, sheet, skeleton, sonner, spinner, switch, table, tabs, textarea, toggle, toggle-group, tooltip
+alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown-menu, empty, field, input, input-group, kbd, label, pagination, popover, radio-group, scroll-area, select, separator, sheet, sidebar, skeleton, sonner, spinner, switch, table, tabs, textarea, toggle, toggle-group, tooltip
 
-사이드바, 데이터 표(TanStack Table) 같은 셸·목록 전용 컴포넌트는 B-06, B-16에서 추가합니다.
+데이터 표(TanStack Table)는 B-16에서 추가합니다.
+
+원본에서 바꾼 것:
+
+- 스크린 리더용 영문 문구(Close, Toggle Sidebar, Loading 등)를 한국어로 바꿨습니다(NFR-UX-01). 다시 받을 때 확인합니다.
+- `hooks/use-mobile.ts`는 effect 안에서 setState를 부르지 않도록 `useSyncExternalStore`로 바꿨습니다(react-hooks 린트).
+
+### 8.1.1 셸과 화면 공통 부품 (B-06)
+
+| 경로 | 내용 |
+| --- | --- |
+| `components/shell/` | 인증 확인(`AuthGate`), 사이드바, 본인 메뉴, 화면 제목 줄(`PageHeader`) |
+| `components/form/` | react-hook-form 입력(`TextField`), 폼 오류 알림(`FormAlert`) |
+| `lib/api.ts` | API 클라이언트. CSRF 헤더, 오류 변환, 세션 만료 시 로그인 이동 |
+| `lib/form-errors.ts` | API 오류를 입력별 오류로 옮기는 `applyApiError` |
+
+- 로그인 후 화면은 `app/(app)/` 아래에 둡니다. 레이아웃이 로그인 확인과 사이드바를 맡습니다.
+- 상세 화면은 정적 export 제약 때문에 ID를 쿼리로 받습니다(`/audit-log?id=3`). `useSearchParams`를 쓰는 컴포넌트는 `Suspense`로 감쌉니다.
+- 폼은 `@qa/shared`의 zod 스키마를 `zodResolver`로 그대로 씁니다. 서버와 같은 규칙으로 검증하기 위해서입니다.
 
 ### 8.2 추가하는 방법
 

@@ -12,6 +12,8 @@ export default defineConfig(
     '**/dist/**',
     '**/.next/**',
     '**/out/**',
+    // apps/api 빌드 시 복사하는 웹 결과물 (scripts/copy-web.mjs)
+    'apps/api/public/**',
     '**/coverage/**',
     '**/.turbo/**',
     '**/next-env.d.ts',
