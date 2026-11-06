@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.3 (B-04 인증 반영) |
+| 문서 버전 | v0.4 (B-37 디자인 시스템 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -17,6 +17,7 @@
 | v0.1 | 2026-11-05 | 초안 |
 | v0.2 | 2026-11-05 | 스파이크 S1(B-08): Quartz 2.3.2, 2.5.2 소스와 대조해 §5.4, §7.1~7.6, §9.2를 확정하고 부록 A(상태 전이 테스트 케이스)를 추가 |
 | v0.3 | 2026-11-06 | B-04: §1 API 행(nestjs-zod 대신 자체 `ZodPipe`), §2.3 API 공통 규칙 추가, §4.2·§4.3 인증·세션·CSRF 세부 규칙 확정, §11.2 초기 관리자·프록시 규칙 보완 |
+| v0.4 | 2026-11-06 | B-37: §1 UI 구성 행에 테마(tweakcn nature), 폰트, `@shadcn/lint`, 디자인 문서(`docs/DESIGN.md`) 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -30,7 +31,8 @@ Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니
 | 모듈 방식 | 전체 ESM (`"type": "module"`, `module: NodeNext`) | NestJS 12가 ESM 전용. 상대 import에는 `.js` 확장자를 붙임 |
 | 레포 구조 | pnpm workspace 모노레포 + Turborepo, 버전은 pnpm catalog로 한 곳에서 관리 | UI, API, 공유 타입, Quartz 로직을 패키지로 분리해 단독 테스트 |
 | 관리 UI | Next.js 16(App Router) 정적 export(SPA) | 단일 컨테이너, 같은 오리진 |
-| UI 구성 | shadcn/ui(Radix + Tailwind), TanStack Query, TanStack Table(가상 스크롤), react-hook-form + zod | 관리 화면에 필요한 표, 폼, 대화상자를 빠르게 구성 |
+| UI 구성 | shadcn/ui(Radix + Tailwind CSS v4, radix-vega 스타일), TanStack Query, TanStack Table(가상 스크롤), react-hook-form + zod | 관리 화면에 필요한 표, 폼, 대화상자를 빠르게 구성 |
+| 디자인 시스템 | tweakcn `nature` 테마 + 상태 색 토큰, 라이트·다크, Pretendard·D2Coding(번들 포함), `@shadcn/lint`로 토큰·variant 이탈을 lint 오류로 처리. 세부는 `docs/DESIGN.md` | 사내망에서도 폰트가 깨지지 않고, 화면마다 색과 간격이 달라지지 않게 함 |
 | API | NestJS 12, REST(`/api/v1`), `@qa/shared`의 zod 스키마를 자체 `ZodPipe`로 검증 | 1인 개발에서 타입을 한 곳에서만 관리. nestjs-zod 5.5는 peer가 NestJS `^10 \|\| ^11`이라 쓰지 않으며, OpenAPI 자동 생성은 nestjs-zod가 NestJS 12를 지원하면 다시 검토 |
 | 메타데이터 저장소 | SQLite(better-sqlite3) + Drizzle ORM, drizzle-kit 마이그레이션 | 설계 검토 결정. 나중에 PostgreSQL로 전환 가능 |
 | 대상 DB 드라이버 | `oracledb`(Thin 모드), `pg`, `mysql2`(MySQL과 MariaDB 공용) | ORM을 쓰지 않고 `QuartzDialect`로 차이를 흡수 |

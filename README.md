@@ -4,11 +4,12 @@
 
 ## 문서
 
-| 문서                       | 내용                                            |
-| -------------------------- | ----------------------------------------------- |
-| [PRD](docs/PRD.md)         | 사용자, 범위, 기능·비기능 요구사항, 성공 지표   |
-| [TRD](docs/TRD.md)         | 아키텍처, 저장소 스키마, 제어·감시 설계, 테스트 |
-| [BACKLOG](docs/BACKLOG.md) | 마일스톤과 작업(B-xx), 진행 규칙, 요구사항 추적 |
+| 문서                       | 내용                                                      |
+| -------------------------- | --------------------------------------------------------- |
+| [PRD](docs/PRD.md)         | 사용자, 범위, 기능·비기능 요구사항, 성공 지표             |
+| [TRD](docs/TRD.md)         | 아키텍처, 저장소 스키마, 제어·감시 설계, 테스트           |
+| [BACKLOG](docs/BACKLOG.md) | 마일스톤과 작업(B-xx), 진행 규칙, 요구사항 추적           |
+| [DESIGN](docs/DESIGN.md)   | 디자인 시스템: 테마, 토큰, 상태 표시, 컴포넌트, 린트 규칙 |
 
 ## 개발 환경
 
@@ -20,7 +21,7 @@ pnpm install
 pnpm build       # 전체 빌드 (turbo)
 pnpm test        # 단위 테스트
 pnpm test:integration  # 통합 테스트(Docker 필요, Oracle Free 23 + quartz-testbed)
-pnpm lint        # ESLint (타입 기반 규칙 포함)
+pnpm lint        # ESLint (타입 기반 규칙, 웹 화면은 @shadcn/lint 디자인 규칙 포함)
 pnpm typecheck   # TypeScript 검사
 pnpm format      # Prettier 적용
 ```
@@ -29,7 +30,7 @@ pnpm format      # Prettier 적용
 
 ```bash
 pnpm --filter @qa/api dev   # NestJS, http://localhost:3000/api/v1 (데이터: apps/api/data/)
-pnpm --filter @qa/web dev   # Next.js 개발 서버
+pnpm --filter @qa/web dev   # Next.js 개발 서버. /design에서 디자인 시스템 확인
 ```
 
 API는 처음 실행하기 전에 `apps/api/.env`가 필요합니다. 암호화 키는 필수입니다.

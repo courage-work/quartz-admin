@@ -1,0 +1,34 @@
+import type { SchedulerHealth, Severity } from '@qa/shared';
+
+import { Badge } from '@/components/ui/badge';
+
+import {
+  SCHEDULER_HEALTH_META,
+  SEVERITY_META,
+  type StatusMeta,
+  TRIGGER_STATE_META,
+  type TriggerState,
+} from './tones';
+
+/** 톤 + 아이콘 + 라벨. 원래 값(예: `PAUSED_BLOCKED`)은 title로 보여 준다. */
+export function StatusBadge({ meta, code }: { meta: StatusMeta; code?: string }) {
+  const Icon = meta.icon;
+  return (
+    <Badge variant={meta.tone} title={code}>
+      <Icon data-icon="inline-start" aria-hidden />
+      {meta.label}
+    </Badge>
+  );
+}
+
+export function TriggerStateBadge({ state }: { state: TriggerState }) {
+  return <StatusBadge meta={TRIGGER_STATE_META[state]} code={state} />;
+}
+
+export function SchedulerHealthBadge({ health }: { health: SchedulerHealth }) {
+  return <StatusBadge meta={SCHEDULER_HEALTH_META[health]} />;
+}
+
+export function SeverityBadge({ severity }: { severity: Severity }) {
+  return <StatusBadge meta={SEVERITY_META[severity]} />;
+}
