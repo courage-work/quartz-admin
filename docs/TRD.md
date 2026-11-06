@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.14 (B-15 감시 루프 반영) |
+| 문서 버전 | v0.15 (B-16 대시보드·조회 화면 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -28,6 +28,7 @@
 | v0.12 | 2026-11-06 | B-13: §5.7 접속·스케줄러 관리 API 추가, §5.6 HTTP 상태 확정, §12.1 손 확인용 테스트베드(`testbed:up`) 추가 |
 | v0.13 | 2026-11-06 | B-14: §8.1~8.3 조회 API 응답 형식·검색·정렬·오래된 실행 기록·JobDataMap 판정 확정, LIKE 이스케이프 문자를 `!`로 변경, §3.2 `schedulers.table_schema` 추가 |
 | v0.14 | 2026-11-06 | B-15: §8.4 스냅샷 상태 판정·실패 시 보존 규칙·스냅샷 API, §9.1 감시 루프 구현(고정 주기, 겹침 건너뛰기, 첫 회차 지터, 동시 실행, 회차 제한, 변경 이벤트, 확장 지점, 수집 쿼리) 확정 |
+| v0.15 | 2026-11-07 | B-16: §8.1 대시보드 목록·스케줄러 상세 응답 형식과 화면 구성, §8.4 대시보드 응답 시간 확인 결과 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -618,8 +619,8 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| GET | `/schedulers` | 대시보드 목록. 스냅샷 캐시 기반(§8.4). `env`, `tag`, `q` 필터 |
-| GET | `/schedulers/:id` | 상세. 스냅샷과 설정 |
+| GET | `/schedulers` | 대시보드 목록. 스냅샷 캐시 기반(§8.4). `env`(정확히 일치, 소문자), `tag`(포함), `q`(스케줄러 표시 이름·SCHED_NAME·접속 이름 부분 일치) 필터. 응답은 `{ generatedAt, items, envs, tags }`이며 `envs`·`tags`는 필터 선택지(필터와 무관하게 전체에서) |
+| GET | `/schedulers/:id` | 상세. 설정·감지 정보에 접속 요약(이름, 환경, 태그, 읽기 전용, 쓰기 가능), 마지막 스냅샷, 열린 알림 수를 붙인다 |
 | GET | `/schedulers/:id/nodes` | 실시간 노드 목록 |
 | GET | `/schedulers/:id/paused-groups` | 일시정지된 트리거 그룹 |
 | GET | `/schedulers/:id/jobs` | `group`, `q`, `page`, `size`(최대 200), `sort` |
@@ -627,6 +628,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 | GET | `/schedulers/:id/triggers` | `state[]`, `type[]`, `group`, `q`, `page`, `size`, `sort`(`key`/`nextFireTime`) |
 | GET | `/schedulers/:id/executing` | FIRED_TRIGGERS 기반 실행 중 목록 |
 
+- 대시보드 카드(`SchedulerSummaryDto`)는 스케줄러 표시 이름·SCHED_NAME·prefix·기대 노드 수·감시 주기, 접속 요약, 스냅샷, 열린 알림 수입니다. 정렬은 접속 이름·표시 이름 순입니다.
 - 잡과 트리거 키는 `/` 같은 문자를 포함할 수 있으므로 경로가 아니라 쿼리 파라미터로 받습니다.
 - 목록은 OFFSET 페이지네이션입니다(`page` 1부터, `size` 기본 50·최대 200). 응답은 `{ dbNow, items, total, page, size }`입니다. 스케줄러당 트리거 10,000개 규모면 충분합니다. 같은 조건의 `COUNT(*)`로 전체 개수를 함께 돌려줍니다.
 - 조회는 대상 DB에서 직접 읽습니다(조회 제한 10초). 요청마다 같은 커넥션에서 DB 현재 시각을 먼저 읽어 응답의 `dbNow`에 넣고, 화면은 이 값을 데이터 기준 시각으로 표시합니다(FR-VIEW-06). 노드 활성 판정, 경과 시간도 이 값을 기준으로 계산합니다.
@@ -644,6 +646,13 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 - 시각 컬럼은 §5.4대로 `NULL`과 0 이하를 `null`로 바꿉니다. 화면은 사용자 타임존으로 표시하고 CRON 트리거의 타임존을 함께 보여 줍니다(FR-VIEW-09). `MISFIRE_INSTR`의 의미는 트리거 타입마다 달라 화면이 라벨로 바꿉니다.
 - **오래된 실행 기록**(`stale`): 활성 노드가 아닌 인스턴스의 `FIRED_TRIGGERS` 행입니다. 살아 있는 노드의 ClusterManager가 복구하기 전이거나 클러스터 전체가 내려간 경우입니다. 도구는 표시만 하고 지우지 않습니다(PRD FR-CTL-12 삭제, §13 제안 3).
+
+- **화면**(B-16, `apps/web`)
+  - 대시보드 `/`: 스냅샷 카드(상태 배지, 활성/전체 노드와 기대 노드 수, 트리거·실행 중·열린 알림 수, 상태별 트리거 배지, 마지막 감시 시각). prod 카드는 위에 빨간 띠를 둡니다(NFR-UX-02). 연결 불가 카드는 원인과 연속 실패 수, "마지막으로 본 값" 기준 시각을 함께 보여 줍니다. 시계 차이가 30초를 넘으면 경고 문구를 붙입니다.
+  - 스케줄러 상세 `/scheduler?id=&tab=`: 탭(트리거, 잡, 실행 중, 노드, 일시정지 그룹)마다 대상 DB에서 읽고, 표 위에 대상 DB 시각을 표시합니다. 트리거 탭은 상태·타입 여러 개 선택, 그룹(정확히 일치), 검색어, 정렬을 지원합니다.
+  - 잡 상세 `/job?scheduler=&group=&name=`: 잡 정보, 연결된 트리거, JobDataMap(값은 기본으로 가림, Java 직렬화는 표시 불가 안내).
+  - 시각은 브라우저 타임존으로 보여 주고, CRON 트리거의 타임존이 다르면 그 타임존 시각을 아래 줄에 함께 씁니다(FR-VIEW-09). Intl이 모르는 Java 타임존 ID(예: `EST`)는 이름만 씁니다.
+  - 자동 새로고침(끔, 10초, 30초 기본, 1분)과 수동 새로고침을 화면 위에 둡니다. 선택한 주기는 브라우저에 저장합니다(FR-VIEW-06).
 
 ### 8.2 주요 쿼리
 
@@ -667,6 +676,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 - 감시 루프(§9)가 주기마다 스케줄러별 요약(상태별 트리거 수, 노드, 실행 중 수, DB 시각, 시계 차이, 오류)을 `scheduler_snapshots`에 저장합니다.
 - 대시보드는 대상 DB를 직접 조회하지 않고 이 캐시만 읽습니다. 그래서 연결할 수 없는 DB가 있어도 응답 시간이 일정합니다(NFR-PERF-01, FR-VIEW-07).
 - 도구 서버와 대상 DB의 시계 차이가 30초를 넘으면 스케줄러 카드에 경고를 표시합니다.
+- B-16 확인(빌드한 API, 연결할 수 없는 스케줄러 2개와 정상 스케줄러 1개): `GET /schedulers` 40회 p95 2ms, 브라우저에서 대시보드 첫 화면이 데이터까지 약 50ms 안에 그려졌습니다(NFR-PERF-01 목표 3초).
 - 상태(`status`)는 감시할 때 정합니다(`apps/api/src/monitor/health.ts`). §9.2 기본 규칙과 같은 기준이며, 알림 엔진(B-24)이 붙으면 열린 알림과 함께 다시 정할 수 있습니다.
   - `unreachable`: 감시가 실패함(연결·인증·시간 초과·대상 DB 오류)
   - `critical`: 활성 노드 0개 또는 ERROR 트리거가 있음

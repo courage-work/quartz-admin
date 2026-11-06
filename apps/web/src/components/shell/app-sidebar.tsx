@@ -35,7 +35,7 @@ interface NavItem {
 }
 
 const MAIN_NAV: NavItem[] = [
-  { href: '/', label: '대시보드', icon: LayoutDashboardIcon },
+  { href: '/', label: '대시보드', icon: LayoutDashboardIcon, match: ['/scheduler', '/job'] },
   {
     href: '/connections',
     label: '접속',

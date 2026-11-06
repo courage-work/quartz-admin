@@ -148,7 +148,7 @@ D2Coding은 KS X 1001 서브셋을 씁니다. 서브셋에 없는 한글은 Pret
 
 alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown-menu, empty, field, input, input-group, kbd, label, pagination, popover, radio-group, scroll-area, select, separator, sheet, sidebar, skeleton, sonner, spinner, switch, table, tabs, textarea, toggle, toggle-group, tooltip
 
-데이터 표(TanStack Table)는 B-16에서 추가합니다.
+데이터 표는 서버 페이지네이션이라 정렬·필터를 서버가 하므로, TanStack Table을 넣지 않고 shadcn `table`과 `components/schedulers/pagination-bar.tsx`를 씁니다(B-16 결정). 클라이언트 정렬·열 선택이 필요해지면 그때 추가합니다.
 
 원본에서 바꾼 것:
 
@@ -167,6 +167,7 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 
 - 로그인 후 화면은 `app/(app)/` 아래에 둡니다. 레이아웃이 로그인 확인과 사이드바를 맡습니다.
 - 상세 화면은 정적 export 제약 때문에 ID를 쿼리로 받습니다(`/audit-log?id=3`). `useSearchParams`를 쓰는 컴포넌트는 `Suspense`로 감쌉니다.
+- 조회 화면 공통 부품(B-16, `components/schedulers/`): 새로고침 주기·수동 새로고침·데이터 기준 시각(`RefreshControls`, 주기는 `useSyncExternalStore`로 브라우저 저장값을 읽음), 트리거 표(`TriggerTable`), 사용자·트리거 타임존 시각(`TimeCell`), 이전·다음 페이지(`PaginationBar`). 필터 토글 줄(`ToggleGroup`)과 탭 목록은 좁은 화면에서 넘치지 않게 줄바꿈하거나 가로 스크롤 영역에 둡니다.
 - 폼은 `@qa/shared`의 zod 스키마를 `zodResolver`로 그대로 씁니다. 서버와 같은 규칙으로 검증하기 위해서입니다. 폼 값과 요청 형태가 다르면(접속 폼: 포트 문자열, 쉼표 태그, Oracle 접속 방식) 값을 요청 형태로 바꾼 뒤 같은 스키마로 검사하는 resolver를 씁니다(`components/connections/connection-form.tsx`).
 
 ### 8.2 추가하는 방법

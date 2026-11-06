@@ -1,4 +1,10 @@
-import type { QuartzDetection, SchedulerDto, SnapshotDto } from '@qa/shared';
+import type {
+  DashboardResponse,
+  QuartzDetection,
+  SchedulerDetailDto,
+  SchedulerDto,
+  SnapshotDto,
+} from '@qa/shared';
 import {
   TargetError,
   TargetPoolManager,
@@ -377,5 +383,81 @@ describe('감시 루프 (B-15, TRD §9.1)', () => {
     // 첫 회차는 지터(최대 15초) 뒤에 돌므로 여기서는 직접 한 번 돌려 결과가 쌓이는지 본다
     const snap = await monitor.poll(s.id);
     expect(snap).toMatchObject({ status: 'ok', polledAt: second.app.clock.now });
+  });
+
+  it('대시보드는 스냅샷만 읽어, 응답하지 않는 대상이 섞여 있어도 p95 3초 안에 응답한다 (NFR-PERF-01)', async () => {
+    const fake = new FakeTarget();
+    const { app, cookie } = await start(fake);
+    const hungS = await addScheduler(app, cookie, 'db-hung');
+    const okS = await addScheduler(app, cookie, 'db-ok');
+    fake.hung.add('db-hung');
+    await until(() => snapshotOf(app, cookie, okS.id));
+    // 무응답 대상의 감시가 도는 중에도 대시보드를 부른다
+    void app.app.get(MonitorService).poll(hungS.id);
+
+    const timings: number[] = [];
+    let last: DashboardResponse | undefined;
+    for (let i = 0; i < 20; i++) {
+      const started = Date.now();
+      last = (await app.get('/schedulers', cookie).expect(200)).body as DashboardResponse;
+      timings.push(Date.now() - started);
+    }
+    timings.sort((a, b) => a - b);
+    expect(timings[Math.ceil(timings.length * 0.95) - 1]!).toBeLessThan(3_000);
+    expect(last!.items.map((i) => i.connection.name)).toEqual(['db-hung', 'db-ok']);
+    expect(last!.items[1]).toMatchObject({
+      id: okS.id,
+      schedName: 'S',
+      connection: { envLabel: 'dev', dbType: 'oracle' },
+      snapshot: { status: 'ok', executingCount: 2 },
+      openAlertCount: 0,
+    });
+    expect(last!.envs).toEqual(['dev']);
+  });
+
+  it('대시보드 필터(환경, 태그, 이름)와 스케줄러 상세의 접속 요약·스냅샷', async () => {
+    const fake = new FakeTarget();
+    const { app, cookie } = await start(fake);
+    const s = await addScheduler(app, cookie, 'db-ok');
+    await until(() => snapshotOf(app, cookie, s.id));
+    const conn = (await app.get('/connections', cookie)).body as { id: number }[];
+    await app
+      .send(
+        'put',
+        `/connections/${conn[0]!.id}`,
+        {
+          name: '정산',
+          dbType: 'oracle',
+          host: 'db-ok',
+          port: 1521,
+          oracleServiceName: 'PDB',
+          username: 'u',
+          password: '',
+          envLabel: 'prod',
+          tags: ['정산', '배치'],
+        },
+        cookie,
+      )
+      .expect(200);
+
+    const names = async (query: string) =>
+      (
+        (await app.get(`/schedulers${query}`, cookie).expect(200)).body as DashboardResponse
+      ).items.map((i) => i.connection.name);
+    expect(await names('?env=PROD')).toEqual(['정산']);
+    expect(await names('?env=dev')).toEqual([]);
+    expect(await names('?tag=배치')).toEqual(['정산']);
+    expect(await names('?q=s')).toEqual(['정산']);
+    expect(await names('?q=nothing')).toEqual([]);
+
+    const detail = (await app.get(`/schedulers/${s.id}`, cookie).expect(200))
+      .body as SchedulerDetailDto;
+    expect(detail).toMatchObject({
+      id: s.id,
+      schedName: 'S',
+      connection: { name: '정산', envLabel: 'prod', tags: ['정산', '배치'] },
+      snapshot: { status: 'ok' },
+      openAlertCount: 0,
+    });
   });
 });

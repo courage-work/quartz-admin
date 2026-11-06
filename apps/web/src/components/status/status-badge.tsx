@@ -8,7 +8,6 @@ import {
   SEVERITY_META,
   type StatusMeta,
   TRIGGER_STATE_META,
-  type TriggerState,
 } from './tones';
 
 /** 톤 + 아이콘 + 라벨. 원래 값(예: `PAUSED_BLOCKED`)은 title로 보여 준다. */
@@ -22,8 +21,11 @@ export function StatusBadge({ meta, code }: { meta: StatusMeta; code?: string })
   );
 }
 
-export function TriggerStateBadge({ state }: { state: TriggerState }) {
-  return <StatusBadge meta={TRIGGER_STATE_META[state]} code={state} />;
+/** 모르는 상태 값(사용자 정의 등)은 원래 값을 회색 배지로 보여 준다 */
+export function TriggerStateBadge({ state }: { state: string }) {
+  const meta = (TRIGGER_STATE_META as Record<string, StatusMeta>)[state];
+  if (!meta) return <Badge variant="neutral">{state}</Badge>;
+  return <StatusBadge meta={meta} code={state} />;
 }
 
 export function SchedulerHealthBadge({ health }: { health: SchedulerHealth }) {
