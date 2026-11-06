@@ -16,6 +16,7 @@ import {
   NOTIFICATION_STATUSES,
   SCHEDULER_HEALTH,
   SEVERITIES,
+  type NodeDto,
   type QuartzFeatures,
   type QuartzTableKey,
 } from '@qa/shared';
@@ -34,13 +35,6 @@ export type AlertScope =
   | { kind: 'all' }
   | { kind: 'groups'; groups: string[] }
   | { kind: 'triggers'; triggers: { group: string; name: string }[] };
-
-export interface NodeSnapshot {
-  instanceName: string;
-  lastCheckinTime: number;
-  checkinInterval: number;
-  active: boolean;
-}
 
 const id = () => integer().primaryKey({ autoIncrement: true });
 const createdAt = () => integer().notNull();
@@ -151,7 +145,7 @@ export const schedulerSnapshots = sqliteTable('scheduler_snapshots', {
   clockSkewMs: integer(),
   status: text({ enum: SCHEDULER_HEALTH }).notNull(),
   triggerCounts: text({ mode: 'json' }).$type<Record<string, number>>(),
-  nodes: text({ mode: 'json' }).$type<NodeSnapshot[]>(),
+  nodes: text({ mode: 'json' }).$type<NodeDto[]>(),
   executingCount: integer(),
   errorCode: text(),
   errorMessage: text(),

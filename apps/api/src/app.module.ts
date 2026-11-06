@@ -13,6 +13,7 @@ import { CryptoModule } from './crypto/crypto.module.js';
 import { HealthController } from './health/health.controller.js';
 import { httpLoggerParams } from './logging/http-logger.js';
 import { MetaDbModule } from './meta-db/meta-db.module.js';
+import { MonitorModule } from './monitor/monitor.module.js';
 import { TargetsModule } from './targets/targets.module.js';
 import { ViewsModule } from './views/views.module.js';
 
@@ -39,6 +40,7 @@ export class AppModule {
         AuditModule,
         AuthModule,
         TargetsModule,
+        MonitorModule,
         ConnectionsModule,
         ViewsModule,
       ],

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   ALL_GROUPS_PAUSED,
   OracleAdapter,
+  collectMonitorData,
   QUARTZ_REQUIRED_TABLES,
   TargetPoolManager,
   createTableSet,
@@ -222,6 +223,35 @@ describe('조회 쿼리 (Oracle Free 23)', () => {
     expect(serialized?.jobData?.subarray(0, 2)).toEqual(Buffer.from([0xac, 0xed]));
 
     expect(await run((c) => getJobDetail(c, ctx, { group: 'jobs', name: 'nope' }))).toBeNull();
+  });
+
+  it('감시 1회 수집: 상태별 개수, 노드, 실행 중 수, 연체 수와 상위 목록, ERROR·BLOCKED 목록 (B-15)', async () => {
+    // 시드의 다음 실행 시각은 모두 미래(seed dbNow + 1초 간격)다. 연체 기준을 seed dbNow + 4.5초로 옮겨
+    // 앞쪽 트리거(i=0~3)만 연체가 되게 한다. 앞선 테스트로 DB 시각이 흘렀으므로 지금 시각에서 거꾸로 계산한다
+    const data = await run(async (c) => {
+      const current = await queryDbNowMillis(c, oracleDialect);
+      return collectMonitorData(c, ctx, {
+        checkinMultiplier: 3,
+        overdueAfterMs: current - (dbNow + 4_500),
+      });
+    });
+    const waiting = data.triggerCounts.WAITING ?? 0;
+    expect(waiting + (data.triggerCounts.PAUSED ?? 0) + (data.triggerCounts.BLOCKED ?? 0)).toBe(
+      TOTAL,
+    );
+    expect(data.triggerCounts.PAUSED).toBe(TRIGGER_COUNT / 10);
+    expect(data.nodes.map((n) => [n.instanceName, n.active])).toEqual([
+      ['node-dead', false],
+      ['node-live', true],
+    ]);
+    expect(data.executingCount).toBe(3);
+    // i=1,2,3(WAITING)의 다음 실행 시각이 dbNow+2초~4초, i=0은 PAUSED라 빠진다
+    expect(data.overdueCount).toBe(3);
+    expect(data.overdue.map((t) => t.name)).toEqual(['trig-00001', 'trig-00002', 'trig-00003']);
+    expect(data.errorTriggers).toEqual([]);
+    // 목록은 상한(기본 500)까지만 읽는다. 개수는 triggerCounts에 있다
+    expect(data.blockedTriggers.length).toBe(Math.min(data.triggerCounts.BLOCKED ?? 0, 500));
+    expect(data.blockedTriggers.every((t) => t.state === 'BLOCKED')).toBe(true);
   });
 
   it('노드 활성 판정, 일시정지 그룹, 실행 중 목록의 오래된 기록 구분', async () => {
