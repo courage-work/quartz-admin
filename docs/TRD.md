@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.4 (B-37 디자인 시스템 반영) |
+| 문서 버전 | v0.5 (B-05 감사 로그 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -18,6 +18,7 @@
 | v0.2 | 2026-11-05 | 스파이크 S1(B-08): Quartz 2.3.2, 2.5.2 소스와 대조해 §5.4, §7.1~7.6, §9.2를 확정하고 부록 A(상태 전이 테스트 케이스)를 추가 |
 | v0.3 | 2026-11-06 | B-04: §1 API 행(nestjs-zod 대신 자체 `ZodPipe`), §2.3 API 공통 규칙 추가, §4.2·§4.3 인증·세션·CSRF 세부 규칙 확정, §11.2 초기 관리자·프록시 규칙 보완 |
 | v0.4 | 2026-11-06 | B-37: §1 UI 구성 행에 테마(tweakcn nature), 폰트, `@shadcn/lint`, 디자인 문서(`docs/DESIGN.md`) 추가 |
+| v0.5 | 2026-11-06 | B-05: §10 기록 방식(`pending` 흐름, 작업 종류, 마스킹 규칙, 기록하지 않는 요청, 조회 API 형식) 확정, §2.3에 요청 ID와 전역 `CLOCK` 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -98,7 +99,8 @@ quartz-admin/
 - 요청 본문은 `@qa/shared`의 zod 스키마로 검증합니다(`apps/api/src/common/zod.pipe.ts`). 실패하면 400 `VALIDATION_FAILED`와 필드별 `details`를 돌려주고, 입력값은 응답에 넣지 않습니다.
 - 오류 응답 본문은 모두 `ApiErrorBody { code, message, details? }`입니다(`@qa/shared` `errors.ts`). 화면은 `code`로 분기하고 `message`(한국어)를 그대로 보여줍니다. 없는 경로나 깨진 JSON 같은 Nest 기본 예외도 같은 형식으로 바꾸고, 처리하지 못한 예외는 내부 정보 없이 500 `INTERNAL_ERROR`로 응답합니다(`ApiExceptionFilter`).
 - 모든 API는 기본적으로 로그인이 필요합니다. 예외 경로에만 `@Public()`, 관리자 전용 경로에는 `@AdminOnly()`를 붙입니다.
-- 시각을 다루는 서비스는 `Date.now()` 대신 `CLOCK`을 주입받습니다. 테스트에서 만료와 잠금을 시간 이동으로 검증하기 위해서입니다.
+- 시각을 다루는 서비스는 `Date.now()` 대신 `CLOCK`을 주입받습니다(전역 `ClockModule`). 테스트에서 만료와 잠금을 시간 이동으로 검증하기 위해서입니다.
+- 요청마다 ID를 붙여 `X-Request-Id` 응답 헤더로 돌려줍니다. 프록시가 보낸 `X-Request-Id`는 `[A-Za-z0-9._-]{8,64}` 형식일 때만 이어 쓰고, 아니면 새 UUID를 만듭니다. 감사 로그의 `request_id`와 서버 로그(§11.3)가 이 값을 씁니다.
 
 ## 3. 메타데이터 저장소 (SQLite)
 
@@ -602,10 +604,24 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 ## 10. 감사 로그 (FR-AUD)
 
-- 기록 지점: 제어 명령(§7.1 절차), 접속·스케줄러·규칙·채널·사용자 변경, 로그인 성공과 실패, 접속 비밀번호 변경(값은 남기지 않고 "변경됨"만)
-- `before_json`과 `after_json`에는 비밀값을 넣지 않습니다. 직렬화 직전에 마스킹 필터를 통과시킵니다.
-- 앱 코드에는 `audit_logs`를 수정하는 경로가 없습니다(INSERT와 `pending` 결과 갱신만 존재). 정리는 보존 정책 작업만 합니다.
-- `GET /audit-logs`(필터, 페이지네이션), `GET /audit-logs/export.csv`(P1, 스트리밍)
+- 기록 지점: 제어 명령(§7.1 절차), 접속·스케줄러·규칙·채널·사용자 변경, 로그인 성공과 실패, 로그아웃(유효한 세션을 끝낸 경우), 비밀번호 변경·초기화(값은 남기지 않고 `{ passwordChanged: true }`만)
+  - 초기 관리자 생성은 작업자 없는 시스템 작업(`user_id`, `username` 모두 null)으로 남기고 `reason`에 사유를 적습니다.
+  - 로그인 실패는 입력한 아이디를 `username`에 남기고, 그 아이디가 있으면 `user_id`도 채웁니다.
+  - 남기지 않는 요청: 속도 제한(429)에 걸린 로그인(기록이 끝없이 쌓이지 않게), 요청 형식 검증(400)에서 막힌 요청
+- 기록 방식(`AuditService`)
+  - 시간이 걸리거나 대상을 바꾸는 작업은 `begin`/`run`으로 `pending`을 먼저 남기고, 끝나면 `success` 또는 `failure`로 바꿉니다. `pending`을 남기지 못하면 작업도 하지 않습니다. 결과는 `pending`인 행만 한 번 바꿀 수 있습니다.
+  - 바로 끝나는 이벤트(로그인, 로그아웃)는 `success`/`failure`로 한 번에 남깁니다. 실패 기록 자체가 실패하면 원래 오류를 가리지 않도록 서버 로그만 남깁니다.
+  - 기동 시 `pending`으로 남은 기록은 `failure`(`error_code=INTERRUPTED`)로 정리합니다.
+  - `error_code`, `error_message`는 `ApiError`의 코드와 한국어 메시지입니다. 처리하지 못한 예외는 내부 메시지 대신 `INTERNAL_ERROR`와 고정 문구를 남깁니다(드라이버 메시지에 접속 정보가 섞일 수 있음).
+  - 작업 종류(`action`)와 대상 종류(`target_type`)는 `@qa/shared`의 `AUDIT_ACTIONS`, `AUDIT_TARGET_TYPES`에 모읍니다. 기능을 추가하는 작업이 여기에 이어 붙입니다.
+- 마스킹: `target`, `before`, `after`를 저장하기 직전에 `maskSecrets`를 통과시킵니다.
+  - 키 이름이 password, passphrase, secret, token, api key, credential, private key, authorization, cookie, webhook을 포함하거나 `Enc`/`_enc`로 끝나면 값을 `***`로 바꿉니다. 값이 불리언이나 null이면 사실 기록을 위해 그대로 둡니다.
+  - 문자열 안의 URL 자격증명(`scheme://user:pass@host`)의 비밀번호 부분도 가립니다.
+- 앱 코드에는 `audit_logs`를 수정하는 경로가 없습니다(INSERT와 `pending` 결과 갱신만 존재). 정리는 보존 정책 작업(`audit_logs`, §3.3)만 합니다. 테스트가 소스 전체에서 `audit_logs`를 바꾸는 코드가 `AuditService` 밖에 없는지 확인합니다.
+- `GET /audit-logs`: 로그인한 사용자 누구나 조회합니다(PRD 권한 모델).
+  - 필터: `from`(포함)·`to`(제외, epoch ms), `userId`, `username`, `schedulerId`, `action`, `result`
+  - 페이지: 최신순(id 내림차순). `limit`(기본 50, 최대 200)과 이전 응답의 `nextCursor`를 `cursor`로 넘기는 키셋 방식입니다. 응답은 `{ items, nextCursor }`이고 `nextCursor`가 null이면 마지막 페이지입니다.
+- `GET /audit-logs/export.csv`(P1, 스트리밍, B-34)
 
 ## 11. 배포와 운영
 

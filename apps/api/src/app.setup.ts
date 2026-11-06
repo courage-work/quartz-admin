@@ -1,6 +1,7 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { API_PREFIX } from '@qa/shared';
 import helmet from 'helmet';
+import { requestIdMiddleware } from './common/request-id.js';
 import type { AppConfig } from './config/env.js';
 
 /**
@@ -11,6 +12,8 @@ export function configureApp(app: NestExpressApplication, config: AppConfig): vo
   // 리버스 프록시 한 단계만 신뢰한다. 클라이언트가 보낸 X-Forwarded-For로 IP를 속일 수 없게 하기 위해서다
   app.set('trust proxy', config.trustProxy ? 1 : false);
   app.disable('x-powered-by');
+  // 감사 로그와 서버 로그를 잇는 요청 ID (TRD §10, §11.3)
+  app.use(requestIdMiddleware);
   // CSP default-src 'self', X-Content-Type-Options, Referrer-Policy 등 (TRD §4.3)
   app.use(helmet());
 }

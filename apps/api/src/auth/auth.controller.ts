@@ -18,6 +18,8 @@ import {
   type MeResponse,
 } from '@qa/shared';
 import type { Response } from 'express';
+import { actorOf } from '../audit/actor.js';
+import { AuditService } from '../audit/audit.service.js';
 import { ApiError } from '../common/api-error.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { ZodPipe } from '../common/zod.pipe.js';
@@ -42,6 +44,7 @@ export class AuthController {
     @Inject(CLOCK) private readonly clock: Clock,
     private readonly sessions: SessionsService,
     private readonly users: UsersService,
+    private readonly audit: AuditService,
   ) {}
 
   @Public()
@@ -62,7 +65,21 @@ export class AuthController {
         { 'Retry-After': String(retryAfter) },
       );
     }
-    const user = await this.authProvider.authenticate(body);
+    let user: MeResponse;
+    try {
+      user = await this.authProvider.authenticate(body);
+    } catch (err) {
+      // 없는 아이디도 입력한 아이디로 남긴다. 속도 제한에 걸린 요청은 기록하지 않는다(기록이 무한히 쌓이지 않게)
+      const known = this.users.findByUsername(body.username);
+      this.audit.failure(
+        {
+          actor: actorOf(req, { id: known?.id ?? null, username: body.username }),
+          action: 'auth.login',
+        },
+        err,
+      );
+      throw err;
+    }
 
     // 이미 들고 있던 세션은 버리고 새로 발급한다
     const previous = readSessionToken(req);
@@ -71,17 +88,19 @@ export class AuthController {
       ...(req.ip ? { ip: req.ip } : {}),
       ...(req.get('user-agent') ? { userAgent: req.get('user-agent') } : {}),
     });
+    this.audit.success({ actor: actorOf(req, user), action: 'auth.login' });
     res.cookie(SESSION_COOKIE, token, sessionCookieOptions(this.config));
     return user;
   }
 
-  /** 세션이 없거나 만료됐어도 쿠키는 지운다 */
+  /** 세션이 없거나 만료됐어도 쿠키는 지운다. 유효한 세션을 끝낸 경우만 기록한다 */
   @Public()
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   logout(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response): void {
     const token = readSessionToken(req);
     if (token) this.sessions.revoke(sessionIdOf(token));
+    if (req.auth) this.audit.success({ actor: actorOf(req), action: 'auth.logout' });
     res.clearCookie(SESSION_COOKIE, sessionCookieOptions(this.config));
   }
 
@@ -95,13 +114,21 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async changePassword(
     @CurrentSession() session: SessionContext,
+    @Req() req: AuthedRequest,
     @Body(new ZodPipe(changePasswordRequestSchema)) body: ChangePasswordRequest,
   ): Promise<void> {
-    await this.users.changeOwnPassword(
-      session.user.id,
-      session.sessionId,
-      body.currentPassword,
-      body.newPassword,
+    const { id, username } = session.user;
+    await this.audit.run(
+      {
+        actor: actorOf(req),
+        action: 'auth.password_change',
+        targetType: 'user',
+        target: { id, username },
+      },
+      () =>
+        this.users.changeOwnPassword(id, session.sessionId, body.currentPassword, body.newPassword),
+      // 값은 남기지 않고 바뀌었다는 사실만 남긴다 (TRD §10)
+      () => ({ after: { passwordChanged: true } }),
     );
   }
 }
