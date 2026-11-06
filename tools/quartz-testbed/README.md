@@ -19,11 +19,12 @@ docker build --build-arg QUARTZ_VERSION=2.5.2 -t quartz-testbed:2.5.2 tools/quar
 
 ## 명령
 
-| 명령                                    | 설명                                                       |
-| --------------------------------------- | ---------------------------------------------------------- |
-| `server` (기본)                         | 클러스터 노드로 기동하고 `:8080`에서 제어 API를 엽니다     |
-| `cron-vectors [--input F] [--output F]` | cron 다음 실행 시각 벡터를 만듭니다. 기본은 stdin → stdout |
-| `version`                               | Quartz 버전을 출력합니다                                   |
+| 명령                                    | 설명                                                                   |
+| --------------------------------------- | ---------------------------------------------------------------------- |
+| `server` (기본)                         | 클러스터 노드로 기동하고 `:8080`에서 제어 API를 엽니다                 |
+| `cron-vectors [--input F] [--output F]` | cron 다음 실행 시각 벡터를 만듭니다. 기본은 stdin → stdout             |
+| `core-vectors [--input F] [--output F]` | `@qa/core` 이식 검증 벡터를 만듭니다(cron, 트리거, 타임존, properties) |
+| `version`                               | Quartz 버전을 출력합니다                                               |
 
 ## 환경변수 (`server`)
 
@@ -150,7 +151,22 @@ docker run -i --rm quartz-testbed:2.3.2 cron-vectors < cases.json > vectors.json
 }
 ```
 
-(case, from) 조합마다 결과를 하나씩 냅니다. `next`는 epoch ms, `nextLocal`은 그 타임존의 ISO-8601 문자열입니다. 표현식이 잘못되면 case마다 `error`에 Quartz 오류 메시지를 담습니다. Java는 모르는 타임존 ID를 조용히 `GMT`로 바꾸므로 실제로 쓴 ID를 `resolvedTimeZone`에 남깁니다.
+(case, from) 조합마다 결과를 하나씩 냅니다. `next`는 epoch ms, `nextLocal`은 그 타임존의 ISO-8601 문자열입니다. 표현식이 잘못되면 case마다 `error`에 Quartz 오류 메시지를 담습니다. Java는 모르는 타임존 ID를 조용히 `GMT`로 바꾸므로 실제로 쓴 ID를 `resolvedTimeZone`에 남깁니다. 파싱은 되지만 계산 중 예외가 나는 표현식(2.3.2의 `L * * * * ?` 등)은 `runtimeError`에 예외 이름을 남깁니다.
+
+## core-vectors
+
+`@qa/core` 이식본(TRD §6)의 기준값을 만듭니다. 보통은 직접 쓰지 않고 `pnpm --filter @qa/core vectors`가 2.3.2, 2.5.2 이미지로 실행해 `packages/core/test/vectors/quartz.json`을 만듭니다.
+
+| 입력 절          | 결과                                                                                                            |
+| ---------------- | --------------------------------------------------------------------------------------------------------------- |
+| `cron`           | `cron-vectors`와 같음                                                                                           |
+| `cronTriggers`   | `CronTriggerImpl`: 밀리초를 버린 시작 시각, `computeFirstFireTime` 이후 시각 목록, `after`별 `getFireTimeAfter` |
+| `simpleTriggers` | `SimpleTriggerImpl`: 같은 형식. 값이 잘못되면 `error`                                                           |
+| `timeZones`      | `TimeZone.getTimeZone(id)`가 쓰는 ID, `ZoneId`, 시점별 오프셋                                                   |
+| `allTimeZonesAt` | `TimeZone.getAvailableIDs()` 전체에 대해 위와 같은 결과(`allTimeZones`)                                         |
+| `properties`     | `Properties.load()`(ISO-8859-1) 결과. 잘못된 `\uXXXX`는 `error`                                                 |
+
+결과에는 입력 값을 그대로 담아 결과 파일만으로 비교할 수 있게 합니다.
 
 ## 스키마
 

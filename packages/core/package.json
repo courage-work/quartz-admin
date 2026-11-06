@@ -17,9 +17,14 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "vectors": "node scripts/generate-vectors.mjs"
+  },
+  "dependencies": {
+    "luxon": "catalog:"
   },
   "devDependencies": {
+    "@types/luxon": "catalog:",
     "@types/node": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",

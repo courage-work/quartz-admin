@@ -96,4 +96,16 @@ class CronVectorsTest {
             .get(0);
     assertEquals(1, r.get("next").size());
   }
+
+  @Test
+  void 파싱은_되지만_계산에서_터지는_표현식은_예외_이름을_남긴다() throws Exception {
+    JsonNode r =
+        run("""
+            {"cases":[{"cron":"0 L * * * ?","timeZone":"UTC","from":0}]}
+            """)
+            .get("results")
+            .get(0);
+    // 2.3.2는 분 필드의 L을 거부하지 않고 빈 집합으로 둔다. 2.5.x는 파싱에서 거부한다
+    assertTrue(r.has("runtimeError") || r.has("error"));
+  }
 }

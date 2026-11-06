@@ -10,3 +10,6 @@ apps/api/drizzle
 # 기획 문서는 표 정렬을 사람이 관리한다
 docs
 apps/api/public
+# 생성 파일 (packages/core/scripts/generate-vectors.mjs)
+packages/core/test/vectors
+packages/core/src/tz/java-zone-ids.ts

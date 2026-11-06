@@ -20,6 +20,7 @@ import quartzadmin.testbed.http.ControlServer;
  * <pre>
  * server                                   클러스터 노드로 기동(기본값)
  * cron-vectors [--input F] [--output F]   cron 다음 실행 시각 벡터 생성(기본 stdin → stdout)
+ * core-vectors [--input F] [--output F]   @qa/core 이식 검증 벡터 생성(cron, 트리거, 타임존, properties)
  * version                                  Quartz 버전 출력
  * </pre>
  */
@@ -33,10 +34,11 @@ public final class Main {
     String command = args.length == 0 ? "server" : args[0];
     switch (command) {
       case "server" -> server();
-      case "cron-vectors" -> cronVectors(args);
+      case "cron-vectors" -> vectors(args, CronVectors::generate);
+      case "core-vectors" -> vectors(args, CoreVectors::generate);
       case "version" -> System.out.println(quartzVersion());
       default -> {
-        System.err.println("알 수 없는 명령입니다: " + command + " (server | cron-vectors | version)");
+        System.err.println("알 수 없는 명령입니다: " + command + " (server | cron-vectors | core-vectors | version)");
         System.exit(2);
       }
     }
@@ -89,7 +91,8 @@ public final class Main {
     stopped.await();
   }
 
-  private static void cronVectors(String[] args) throws Exception {
+  private static void vectors(String[] args, java.util.function.Function<JsonNode, JsonNode> generator)
+      throws Exception {
     Path input = null;
     Path output = null;
     for (int i = 1; i < args.length; i++) {
@@ -104,7 +107,7 @@ public final class Main {
     try (InputStream s = input == null ? System.in : Files.newInputStream(input)) {
       in = json.readTree(s);
     }
-    JsonNode result = CronVectors.generate(in);
+    JsonNode result = generator.apply(in);
     byte[] bytes =
         (json.writerWithDefaultPrettyPrinter().writeValueAsString(result) + "\n")
             .getBytes(java.nio.charset.StandardCharsets.UTF_8);

@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.7 (B-07 컨테이너 반영) |
+| 문서 버전 | v0.8 (B-10 cron 이식 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -21,6 +21,7 @@
 | v0.5 | 2026-11-06 | B-05: §10 기록 방식(`pending` 흐름, 작업 종류, 마스킹 규칙, 기록하지 않는 요청, 조회 API 형식) 확정, §2.3에 요청 ID와 전역 `CLOCK` 추가 |
 | v0.6 | 2026-11-06 | B-06: §2.2 화면 서빙 규칙과 개발 서버 프록시, §4.3 화면 HTML의 CSP(인라인 스크립트 해시), §10 감사 기록 단건 조회 추가 |
 | v0.7 | 2026-11-06 | B-07: §11.1 이미지·compose·헬스체크 세부, §11.3 로그 형식과 마스킹 확정 |
+| v0.8 | 2026-11-06 | B-10: §6 이식 범위·지원 범위(2.3.2와 2.5.x 차이)·Java Calendar 흉내·벡터 생성 방식 확정, §12.1 `core-vectors` 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -324,15 +325,31 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 | `tz` | Java TimeZone ID를 IANA ID로 변환(`GMT+09:00`, `EST` 같은 레거시 ID 포함) | `java.util.TimeZone` |
 | `props` | Java `.properties` 형식 파서(ISO-8859-1, 유니코드 이스케이프) | `java.util.Properties` |
 
-- Quartz는 Apache License 2.0입니다. 이식한 파일에는 원본 저작권 고지와 라이선스를 남기고, 루트에 `NOTICE`를 둡니다.
+- Quartz는 Apache License 2.0입니다. 이식한 파일에는 원본 저작권 고지와 라이선스를 남기고, 루트 `NOTICE`에 적습니다.
+- 공개 API(`@qa/core`): `validateCron`(검증과 한국어 오류), `cronSchedule(expr, javaTimeZoneId)`(`next`, `nextTimes`), `CronTriggerCalc`, `SimpleTriggerCalc`, `resolveJavaTimeZone`, `parseJavaProperties`(`Bytes`)
+- `getTimeAfter`는 원본 알고리즘을 줄 단위로 옮기고, `java.util.GregorianCalendar`(lenient)의 필드 설정·정규화를 `cron/java-calendar.ts`로 흉내 냅니다. 벽시계 시각 → 순간 변환은 JDK `ZoneInfo.getOffsetsByWall`과 같아서, DST 시작일의 없는 시각은 앞으로 밀리고(그날은 건너뜀) 종료일의 겹치는 시각은 표준시(뒤쪽 순간)로 봅니다. 오프셋은 Luxon(ICU 데이터)으로 구합니다.
+- `tz`는 `TimeZone.getTimeZone` 규칙을 따릅니다. JDK가 아는 ID 목록(`tz/java-zone-ids.ts`, 벡터 생성 시 함께 만듦)에 있으면 그 ID, 3글자 축약 ID는 `ZoneId.SHORT_IDS`(`EST`·`MST`·`HST`는 고정 오프셋), `GMT±h[h][[:]mm]`은 고정 오프셋, 나머지는 GMT입니다. GMT로 바뀌었는지(`fallbackToGmt`)를 함께 알려 화면이 경고할 수 있게 합니다.
+
+**지원 범위** (PRD R2). 도구는 "Quartz 2.3.2와 2.5.x가 모두 받아들이고 같은 시각을 계산하는 표현식"만 받습니다. 2.5.x는 `L`·`W` 계산을 다시 썼고 몇 가지 검증을 더했기 때문입니다(벡터로 확인한 차이).
+
+| 형태 | 2.3.2 | 2.5.x | 도구 |
+| --- | --- | --- | --- |
+| `L`·`LW`를 다른 날짜와 함께(`L,15`) | 거부 | 허용 | 거부 |
+| `W`를 다른 날짜와 함께(`1W,15`) | 허용 | 허용(결과 다름) | 거부(지원 안 함) |
+| 29일 이후의 `W`(`29W`~`31W`) | 허용 | 허용(그 날이 없는 달에서 결과 다름) | 거부(지원 안 함) |
+| 필드 8개 이상 | 나머지 무시 | 거부 | 거부 |
+| 초·분·시 필드의 `L` | 계산 중 예외 | 거부 | 거부 |
+
+이 밖에 Quartz 파서가 너그럽게 받는 형태도 거부합니다: 이름에 증가값(`JAN-MAR/2`, 2.3.2는 증가값을 무시), 증가값 0, 1970년 이전·2999년 이후 연도, `?a`처럼 뒤에 붙은 문자. 오류는 `{ code: SYNTAX | RANGE | UNSUPPORTED | QUARTZ, field, message }`이고 `message`는 한국어입니다.
 - misfire 처리 방식별 다음 실행 시각 계산(`updateAfterMisfire`)은 **이식하지 않습니다**. 재개할 때 발생하는 misfire는 Quartz 노드의 MisfireHandler에 맡깁니다(§7.4).
 
 ### 6.2 교차 검증
 
-- `tools/quartz-testbed`의 `cron-vectors` 명령이 실제 Quartz로 테스트 벡터 JSON을 만듭니다. 벡터는 (cron 표현식, 타임존, 기준 시각) 조합마다 다음 실행 시각 20개입니다.
-- 벡터에는 `L`, `LW`, `#`, `W`, 윤년, 월말, DST 전환(America/New_York, Europe/Berlin)과 Asia/Seoul을 포함하고, 조합은 300개 이상으로 잡습니다.
-- 잘못된 표현식 목록에 대해서는 Quartz와 같이 거부하는지 검증합니다.
-- 벡터 JSON은 레포에 커밋합니다. CI는 Java 없이 Vitest로 비교합니다.
+- `tools/quartz-testbed`의 `core-vectors` 명령이 실제 Quartz와 JDK로 벡터를 만듭니다. `pnpm --filter @qa/core vectors`(`scripts/generate-vectors.mjs`)가 케이스(`scripts/vector-cases.mjs`)를 Quartz 2.3.2, 2.5.2 이미지에 넣어 `test/vectors/quartz.json`을 만들고, 두 버전 결과가 다르면 항목에 `v252`로 남깁니다.
+- cron: 표현식 60개 × 타임존 4개(UTC, Asia/Seoul, America/New_York, Europe/Berlin) × 기준 시각 6개(DST 시작·종료 직전, 윤년 2월 포함), 조합마다 다음 실행 시각 20개. 1,440개 조합 중 두 버전 결과가 같은 1,416개가 모두 일치합니다(나머지 24개는 버전마다 다른 `31W`라 거부). `L`, `L-n`, `LW`, `L-nW`, `nW`, `#`, 범위 감김(`22-2`), 연도, DST의 없는·겹치는 시각을 포함합니다.
+- 잘못된 표현식 55개는 모두 거부합니다(Quartz가 거부하는 것과 지원 범위 밖인 것). Quartz가 거부하는 표현식은 도구도 반드시 거부하는지 따로 검사합니다.
+- CronTrigger 14개(시작 시각 밀리초, 종료 시각 경계, 레거시·사용자 지정·모르는 타임존), SimpleTrigger 12개(무한 반복, 종료 시각, 잘못된 값), JDK 타임존 ID 632개 전체의 오프셋, properties 15개가 모두 일치합니다.
+- 결과는 `CronExpression.MAX_YEAR`(생성한 해 + 100)에 따라 먼 미래에서 달라질 수 있어 생성 날짜를 함께 남깁니다. 벡터 JSON은 레포에 커밋하고, CI는 Java 없이 Vitest로 비교합니다.
 
 ## 7. 제어 명령 설계 (FR-CTL)
 
@@ -700,7 +717,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
   - **행 스냅샷**: SCHED_NAME 하나의 `TRIGGERS`, 하위 4개 테이블, `PAUSED_TRIGGER_GRPS`, `JOB_DETAILS`(키, IS_DURABLE), `FIRED_TRIGGERS`를 정렬된 JSON으로 내보냅니다.
 - 스키마 초기화는 Quartz 배포본의 `tables_*.sql`을 씁니다(`tools/quartz-testbed/schema/`에 2.5.2 jar의 파일을 그대로 둠). 헬퍼가 CREATE 문만 골라 prefix와 대소문자를 바꿉니다. 테이블뿐 아니라 제약 조건과 인덱스 이름의 prefix도 바꾸므로 한 스키마에 prefix 여러 개를 둘 수 있습니다. 변형 시나리오로 사용자 지정 prefix, 대문자와 소문자 테이블명, Oracle 23 `BOOLEAN` 스키마(`tables_oracle23.sql`), MySQL `lower_case_table_names=1`(B-28), 한 DB 안의 여러 SCHED_NAME을 둡니다.
   - Quartz는 테이블명을 따옴표 없이 쓰므로 Oracle의 소문자(따옴표) 테이블에는 Quartz 노드를 붙일 수 없습니다. 이 변형은 자동 감지 테스트에만 씁니다.
-- `cron-vectors` 서브커맨드로 §6.2의 벡터를 만듭니다. 입력은 (cron, 타임존, 기준 시각 목록), 출력은 조합마다 다음 실행 시각 20개(epoch ms와 해당 타임존 ISO-8601)입니다. 잘못된 표현식은 Quartz 오류 메시지를, 모르는 타임존은 Java가 실제로 쓴 ID(`GMT`)를 함께 남깁니다.
+- `core-vectors` 서브커맨드가 §6.2의 벡터(cron, 트리거, 타임존, properties)를 만듭니다. `cron-vectors` 서브커맨드는 cron만 만듭니다. 입력은 (cron, 타임존, 기준 시각 목록), 출력은 조합마다 다음 실행 시각 20개(epoch ms와 해당 타임존 ISO-8601)입니다. 잘못된 표현식은 Quartz 오류 메시지를, 모르는 타임존은 Java가 실제로 쓴 ID(`GMT`)를 함께 남깁니다.
 
 통합 테스트 헬퍼는 `packages/store/test/support/`에 있고 `pnpm test:integration`(Docker 필요)으로 돕니다. 단위 테스트(`pnpm test`)와는 분리돼 있습니다.
 
