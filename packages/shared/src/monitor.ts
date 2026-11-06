@@ -1,7 +1,9 @@
 /**
  * 감시 루프와 대시보드 스냅샷 (TRD §8.4, §9.1)
  */
+import { z } from 'zod';
 import type { SchedulerHealth } from './domain.js';
+import type { DbKind } from './quartz.js';
 import type { NodeDto } from './views.js';
 
 export interface TriggerRef {
@@ -47,3 +49,61 @@ export interface SnapshotDto {
 
 /** 시계 차이 경고 기준 (TRD §8.4) */
 export const CLOCK_SKEW_WARN_MS = 30_000;
+
+/** `GET /schedulers` 필터 (FR-VIEW-01). 환경은 정확히 일치, 태그는 포함, 검색어는 이름 부분 일치 */
+export const dashboardQuerySchema = z.object({
+  env: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .max(20)
+    .transform((v) => (v === '' ? undefined : v))
+    .optional(),
+  tag: z
+    .string()
+    .trim()
+    .max(30)
+    .transform((v) => (v === '' ? undefined : v))
+    .optional(),
+  q: z
+    .string()
+    .trim()
+    .max(100)
+    .transform((v) => (v === '' ? undefined : v))
+    .optional(),
+});
+export type DashboardQuery = z.infer<typeof dashboardQuerySchema>;
+
+/** 스케줄러가 속한 접속의 요약 */
+export interface SchedulerConnectionSummary {
+  id: number;
+  name: string;
+  dbType: DbKind;
+  envLabel: string;
+  tags: string[];
+  readOnly: boolean;
+  writeCapable: boolean | null;
+}
+
+/** 대시보드 카드 하나. 대상 DB를 조회하지 않고 메타 저장소와 스냅샷만 읽는다 (TRD §8.4) */
+export interface SchedulerSummaryDto {
+  id: number;
+  displayName: string;
+  schedName: string;
+  tablePrefix: string;
+  expectedNodeCount: number;
+  pollIntervalSec: number;
+  connection: SchedulerConnectionSummary;
+  /** 아직 한 번도 감시하지 않았으면 null */
+  snapshot: SnapshotDto | null;
+  openAlertCount: number;
+}
+
+export interface DashboardResponse {
+  /** 응답을 만든 도구 서버 시각 */
+  generatedAt: number;
+  items: SchedulerSummaryDto[];
+  /** 필터 선택지. 필터와 상관없이 등록된 전체에서 뽑는다 */
+  envs: string[];
+  tags: string[];
+}

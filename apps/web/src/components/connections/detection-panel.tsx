@@ -183,6 +183,7 @@ export function DetectionPanel({
 }) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pickHint, setPickHint] = useState(false);
 
   const register = useMutation({
     mutationFn: (body: RegisterSchedulersRequest) =>
@@ -281,12 +282,25 @@ export function DetectionPanel({
           ) ? (
             <div>
               <Button
-                disabled={selections.length === 0 || register.isPending}
-                onClick={() => register.mutate({ selections })}
+                disabled={register.isPending}
+                onClick={() => {
+                  // 버튼을 막는 대신 누르면 무엇이 필요한지 알려 준다
+                  if (selections.length === 0) {
+                    setPickHint(true);
+                    return;
+                  }
+                  setPickHint(false);
+                  register.mutate({ selections });
+                }}
               >
                 {register.isPending ? <Spinner data-icon="inline-start" /> : null}
                 선택한 스케줄러 등록하기{selections.length > 0 ? ` (${selections.length})` : ''}
               </Button>
+              {pickHint && selections.length === 0 ? (
+                <p role="alert" className="mt-2 text-sm text-destructive">
+                  등록할 스케줄러를 표에서 하나 이상 고르세요.
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>

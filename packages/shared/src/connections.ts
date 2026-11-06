@@ -14,6 +14,7 @@ import {
   type SchedulerCandidate,
   type UnusableTableSet,
 } from './quartz.js';
+import type { SchedulerConnectionSummary, SnapshotDto } from './monitor.js';
 
 /** 지금 연결할 수 있는 DB 종류. 나머지는 B-27~B-29에서 추가한다 */
 export const SUPPORTED_DB_KINDS: readonly DbKind[] = ['oracle'];
@@ -328,6 +329,13 @@ export interface SchedulerDto extends SchedulerSettings {
   detectedAt: number;
   createdAt: number;
   updatedAt: number;
+}
+
+/** `GET /schedulers/:id`. 설정·감지 정보에 접속 요약, 마지막 스냅샷, 열린 알림 수를 붙인다 (TRD §8.1) */
+export interface SchedulerDetailDto extends SchedulerDto {
+  connection: SchedulerConnectionSummary;
+  snapshot: SnapshotDto | null;
+  openAlertCount: number;
 }
 
 /** 삭제 영향 미리보기 (FR-CON-05) */

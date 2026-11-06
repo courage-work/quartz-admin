@@ -37,6 +37,7 @@ const FIELDS: (keyof SchedulerSettings)[] = [
 function SettingsForm({ scheduler, onClose }: { scheduler: SchedulerDto; onClose: () => void }) {
   const queryClient = useQueryClient();
   const form = useForm<FormInput, unknown, SchedulerSettings>({
+    mode: 'onTouched',
     resolver: zodResolver(schedulerSettingsSchema),
     defaultValues: {
       displayName: scheduler.displayName,

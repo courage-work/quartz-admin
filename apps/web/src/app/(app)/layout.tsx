@@ -14,7 +14,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <AuthGate>
       <SidebarProvider>
         <AppSidebar />
-        <SidebarInset>
+        {/* min-w-0: 넓은 표가 본문을 늘리지 않고 표 안에서 가로로 스크롤하게 한다 */}
+        <SidebarInset className="min-w-0">
           <header className="flex h-14 items-center gap-2 border-b border-border px-4">
             <SidebarTrigger />
             <div className="flex-1" />

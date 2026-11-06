@@ -8,10 +8,15 @@ import {
   Param,
   ParseIntPipe,
   Put,
+  Query,
   Req,
 } from '@nestjs/common';
 import {
+  type DashboardQuery,
+  dashboardQuerySchema,
+  type DashboardResponse,
   type DeleteImpactDto,
+  type SchedulerDetailDto,
   type SchedulerDto,
   type SchedulerSettings,
   schedulerSettingsSchema,
@@ -35,9 +40,15 @@ export class SchedulersController {
     private readonly audit: AuditService,
   ) {}
 
+  /** 대시보드 목록 (FR-VIEW-01). 스냅샷 캐시만 읽는다 */
+  @Get()
+  dashboard(@Query(new ZodPipe(dashboardQuerySchema)) query: DashboardQuery): DashboardResponse {
+    return this.connections.dashboard(query);
+  }
+
   @Get(':id')
-  get(@Param('id', ParseIntPipe) id: number): SchedulerDto {
-    return toSchedulerDto(this.connections.requireScheduler(id));
+  get(@Param('id', ParseIntPipe) id: number): SchedulerDetailDto {
+    return this.connections.schedulerDetail(id);
   }
 
   /** 대시보드 캐시(감시 루프의 마지막 결과). 대상 DB를 조회하지 않는다 */

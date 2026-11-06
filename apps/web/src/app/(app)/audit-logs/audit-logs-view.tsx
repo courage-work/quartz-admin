@@ -210,7 +210,7 @@ export function AuditLogsView() {
                     <TableCell>
                       <Link
                         href={`/audit-log?id=${log.id}`}
-                        className="text-primary underline-offset-4 hover:underline"
+                        className="text-primary underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
                       >
                         {formatDateTime(log.at)}
                       </Link>

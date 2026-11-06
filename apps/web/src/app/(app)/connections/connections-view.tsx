@@ -6,6 +6,7 @@ import { DatabaseIcon, PlusIcon } from 'lucide-react';
 import Link from 'next/link';
 
 import { FormAlert } from '@/components/form/form-alert';
+import { TableFrame } from '@/components/table-frame';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge } from '@/components/status/environment';
 import { Badge } from '@/components/ui/badge';
@@ -68,66 +69,68 @@ export function ConnectionsView() {
   else if (connections.data?.length === 0) body = <NoConnections />;
   else {
     body = (
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>이름</TableHead>
-            <TableHead>환경</TableHead>
-            <TableHead>DB</TableHead>
-            <TableHead>주소</TableHead>
-            <TableHead>계정</TableHead>
-            <TableHead className="text-right">스케줄러</TableHead>
-            <TableHead>권한</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {connections.isPending
-            ? Array.from({ length: 3 }, (_, i) => (
-                <TableRow key={i}>
-                  <TableCell colSpan={7}>
-                    <Skeleton className="h-5 w-full" />
-                  </TableCell>
-                </TableRow>
-              ))
-            : connections.data.map((conn) => (
-                <TableRow key={conn.id}>
-                  <TableCell>
-                    <Link
-                      href={`/connection?id=${conn.id}`}
-                      className="font-medium underline-offset-4 hover:underline"
-                    >
-                      {conn.name}
-                    </Link>
-                    {conn.tags.length > 0 ? (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {conn.tags.map((tag) => (
-                          <Badge key={tag} variant="outline">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell>
-                    <EnvBadge environment={conn.envLabel} />
-                  </TableCell>
-                  <TableCell>{DB_KIND_LABELS[conn.dbType]}</TableCell>
-                  <TableCell>
-                    <span className="font-mono">{describeAddress(conn)}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="font-mono">{conn.username}</span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <span className="tabular-nums">{conn.schedulerCount}</span>
-                  </TableCell>
-                  <TableCell>
-                    <WriteStatusBadge connection={conn} />
-                  </TableCell>
-                </TableRow>
-              ))}
-        </TableBody>
-      </Table>
+      <TableFrame>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>이름</TableHead>
+              <TableHead>환경</TableHead>
+              <TableHead>DB</TableHead>
+              <TableHead>주소</TableHead>
+              <TableHead>계정</TableHead>
+              <TableHead className="text-right">스케줄러</TableHead>
+              <TableHead>권한</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {connections.isPending
+              ? Array.from({ length: 3 }, (_, i) => (
+                  <TableRow key={i}>
+                    <TableCell colSpan={7}>
+                      <Skeleton className="h-5 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ))
+              : connections.data.map((conn) => (
+                  <TableRow key={conn.id}>
+                    <TableCell>
+                      <Link
+                        href={`/connection?id=${conn.id}`}
+                        className="font-medium underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
+                      >
+                        {conn.name}
+                      </Link>
+                      {conn.tags.length > 0 ? (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {conn.tags.map((tag) => (
+                            <Badge key={tag} variant="outline">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      <EnvBadge environment={conn.envLabel} />
+                    </TableCell>
+                    <TableCell>{DB_KIND_LABELS[conn.dbType]}</TableCell>
+                    <TableCell>
+                      <span className="font-mono">{describeAddress(conn)}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-mono">{conn.username}</span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span className="tabular-nums">{conn.schedulerCount}</span>
+                    </TableCell>
+                    <TableCell>
+                      <WriteStatusBadge connection={conn} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+          </TableBody>
+        </Table>
+      </TableFrame>
     );
   }
 

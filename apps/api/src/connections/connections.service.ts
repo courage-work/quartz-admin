@@ -9,7 +9,12 @@ import type {
   QuartzDetection,
   RegisterSchedulersInput,
   SchedulerDto,
+  DashboardQuery,
+  DashboardResponse,
+  SchedulerConnectionSummary,
+  SchedulerDetailDto,
   SchedulerSettings,
+  SchedulerSummaryDto,
   SnapshotDto,
   TestConnectionInput,
   UpdateConnectionInput,
@@ -74,6 +79,18 @@ export function toSchedulerDto(row: SchedulerRow): SchedulerDto {
     detectedAt: row.detectedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+export function connectionSummary(row: ConnectionRow): SchedulerConnectionSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    dbType: row.dbType,
+    envLabel: row.envLabel,
+    tags: row.tags,
+    readOnly: row.readOnly,
+    writeCapable: row.writeCapable,
   };
 }
 
@@ -479,6 +496,60 @@ export class ConnectionsService {
     return row;
   }
 
+  /**
+   * 대시보드 (FR-VIEW-01, TRD §8.4). 대상 DB를 조회하지 않고 메타 저장소와 스냅샷만 읽는다.
+   * 그래서 연결할 수 없는 대상이 섞여 있어도 응답 시간이 일정하다(NFR-PERF-01, FR-VIEW-07).
+   */
+  dashboard(query: DashboardQuery): DashboardResponse {
+    const rows = this.metaDb.db
+      .select({ scheduler: schedulers, connection: connections, snapshot: schedulerSnapshots })
+      .from(schedulers)
+      .innerJoin(connections, eq(connections.id, schedulers.connectionId))
+      .leftJoin(schedulerSnapshots, eq(schedulerSnapshots.schedulerId, schedulers.id))
+      .orderBy(asc(connections.name), asc(schedulers.displayName))
+      .all();
+    const alertCounts = this.openAlertCounts();
+    const q = query.q?.toLowerCase();
+    const items: SchedulerSummaryDto[] = rows
+      .filter(({ scheduler, connection }) => {
+        if (query.env !== undefined && connection.envLabel !== query.env) return false;
+        if (query.tag !== undefined && !connection.tags.includes(query.tag)) return false;
+        if (q !== undefined) {
+          const names = [scheduler.displayName, scheduler.schedName, connection.name];
+          if (!names.some((n) => n.toLowerCase().includes(q))) return false;
+        }
+        return true;
+      })
+      .map(({ scheduler, connection, snapshot }) => ({
+        id: scheduler.id,
+        displayName: scheduler.displayName,
+        schedName: scheduler.schedName,
+        tablePrefix: scheduler.tablePrefix,
+        expectedNodeCount: scheduler.expectedNodeCount,
+        pollIntervalSec: scheduler.pollIntervalSec,
+        connection: connectionSummary(connection),
+        snapshot: snapshot ? toSnapshotDto(snapshot) : null,
+        openAlertCount: alertCounts.get(scheduler.id) ?? 0,
+      }));
+    return {
+      generatedAt: this.clock(),
+      items,
+      envs: [...new Set(rows.map((r) => r.connection.envLabel))].sort(),
+      tags: [...new Set(rows.flatMap((r) => r.connection.tags))].sort(),
+    };
+  }
+
+  /** 스케줄러 상세 (TRD §8.1 `GET /schedulers/:id`) */
+  schedulerDetail(id: number): SchedulerDetailDto {
+    const scheduler = this.requireScheduler(id);
+    return {
+      ...toSchedulerDto(scheduler),
+      connection: connectionSummary(this.require(scheduler.connectionId)),
+      snapshot: this.snapshot(id),
+      openAlertCount: this.openAlertCounts(id).get(id) ?? 0,
+    };
+  }
+
   /** 감시 루프가 남긴 마지막 스냅샷 (TRD §8.4). 아직 감시하지 않았으면 null */
   snapshot(id: number): SnapshotDto | null {
     this.requireScheduler(id);
@@ -524,6 +595,21 @@ export class ConnectionsService {
       tags: input.tags,
       readOnly: input.readOnly,
     };
+  }
+
+  private openAlertCounts(schedulerId?: number): Map<number, number> {
+    const rows = this.metaDb.db
+      .select({ schedulerId: alerts.schedulerId, n: count() })
+      .from(alerts)
+      .where(
+        and(
+          ne(alerts.status, 'resolved'),
+          schedulerId === undefined ? undefined : eq(alerts.schedulerId, schedulerId),
+        ),
+      )
+      .groupBy(alerts.schedulerId)
+      .all();
+    return new Map(rows.map((r) => [r.schedulerId, r.n]));
   }
 
   private schedulerIdsOf(connectionId: number): number[] {

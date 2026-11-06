@@ -1,4 +1,4 @@
-import type { AuditResult, SchedulerHealth, Severity } from '@qa/shared';
+import type { AuditResult, SchedulerHealth, Severity, TriggerState } from '@qa/shared';
 import {
   BanIcon,
   CircleCheckIcon,
@@ -28,10 +28,7 @@ export interface StatusMeta {
   icon: LucideIcon;
 }
 
-/**
- * QRTZ_TRIGGERS.TRIGGER_STATE. 원본 목록은 `@qa/core`의 TRIGGER_STATES이며,
- * web은 shared에만 의존하므로(TRD §2.1) 여기서는 키를 그대로 옮겨 둔다. 조회 DTO가 shared로 오면(B-14) 그 타입을 쓴다.
- */
+/** QRTZ_TRIGGERS.TRIGGER_STATE (`@qa/shared` TRIGGER_STATES) */
 export const TRIGGER_STATE_META = {
   WAITING: { tone: 'success', label: '대기', icon: ClockIcon },
   ACQUIRED: { tone: 'info', label: '획득', icon: CircleDotIcon },
@@ -42,9 +39,9 @@ export const TRIGGER_STATE_META = {
   PAUSED: { tone: 'neutral', label: '일시정지', icon: PauseIcon },
   PAUSED_BLOCKED: { tone: 'warning', label: '일시정지(차단)', icon: PauseIcon },
   DELETED: { tone: 'neutral', label: '삭제됨', icon: Trash2Icon },
-} as const satisfies Record<string, StatusMeta>;
+} as const satisfies Record<TriggerState, StatusMeta>;
 
-export type TriggerState = keyof typeof TRIGGER_STATE_META;
+export type { TriggerState };
 
 /** 대시보드 스케줄러 상태 (PRD FR-VIEW-01) */
 export const SCHEDULER_HEALTH_META = {
