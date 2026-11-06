@@ -59,6 +59,8 @@ export async function createTestApp(
     loginRateLimit?: number;
     /** 화면 정적 파일 디렉터리 (web/web-assets.ts) */
     webDir?: string;
+    /** 바꿔 끼울 provider. 대상 DB 없이 접속 기능을 시험할 때 쓴다 */
+    overrides?: { provide: unknown; useValue: unknown }[];
   } = {},
 ): Promise<TestApp> {
   const tmp = options.dataDir ? undefined : tempDataDir();
@@ -74,14 +76,17 @@ export async function createTestApp(
     },
   };
   testLogs.clear();
-  const moduleRef = await Test.createTestingModule({
+  let builder = Test.createTestingModule({
     imports: [AppModule.forRoot(config, { logStream: testLogs })],
   })
     .overrideProvider(CLOCK)
     .useValue(() => clock.now)
     .overrideProvider(LOGIN_RATE_LIMITER)
-    .useValue(new FixedWindowRateLimiter(options.loginRateLimit ?? 1_000, 60_000))
-    .compile();
+    .useValue(new FixedWindowRateLimiter(options.loginRateLimit ?? 1_000, 60_000));
+  for (const o of options.overrides ?? []) {
+    builder = builder.overrideProvider(o.provide).useValue(o.useValue);
+  }
+  const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
   configureApp(app, config, { webDir: options.webDir ?? null });
   await app.init();

@@ -3,6 +3,7 @@
 import { APP_NAME } from '@qa/shared';
 import {
   CalendarClockIcon,
+  DatabaseIcon,
   LayoutDashboardIcon,
   type LucideIcon,
   ScrollTextIcon,
@@ -35,6 +36,12 @@ interface NavItem {
 
 const MAIN_NAV: NavItem[] = [
   { href: '/', label: '대시보드', icon: LayoutDashboardIcon },
+  {
+    href: '/connections',
+    label: '접속',
+    icon: DatabaseIcon,
+    match: ['/connection', '/connection/edit', '/connections/new'],
+  },
   { href: '/audit-logs', label: '감사 로그', icon: ScrollTextIcon, match: ['/audit-log'] },
 ];
 

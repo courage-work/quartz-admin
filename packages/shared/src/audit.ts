@@ -16,11 +16,18 @@ export const AUDIT_ACTIONS = [
   'user.activate',
   'user.deactivate',
   'user.password_reset',
+  'connection.create',
+  'connection.update',
+  'connection.delete',
+  'connection.detect',
+  'scheduler.register',
+  'scheduler.update',
+  'scheduler.delete',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
-/** 대상 종류. 접속, 스케줄러, 잡, 트리거는 각 기능 작업에서 추가한다 */
-export const AUDIT_TARGET_TYPES = ['user'] as const;
+/** 대상 종류. 잡, 트리거는 각 기능 작업에서 추가한다 */
+export const AUDIT_TARGET_TYPES = ['user', 'connection', 'scheduler'] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 
 /**

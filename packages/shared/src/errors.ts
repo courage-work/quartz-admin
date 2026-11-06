@@ -43,6 +43,12 @@ export const API_ERROR_CODES = [
   'NOT_FOUND',
   /** 이미 있는 아이디 (409) */
   'USERNAME_TAKEN',
+  /** 이미 있는 접속 이름 (409) */
+  'CONNECTION_NAME_TAKEN',
+  /** 이미 등록된 스케줄러(같은 접속, prefix, SCHED_NAME) (409) */
+  'SCHEDULER_ALREADY_REGISTERED',
+  /** 고른 후보를 감지 결과에서 찾지 못함. 다시 감지한 뒤 고른다 (409) */
+  'SCHEDULER_NOT_DETECTED',
   /** 본인 계정 비활성화처럼 허용하지 않는 변경 (409) */
   'OPERATION_NOT_ALLOWED',
   /** 요청이 너무 많음 (429) */

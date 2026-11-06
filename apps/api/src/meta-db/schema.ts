@@ -16,6 +16,8 @@ import {
   NOTIFICATION_STATUSES,
   SCHEDULER_HEALTH,
   SEVERITIES,
+  type QuartzFeatures,
+  type QuartzTableKey,
 } from '@qa/shared';
 import { BOOL_FORMATS, DB_KINDS } from '@qa/store';
 import { sql } from 'drizzle-orm';
@@ -28,7 +30,6 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
-/** 자동 감지한 불리언 저장 형식 (TRD §5.5) */
 export type AlertScope =
   | { kind: 'all' }
   | { kind: 'groups'; groups: string[] }
@@ -119,11 +120,11 @@ export const schedulers = sqliteTable(
       .references(() => connections.id, { onDelete: 'cascade' }),
     tablePrefix: text().notNull(),
     /** 논리 테이블명(TRIGGERS 등) → 감지한 실제 테이블명 */
-    tableNames: text({ mode: 'json' }).$type<Record<string, string>>().notNull(),
+    tableNames: text({ mode: 'json' }).$type<Partial<Record<QuartzTableKey, string>>>().notNull(),
     schedName: text().notNull(),
     displayName: text().notNull(),
     /** 선택 테이블·컬럼 존재 여부 (SIMPROP_TRIGGERS, FIRED_TRIGGERS.SCHED_TIME 등) */
-    features: text({ mode: 'json' }).$type<Record<string, boolean>>().notNull(),
+    features: text({ mode: 'json' }).$type<QuartzFeatures>().notNull(),
     boolFormat: text({ enum: BOOL_FORMATS }).notNull(),
     misfireThresholdMs: integer().notNull().default(60_000),
     overdueGraceMs: integer().notNull().default(60_000),

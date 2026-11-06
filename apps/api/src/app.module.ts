@@ -6,12 +6,14 @@ import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { ApiExceptionFilter } from './common/api-exception.filter.js';
 import { ClockModule } from './common/clock.module.js';
+import { ConnectionsModule } from './connections/connections.module.js';
 import { ConfigModule } from './config/config.module.js';
 import type { AppConfig } from './config/env.js';
 import { CryptoModule } from './crypto/crypto.module.js';
 import { HealthController } from './health/health.controller.js';
 import { httpLoggerParams } from './logging/http-logger.js';
 import { MetaDbModule } from './meta-db/meta-db.module.js';
+import { TargetsModule } from './targets/targets.module.js';
 
 export interface AppModuleOptions {
   /**
@@ -35,6 +37,8 @@ export class AppModule {
         MetaDbModule.forRoot({ dataDir: config.dataDir }),
         AuditModule,
         AuthModule,
+        TargetsModule,
+        ConnectionsModule,
       ],
       controllers: [HealthController],
       providers: [{ provide: APP_FILTER, useClass: ApiExceptionFilter }],

@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.11 (B-12 자동 감지 반영) |
+| 문서 버전 | v0.12 (B-13 접속·스케줄러 관리 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -25,6 +25,7 @@
 | v0.9 | 2026-11-06 | B-11(S3): §5.2 풀 구현 방식(직접 관리, 연결 중 자리 유지, 끊긴 커넥션 폐기, 강제 시간 제한)과 oracledb 설정, §5.3 Oracle 바인드를 `:p1`로 변경, §5.4 `readTime`, §5.6 오류 분류 추가, §12.3 S3 완료 |
 | v0.10 | 2026-11-06 | §12.2: MVP 기능 개발 동안 PR CI 중지(main 머지 후와 수동 실행만) |
 | v0.11 | 2026-11-06 | B-12: §5.5 자동 감지 세부 규칙(스키마 해석, prefix 후보 거르기, 대소문자 매칭, Quartz 1.x 제외, 기능 키, 불리언 판정 순서, 권한 점검의 문장별 ROLLBACK, Oracle 23 `ORA-41900`)과 감지 결과 형식 확정 |
+| v0.12 | 2026-11-06 | B-13: §5.7 접속·스케줄러 관리 API 추가, §5.6 HTTP 상태 확정, §12.1 손 확인용 테스트베드(`testbed:up`) 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -353,7 +354,7 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 
 드라이버 오류는 어댑터가 `TargetError`로 바꿉니다. 코드는 `@qa/shared`의 `TARGET_ERROR_CODES`이고 API 오류 코드에도 포함됩니다. 화면 문구는 코드마다 고정된 한국어이며, 드라이버 원문은 쓰지 않습니다.
 
-| 코드 | 뜻 | Oracle 예 | 재시도 | HTTP(예정) |
+| 코드 | 뜻 | Oracle 예 | 재시도 | HTTP |
 | --- | --- | --- | --- | --- |
 | `TARGET_UNREACHABLE` | 호스트·포트·서비스에 닿지 못함, 커넥션 끊김 | `NJS-503`, `NJS-511`, `NJS-518`, `NJS-500`, `ORA-12514`, `ECONNREFUSED` | 가능 | 502 |
 | `TARGET_AUTH_FAILED` | 인증 실패, 계정 잠김·만료, `CREATE SESSION` 없음 | `ORA-01017`, `ORA-28000`, `ORA-28001`, `ORA-01045`, `NJS-116` | 불가 | 502 |
@@ -364,7 +365,38 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 
 - `TargetError`에는 원래 드라이버 오류를 `cause`로 붙이지 않습니다. 로거가 `cause`를 그대로 직렬화하면 접속 문자열이 로그에 남기 때문입니다. 대신 `driverCode`(`ORA-01017` 같은 코드)와 `detail`(접속 정보를 지운 원문, 500자 이내)을 남깁니다. `detail`은 서버 로그용이고 API 응답에는 넣지 않습니다.
 - 접속 정보 제거(`redactConnectionInfo`): 그 접속의 호스트, 계정, 비밀번호, 서비스·SID·DB 이름을 값으로 찾아 지우고, 드라이버 메시지 형식(`host X port N`, `(HOST=…)`, `CONNECTION_ID=…`, IP 주소, `ENOTFOUND <host>`, `user "<name>"`)도 지웁니다. 포트는 `:`·공백·`=` 뒤에 올 때만 지워 `ORA-01521` 같은 오류 번호는 그대로 둡니다.
-- HTTP 상태 매핑은 대상 DB를 다루는 첫 API(B-13)에서 정합니다.
+- API는 `TargetError`를 위 상태 코드와 고정 문구로 응답합니다(`ApiExceptionFilter`, `apps/api/src/targets/target-api-error.ts`). 감사 기록의 `error_code`에도 같은 코드가 남습니다. 접속 정보를 지운 원문(`driverCode`, `detail`)은 `TargetsService`가 서버 로그(warn)에만 남깁니다.
+
+### 5.7 접속·스케줄러 관리 API (FR-CON)
+
+로그인한 사용자는 모두 쓸 수 있습니다(PRD 권한 모델). 상태를 바꾸는 요청은 모두 감사 로그에 남기고(`connection.*`, `scheduler.*`), 비밀번호는 요청으로만 받아 응답·감사 기록·로그 어디에도 넣지 않습니다(FR-CON-06). 요청 스키마와 응답 타입은 `@qa/shared`의 `connections.ts`입니다.
+
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| GET | `/connections` | 접속 목록. 등록한 스케줄러 수 포함 |
+| POST | `/connections/test` | 저장 전 연결 테스트(FR-CON-02). 실패도 200으로 `{ ok: false, code, message }`를 돌려준다 |
+| GET | `/connections/:id` | 접속 하나 |
+| POST | `/connections` | 접속 등록(FR-CON-01) |
+| PUT | `/connections/:id` | 접속 수정(FR-CON-05). 전체 값을 보내고, `password`를 비우면 기존 값을 쓴다 |
+| GET | `/connections/:id/delete-impact` | 삭제 영향(스케줄러, 알림 규칙 수, 열린 알림 수) |
+| DELETE | `/connections/:id` | 접속 삭제. 하위 스케줄러·알림 규칙·알림·스냅샷은 외래키 cascade로 함께 지워진다 |
+| POST | `/connections/:id/detect` | 감지·재감지(FR-CON-03, 05). 후보 목록과 등록 여부를 돌려준다 |
+| GET | `/connections/:id/schedulers` | 이 접속에 등록한 스케줄러 |
+| POST | `/connections/:id/schedulers` | 감지한 후보를 스케줄러로 등록(`selections: [{ prefix, schedName, displayName? }]`) |
+| GET | `/schedulers/:id` | 스케줄러 하나(설정과 감지 정보). 조회 화면용 필드는 B-14·B-16에서 늘린다 |
+| PUT | `/schedulers/:id/settings` | 감시 설정(FR-CON-07) |
+| GET | `/schedulers/:id/delete-impact` | 등록 해제 영향 |
+| DELETE | `/schedulers/:id` | 등록 해제. 대상 DB의 Quartz 데이터는 건드리지 않는다 |
+
+- **입력 검증**: 지금은 `SUPPORTED_DB_KINDS`(Oracle)만 받습니다. Oracle은 서비스 이름과 SID 중 정확히 하나, 다른 DB는 DB 이름이 필요합니다. 호스트·서비스 이름·SID는 접속 기술자를 깨뜨리는 문자(괄호, 등호, 공백)를 받지 않습니다. 환경 라벨은 소문자로 맞추고(`prod`, `stage`, `dev`), 태그는 10개·30자까지이며 중복을 없앱니다. 접속 이름은 고유합니다(409 `CONNECTION_NAME_TAKEN`).
+- **비밀번호 저장**: §4.1대로 빈 값으로 INSERT한 뒤 같은 트랜잭션에서 행 ID를 AAD로 암호화해 UPDATE합니다.
+- **연결 테스트**: 저장하지 않은 값으로 일회용 풀(`test:<uuid>`)을 만들어 감지까지 실행하고 풀을 바로 닫습니다. 결과는 스키마, 테이블 세트 수, 후보 수, 쓰기 가능 여부입니다. 수정 화면에서 비밀번호를 비우고 `connectionId`를 주면 저장된 비밀번호로 시험합니다.
+- **수정과 풀**: 연결에 쓰는 값(DB 종류, 호스트, 포트, DB·서비스·SID, 스키마, 계정, 비밀번호)이 바뀌면 그 접속의 풀을 버리고(`TargetPoolManager.invalidate`) `write_capable`을 비웁니다. 이름·환경·태그·읽기 전용만 바꾸면 그대로 둡니다.
+- **감지와 재감지**: 결과를 그대로 돌려주면서, 이미 등록된 스케줄러(같은 prefix와 SCHED_NAME)는 테이블 이름·기능·불리언 형식·`detected_at`을 새 결과로 갱신합니다(`refreshedSchedulerIds`). 등록돼 있지만 찾지 못한 스케줄러는 `missingSchedulerIds`로 알리고 지우지 않습니다. 접속의 `write_capable`은 테이블 세트가 하나 이상이고 모두 쓰기 가능하면 true, 세트가 없으면 null입니다.
+- **등록**: 화면이 보낸 테이블 이름을 믿지 않고 서버가 다시 감지해 카탈로그로 확인한 이름만 저장합니다(NFR-SEC-02). 고른 후보가 결과에 없으면 409 `SCHEDULER_NOT_DETECTED`, 이미 등록됐으면 409 `SCHEDULER_ALREADY_REGISTERED`이며 한 요청의 등록은 모두 성공하거나 모두 실패합니다. 기대 노드 수는 감지한 활성 노드 수, 표시 이름 기본값은 SCHED_NAME(같은 이름이 여러 prefix에 있으면 `이름 (prefix)`)입니다. 기본 알림 규칙 생성(§9.2)은 B-24에서 붙입니다.
+- **감시 설정 범위**: misfire 임계값과 연체 유예 1초~1시간(유예 ≥ 임계값, §9.2), 체크인 배수 2~20, 기대 노드 수 0~100, 감시 주기 15~3600초.
+- **감사 기록**: `connection.create/update/delete`는 접속 값(비밀번호 제외)을 before/after로, 수정은 `passwordChanged`를 남깁니다. `connection.detect`는 세트별 prefix·쓰기 가능 여부·후보 이름과 갱신·누락 ID를, `scheduler.register`는 등록한 스케줄러 목록을, `scheduler.update`는 설정 전후를 남깁니다. 대상 DB 오류로 실패하면 `error_code`에 `TARGET_*` 코드가 남습니다.
+- **화면**(`apps/web`): 목록 `/connections`, 추가 `/connections/new`, 상세 `/connection?id=`(정보, 등록한 스케줄러, 감지·등록 패널), 수정 `/connection/edit?id=`. 새 접속을 저장하면 상세 화면으로 가서 바로 감지합니다(`&detect=1`). 삭제와 등록 해제는 영향 범위를 보여 준 뒤 확인합니다.
 
 ## 6. Quartz 로직 이식 (`@qa/core`)
 
@@ -774,6 +806,8 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 - `core-vectors` 서브커맨드가 §6.2의 벡터(cron, 트리거, 타임존, properties)를 만듭니다. `cron-vectors` 서브커맨드는 cron만 만듭니다. 입력은 (cron, 타임존, 기준 시각 목록), 출력은 조합마다 다음 실행 시각 20개(epoch ms와 해당 타임존 ISO-8601)입니다. 잘못된 표현식은 Quartz 오류 메시지를, 모르는 타임존은 Java가 실제로 쓴 ID(`GMT`)를 함께 남깁니다.
 
 통합 테스트 헬퍼는 `packages/store/test/support/`에 있고 `pnpm test:integration`(Docker 필요)으로 돕니다. 단위 테스트(`pnpm test`)와는 분리돼 있습니다.
+
+화면이나 API를 손으로 확인할 때는 `pnpm --filter @qa/store testbed:up`으로 Oracle Free 23과 2노드 클러스터(잡 2개)를 띄웁니다. 접속 정보는 `packages/store/.testbed.json`에 쓰이고, 같은 위치에 `.testbed.stop` 파일을 만들거나 `QA_TESTBED_MINUTES`(기본 120)분이 지나면 끝납니다(두 파일은 git 제외 대상). CI에서는 돌리지 않습니다.
 
 | 헬퍼 | 내용 |
 | --- | --- |

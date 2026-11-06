@@ -33,13 +33,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { api, isApiError } from '@/lib/api';
 import { describeActor, describeTarget } from '@/lib/audit';
 import { formatDateTime } from '@/lib/format';
+import { parseId } from '@/lib/navigation';
 import { auditActionLabel } from '@/lib/labels';
-
-/** `?id=` 값. 양의 정수가 아니면 null */
-export function parseId(raw: string | null): number | null {
-  if (!raw || !/^[1-9]\d{0,15}$/.test(raw)) return null;
-  return Number(raw);
-}
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
