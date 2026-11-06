@@ -1,4 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
+import { AuthModule } from './auth/auth.module.js';
+import { ApiExceptionFilter } from './common/api-exception.filter.js';
 import { ConfigModule } from './config/config.module.js';
 import type { AppConfig } from './config/env.js';
 import { CryptoModule } from './crypto/crypto.module.js';
@@ -14,7 +17,9 @@ export class AppModule {
         ConfigModule.forRoot(config),
         CryptoModule,
         MetaDbModule.forRoot({ dataDir: config.dataDir }),
+        AuthModule,
       ],
+      providers: [{ provide: APP_FILTER, useClass: ApiExceptionFilter }],
     };
   }
 }

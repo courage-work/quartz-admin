@@ -42,6 +42,15 @@ pnpm --filter @qa/api cli gen-key   # 출력값을 .env의 QA_ENCRYPTION_KEYS에
 
 환경변수 전체 목록은 [TRD §11.2](docs/TRD.md)에 있습니다. 값이 잘못되면 어떤 변수가 왜 틀렸는지 출력하고 기동하지 않습니다.
 
+Windows에 Visual Studio C++ 빌드 도구가 없으면 `pnpm install`이 better-sqlite3의 `node-gyp` 단계에서 실패합니다. better-sqlite3에는 Windows용 사전 빌드 바이너리가 들어 있으므로 `pnpm install --ignore-scripts`로 설치하면 됩니다.
+
+## 로그인과 사용자
+
+- 처음 기동할 때 `users` 테이블이 비어 있으면 `QA_ADMIN_USERNAME`, `QA_ADMIN_PASSWORD`로 관리자를 만듭니다. 계정이 하나라도 있으면 이 값은 쓰지 않습니다.
+- 사용자 추가, 비활성화, 비밀번호 초기화는 관리자만 할 수 있습니다. 로그인 실패가 5번 이어지면 계정이 15분 동안 잠기고, 관리자가 비밀번호를 초기화하면 바로 풀립니다.
+- 세션은 30분 동안 요청이 없거나(`QA_SESSION_IDLE_MIN`) 로그인 후 12시간이 지나면 만료됩니다.
+- 상태를 바꾸는 API 요청에는 `Origin`(= `QA_PUBLIC_URL`)과 `X-QA-Request: 1` 헤더가 필요합니다. 직접 호출할 때는 두 헤더를 붙이세요.
+
 ## 암호화 키 교체
 
 대상 DB 비밀번호와 알림 웹훅 URL은 `QA_ENCRYPTION_KEYS`의 키로 AES-256-GCM 암호화해 저장합니다.
@@ -75,7 +84,7 @@ apps/
   api/        NestJS API. 빌드 시 web 정적 결과물을 함께 서빙 (B-06)
   web/        Next.js 관리 UI (output: 'export')
 packages/
-  shared/     API DTO, 공통 상수 (@qa/shared)
+  shared/     API DTO, zod 요청 스키마, 오류 코드, 공통 상수 (@qa/shared)
   core/       I/O 없는 Quartz 로직: cron 이식, 트리거 계산 (@qa/core)
   store/      대상 DB 접근: QuartzDialect, 자동 감지, 조회·명령 (@qa/store)
               test/support: Testcontainers 통합 테스트 헬퍼

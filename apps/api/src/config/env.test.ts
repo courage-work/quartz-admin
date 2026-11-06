@@ -123,8 +123,15 @@ describe('loadConfig', () => {
       'QA_ADMIN_PASSWORD: QA_ADMIN_USERNAME과 QA_ADMIN_PASSWORD는 함께 지정해야 합니다',
     ]);
     expect(
-      loadConfig({ ...base, QA_ADMIN_USERNAME: 'admin', QA_ADMIN_PASSWORD: 'pw' }).admin,
-    ).toEqual({ username: 'admin', password: 'pw' });
+      loadConfig({ ...base, QA_ADMIN_USERNAME: ' Admin ', QA_ADMIN_PASSWORD: 'long-enough' }).admin,
+    ).toEqual({ username: 'admin', password: 'long-enough' });
+  });
+
+  it('초기 관리자에도 화면과 같은 아이디·비밀번호 규칙을 적용한다', () => {
+    expect(issuesOf({ ...base, QA_ADMIN_USERNAME: 'a!', QA_ADMIN_PASSWORD: 'short' })).toEqual([
+      'QA_ADMIN_USERNAME: 아이디는 영문, 숫자, ., _, @, -로 된 3~64자여야 합니다',
+      'QA_ADMIN_PASSWORD: 비밀번호는 8자 이상이어야 합니다',
+    ]);
   });
 
   it('SMTP 변수를 하나라도 쓰면 호스트와 발신 주소가 필요하다', () => {

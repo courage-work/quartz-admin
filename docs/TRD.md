@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.2 (스파이크 S1 반영) |
-| 작성일 | 2026-11-05 |
+| 문서 버전 | v0.3 (B-04 인증 반영) |
+| 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
 | 후속 문서 | 백로그(`docs/BACKLOG.md`) |
@@ -16,6 +16,7 @@
 | --- | --- | --- |
 | v0.1 | 2026-11-05 | 초안 |
 | v0.2 | 2026-11-05 | 스파이크 S1(B-08): Quartz 2.3.2, 2.5.2 소스와 대조해 §5.4, §7.1~7.6, §9.2를 확정하고 부록 A(상태 전이 테스트 케이스)를 추가 |
+| v0.3 | 2026-11-06 | B-04: §1 API 행(nestjs-zod 대신 자체 `ZodPipe`), §2.3 API 공통 규칙 추가, §4.2·§4.3 인증·세션·CSRF 세부 규칙 확정, §11.2 초기 관리자·프록시 규칙 보완 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -30,7 +31,7 @@ Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니
 | 레포 구조 | pnpm workspace 모노레포 + Turborepo, 버전은 pnpm catalog로 한 곳에서 관리 | UI, API, 공유 타입, Quartz 로직을 패키지로 분리해 단독 테스트 |
 | 관리 UI | Next.js 16(App Router) 정적 export(SPA) | 단일 컨테이너, 같은 오리진 |
 | UI 구성 | shadcn/ui(Radix + Tailwind), TanStack Query, TanStack Table(가상 스크롤), react-hook-form + zod | 관리 화면에 필요한 표, 폼, 대화상자를 빠르게 구성 |
-| API | NestJS 12, REST(`/api/v1`), zod 스키마 공유(nestjs-zod), OpenAPI 자동 생성 | 1인 개발에서 타입을 한 곳에서만 관리 |
+| API | NestJS 12, REST(`/api/v1`), `@qa/shared`의 zod 스키마를 자체 `ZodPipe`로 검증 | 1인 개발에서 타입을 한 곳에서만 관리. nestjs-zod 5.5는 peer가 NestJS `^10 \|\| ^11`이라 쓰지 않으며, OpenAPI 자동 생성은 nestjs-zod가 NestJS 12를 지원하면 다시 검토 |
 | 메타데이터 저장소 | SQLite(better-sqlite3) + Drizzle ORM, drizzle-kit 마이그레이션 | 설계 검토 결정. 나중에 PostgreSQL로 전환 가능 |
 | 대상 DB 드라이버 | `oracledb`(Thin 모드), `pg`, `mysql2`(MySQL과 MariaDB 공용) | ORM을 쓰지 않고 `QuartzDialect`로 차이를 흡수 |
 | cron 계산 | Quartz `CronExpression`을 TypeScript로 이식, 타임존은 Luxon | Quartz와 결과가 같아야 함(PRD R2) |
@@ -89,6 +90,13 @@ quartz-admin/
 - 런타임 ID가 들어가는 동적 라우트(`/schedulers/[id]`)는 정적 export로 만들 수 없습니다. 그래서 **ID를 쿼리 파라미터로 전달**합니다. 예: `/scheduler?id=12&tab=triggers`, `/connection?id=3`.
 - 서버 컴포넌트에서 데이터를 가져오거나 Next 미들웨어를 쓰지 않습니다. 인증 확인은 클라이언트에서 `GET /api/v1/auth/me`로 합니다. 실제 접근 통제는 API가 맡습니다.
 - NestJS는 `/api/*` 이외의 경로 중 파일이 없는 요청에 해당 HTML(`*.html`) 또는 `404.html`을 돌려줍니다.
+
+### 2.3 API 공통 규칙
+
+- 요청 본문은 `@qa/shared`의 zod 스키마로 검증합니다(`apps/api/src/common/zod.pipe.ts`). 실패하면 400 `VALIDATION_FAILED`와 필드별 `details`를 돌려주고, 입력값은 응답에 넣지 않습니다.
+- 오류 응답 본문은 모두 `ApiErrorBody { code, message, details? }`입니다(`@qa/shared` `errors.ts`). 화면은 `code`로 분기하고 `message`(한국어)를 그대로 보여줍니다. 없는 경로나 깨진 JSON 같은 Nest 기본 예외도 같은 형식으로 바꾸고, 처리하지 못한 예외는 내부 정보 없이 500 `INTERNAL_ERROR`로 응답합니다(`ApiExceptionFilter`).
+- 모든 API는 기본적으로 로그인이 필요합니다. 예외 경로에만 `@Public()`, 관리자 전용 경로에는 `@AdminOnly()`를 붙입니다.
+- 시각을 다루는 서비스는 `Date.now()` 대신 `CLOCK`을 주입받습니다. 테스트에서 만료와 잠금을 시간 이동으로 검증하기 위해서입니다.
 
 ## 3. 메타데이터 저장소 (SQLite)
 
@@ -159,18 +167,36 @@ quartz-admin/
 
 ### 4.2 인증과 세션 (FR-USR)
 
-- 비밀번호는 argon2id로 해시합니다(memory 19MiB, iterations 2, parallelism 1, OWASP 권장값).
-- 세션 쿠키 `qa_sid`는 32바이트 난수이며 `HttpOnly; Secure; SameSite=Strict; Path=/`로 설정합니다. 로컬 HTTP 개발 환경에서만 `Secure`를 끕니다.
-- 유휴 만료는 30분(`QA_SESSION_IDLE_MIN`), 절대 만료는 12시간입니다.
-- 로그인 실패가 5회 이어지면 계정을 15분 동안 잠급니다. 로그인 API는 IP당 분당 10회로 제한합니다.
-- 초기 관리자: `users` 테이블이 비어 있을 때만 `QA_ADMIN_USERNAME`과 `QA_ADMIN_PASSWORD`로 관리자를 만듭니다.
-- 인증 계층은 `AuthProvider` 인터페이스(`authenticate(credentials) → UserIdentity`) 뒤에 둡니다. 후속 OIDC 지원을 위한 구조입니다(FR-USR-06).
+- 비밀번호는 argon2id로 해시합니다(memory 19MiB, iterations 2, parallelism 1, OWASP 권장값). 길이는 8~256자입니다. 상한은 아주 긴 입력으로 해시 계산 부하를 일으키는 요청을 막기 위한 것입니다.
+- 아이디는 앞뒤 공백을 지우고 소문자로 맞춰 저장·비교합니다. 영문, 숫자, `.`, `_`, `@`, `-`로 된 3~64자입니다.
+- 세션 쿠키 `qa_sid`는 32바이트 난수(base64url)이며 `HttpOnly; Secure; SameSite=Strict; Path=/`로 설정합니다. 만료 시각을 넣지 않은 세션 쿠키라 브라우저를 닫으면 사라집니다. `QA_PUBLIC_URL`이 `http://`일 때(로컬 개발)만 `Secure`를 끕니다.
+- DB `sessions.id`에는 토큰의 SHA-256만 저장합니다. 로그인하면 요청에 붙어 온 이전 세션을 지우고 새로 발급합니다.
+- 유휴 만료는 30분(`QA_SESSION_IDLE_MIN`), 절대 만료는 12시간입니다. `expires_at`에는 둘 중 이른 시각을 넣고 인증된 요청마다 다시 계산합니다. 만료된 세션은 조회 시점에 바로 무효가 되고, 남은 행은 일일 보존 정리(§3.3)가 지웁니다.
+- 로그인 실패가 5회 이어지면 계정을 15분 동안 잠그고 실패 횟수를 0으로 되돌립니다. 성공하면 실패 횟수를 0으로 되돌립니다. 잠긴 동안의 시도는 비밀번호를 확인하지 않고 423 `ACCOUNT_LOCKED`로 거부하며 횟수에 넣지 않습니다.
+- 없는 아이디, 비활성 계정, 틀린 비밀번호는 모두 401 `INVALID_CREDENTIALS`로 같게 응답합니다. 없는 아이디도 더미 해시와 비교해 응답 시간을 맞춥니다.
+- 로그인 API는 IP당 분당 10회로 제한합니다(429 `RATE_LIMITED`, `Retry-After`). 단일 프로세스이므로 메모리의 고정 창 카운터를 씁니다. 재시작하면 초기화되지만 계정 잠금은 DB에 남습니다.
+- 세션 무효화: 비활성화하면 그 사용자의 세션을 모두, 관리자가 비밀번호를 초기화하면 모두(잠금도 해제), 본인이 비밀번호를 바꾸면 현재 세션만 남기고 지웁니다. 비활성 사용자의 세션은 남아 있더라도 인증 시 거부합니다.
+- 본인 계정은 비활성화할 수 없습니다(409 `OPERATION_NOT_ALLOWED`). 호출자는 항상 활성 관리자이므로 활성 관리자가 0명이 되는 일도 없습니다.
+- 초기 관리자: `users` 테이블이 비어 있을 때만 `QA_ADMIN_USERNAME`과 `QA_ADMIN_PASSWORD`로 관리자를 만듭니다. 계정이 있으면 이 값을 쓰지 않습니다(비밀번호를 바꿔 다시 기동해도 기존 계정은 그대로).
+- 인증 계층은 `AuthProvider` 인터페이스(`authenticate(credentials) → UserIdentity`) 뒤에 둡니다. 후속 OIDC 지원을 위한 구조입니다(FR-USR-06). 지금 구현은 `LocalAuthProvider`이고, 세션 발급과 권한 확인은 공급자와 무관하게 `SessionsService`와 전역 가드가 맡습니다.
+- API(관리자 전용은 *로 표시)
+
+  | 메서드 | 경로 | 설명 |
+  | --- | --- | --- |
+  | POST | `/auth/login` | 로그인. 본인 정보(`MeResponse`)와 세션 쿠키 |
+  | POST | `/auth/logout` | 로그아웃. 세션이 없어도 쿠키를 지우고 204 |
+  | GET | `/auth/me` | 본인 정보. 화면의 로그인 확인용(§2.2) |
+  | PUT | `/auth/password` | 본인 비밀번호 변경(`currentPassword`, `newPassword`) |
+  | GET | `/users`* | 사용자 목록(비밀번호 해시 제외, 잠금 해제 시각 포함) |
+  | POST | `/users`* | 사용자 추가(`username`, `password`, `isAdmin`) |
+  | PATCH | `/users/:id`* | 활성/비활성 전환(`isActive`) |
+  | POST | `/users/:id/reset-password`* | 비밀번호 초기화 |
 
 ### 4.3 웹 보안 (NFR-SEC-04)
 
-- CSRF: 상태를 바꾸는 요청(POST/PUT/PATCH/DELETE)은 `Origin` 헤더가 `QA_PUBLIC_URL`과 같고 `X-QA-Request: 1` 헤더가 있어야 받습니다. `SameSite=Strict`와 함께 이중으로 방어합니다.
-- helmet으로 CSP(`default-src 'self'`), `X-Content-Type-Options`, `Referrer-Policy` 등을 설정합니다.
-- TLS는 앞단 리버스 프록시에서 종단하는 것을 기본으로 합니다. 이때 `QA_TRUST_PROXY=1`로 실제 클라이언트 IP를 감사 로그에 남깁니다.
+- CSRF: 상태를 바꾸는 요청(GET/HEAD/OPTIONS 이외)은 `Origin` 헤더가 `QA_PUBLIC_URL`의 origin과 같고 `X-QA-Request: 1` 헤더가 있어야 받습니다. `Origin`이 없어도 거부합니다. 로그인 요청에도 적용해 로그인 CSRF를 막습니다. 실패하면 403 `CSRF_REJECTED`입니다. `SameSite=Strict`와 함께 이중으로 방어합니다. 전역 가드 순서는 CSRF 검사 → 인증·권한입니다.
+- helmet 기본값으로 CSP(`default-src 'self'`), `X-Content-Type-Options`, `Referrer-Policy: no-referrer` 등을 설정하고 `X-Powered-By`를 뺍니다(`apps/api/src/app.setup.ts`). Next.js 정적 export가 넣는 인라인 스크립트는 기본 CSP에 막히므로, B-06에서 화면을 서빙할 때 CSP를 조정합니다.
+- TLS는 앞단 리버스 프록시에서 종단하는 것을 기본으로 합니다. 이때 `QA_TRUST_PROXY=1`로 실제 클라이언트 IP를 감사 로그와 로그인 속도 제한에 씁니다. 프록시는 한 단계만 신뢰합니다(Express `trust proxy` = 1). 클라이언트가 보낸 `X-Forwarded-For`로 IP를 속일 수 없게 하기 위해서입니다.
 
 ### 4.4 대상 DB 접근 통제 (NFR-SEC-02)
 
@@ -605,7 +631,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 - 검증은 `apps/api/src/config/env.ts`(zod)가 기동 시 한 번 합니다. 결과 `AppConfig`는 DI(`APP_CONFIG`)로만 전달하고, 모듈은 `process.env`를 직접 읽지 않습니다.
 - 잘못된 값은 변수별 원인을 모아 한 번에 출력하고 종료합니다(exit 1, 스택 트레이스 없음). 메시지에 키 값은 넣지 않습니다.
-- 빈 문자열은 지정하지 않은 것으로 봅니다. `QA_ADMIN_USERNAME`과 `QA_ADMIN_PASSWORD`는 함께 지정해야 합니다. `QA_SMTP_*`를 하나라도 쓰면 `QA_SMTP_HOST`와 `QA_SMTP_FROM`이 필요합니다(포트 기본값 587).
+- 빈 문자열은 지정하지 않은 것으로 봅니다. `QA_ADMIN_USERNAME`과 `QA_ADMIN_PASSWORD`는 함께 지정해야 하고, 화면에서 만드는 계정과 같은 아이디·비밀번호 규칙(§4.2)을 따릅니다. `QA_SMTP_*`를 하나라도 쓰면 `QA_SMTP_HOST`와 `QA_SMTP_FROM`이 필요합니다(포트 기본값 587).
 - `start`, `dev`, `cli` 스크립트는 `node --env-file-if-exists=.env`로 실행합니다. 로컬 개발에서는 `apps/api/.env`를 쓰고(`.env.example` 참고), 이미 설정된 환경변수가 우선합니다.
 - `cli backup`은 암호화 키 없이 `QA_DATA_DIR`만 읽습니다.
 
