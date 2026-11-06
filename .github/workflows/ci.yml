@@ -1,9 +1,12 @@
 name: CI
 
+# MVP 기능 개발 동안은 PR마다 돌리지 않는다(실행 시간이 길어 개발 흐름을 막음).
+# main에 머지되면 돌고, Actions 화면에서 직접 실행할 수도 있다. PR 트리거와 브랜치 보호의
+# 필수 검사(verify)는 MVP 이후 CI/CD를 정리할 때 다시 켠다.
 on:
-  pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
