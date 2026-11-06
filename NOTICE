@@ -8,5 +8,12 @@ Third-party notices
 Files ported from third-party projects keep their original copyright and
 license headers. Each such project is listed below with its license.
 
-(No ported third-party code yet. Quartz Scheduler, Apache License 2.0, will
-be listed here when packages/core ports CronExpression; see docs/BACKLOG.md B-10.)
+Quartz Scheduler (https://github.com/quartz-scheduler/quartz)
+  Copyright Terracotta, Inc. (portions copyright IBM Corp.)
+  Licensed under the Apache License, Version 2.0
+  (http://www.apache.org/licenses/LICENSE-2.0).
+
+  Ported to TypeScript from Quartz 2.3.2, with modifications:
+    packages/core/src/cron/quartz-cron-expression.ts  org.quartz.CronExpression
+    packages/core/src/triggers/cron-trigger.ts        org.quartz.impl.triggers.CronTriggerImpl
+    packages/core/src/triggers/simple-trigger.ts      org.quartz.impl.triggers.SimpleTriggerImpl

@@ -28,7 +28,7 @@ import org.quartz.CronExpression;
  *
  * <p>{@code from}은 ISO-8601 문자열이나 epoch ms이고, 하나만 줄 때는 배열이 아니어도 된다. 결과는 (case, from) 조합마다 하나씩
  * 나오며 {@code next}는 epoch ms, {@code nextLocal}은 해당 타임존의 ISO-8601 문자열이다. 표현식이 잘못되면 case마다 {@code
- * error}에 Quartz의 오류 메시지를 담는다.
+ * error}에 Quartz의 오류 메시지를, 파싱은 되지만 계산 중 예외가 나면 {@code runtimeError}에 예외 이름을 담는다.
  */
 public final class CronVectors {
 
@@ -89,14 +89,19 @@ public final class CronVectors {
       ArrayNode nextLocal = r.putArray("nextLocal");
       ZoneId zone = tz.toZoneId();
       Date cursor = new Date(from);
-      for (int i = 0; i < count; i++) {
-        cursor = expr.getTimeAfter(cursor);
-        if (cursor == null) {
-          break;
+      try {
+        for (int i = 0; i < count; i++) {
+          cursor = expr.getTimeAfter(cursor);
+          if (cursor == null) {
+            break;
+          }
+          next.add(cursor.getTime());
+          nextLocal.add(
+              DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(cursor.toInstant().atZone(zone)));
         }
-        next.add(cursor.getTime());
-        nextLocal.add(
-            DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(cursor.toInstant().atZone(zone)));
+      } catch (RuntimeException e) {
+        // 파싱은 통과하지만 계산에서 터지는 표현식(예: 2.3.2의 'L * * * * ?')
+        r.put("runtimeError", e.getClass().getSimpleName());
       }
       results.add(r);
     }
