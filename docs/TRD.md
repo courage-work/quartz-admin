@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.9 (B-11 `@qa/store` 기반 반영) |
+| 문서 버전 | v0.10 (MVP 동안 PR CI 중지) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -23,6 +23,7 @@
 | v0.7 | 2026-11-06 | B-07: §11.1 이미지·compose·헬스체크 세부, §11.3 로그 형식과 마스킹 확정 |
 | v0.8 | 2026-11-06 | B-10: §6 이식 범위·지원 범위(2.3.2와 2.5.x 차이)·Java Calendar 흉내·벡터 생성 방식 확정, §12.1 `core-vectors` 추가 |
 | v0.9 | 2026-11-06 | B-11(S3): §5.2 풀 구현 방식(직접 관리, 연결 중 자리 유지, 끊긴 커넥션 폐기, 강제 시간 제한)과 oracledb 설정, §5.3 Oracle 바인드를 `:p1`로 변경, §5.4 `readTime`, §5.6 오류 분류 추가, §12.3 S3 완료 |
+| v0.10 | 2026-11-06 | §12.2: MVP 기능 개발 동안 PR CI 중지(main 머지 후와 수동 실행만) |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -770,6 +771,7 @@ S2에서 확인한 사항:
 
 - Apple Silicon: Oracle XE 21과 MySQL 5.7 이미지는 amd64 전용이라 로컬에서는 에뮬레이션으로 느리게 돕니다. 로컬 기본값은 Oracle Free 23과 각 DB 최신 버전으로 두고, 전체 매트릭스는 CI(x64 러너)에서 돌립니다. `gvenzl/oracle-free:23-slim-faststart`와 테스트베드 베이스 이미지는 arm64를 제공합니다.
 - CI는 GitHub Actions를 가정합니다. DB별로 잡을 나눠 병렬로 실행합니다. 지금은 `integration-oracle` 잡이 Quartz 2.3.2와 2.5.2 매트릭스로 테스트베드 이미지를 빌드하고(`QA_IT_TESTBED_IMAGE`) 통합 테스트를 돌립니다.
+- MVP 기능 개발 동안은 PR에서 CI를 돌리지 않습니다. 워크플로는 main 푸시와 수동 실행(`workflow_dispatch`)에만 돌고, main 브랜치 보호의 필수 검사(`verify`)도 해제했습니다. PR을 올리기 전에는 로컬에서 `pnpm format:check`, `build`, `lint`, `typecheck`, `test`(대상 DB 코드를 바꿨으면 `test:integration`도)를 돌립니다. MVP 이후 CI/CD를 정리할 때 PR 트리거와 필수 검사를 다시 켭니다.
 
 ### 12.3 구현 전 확인 항목 (스파이크)
 
