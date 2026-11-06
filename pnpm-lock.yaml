@@ -446,6 +446,13 @@ importers:
         version: 6.0.3
 
   packages/store:
+    dependencies:
+      '@qa/shared':
+        specifier: workspace:*
+        version: link:../shared
+      oracledb:
+        specifier: 'catalog:'
+        version: 26.0.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -456,9 +463,6 @@ importers:
       eslint:
         specifier: 'catalog:'
         version: 10.14.0(jiti@2.7.0)
-      oracledb:
-        specifier: 'catalog:'
-        version: 26.0.0
       testcontainers:
         specifier: 'catalog:'
         version: 12.2.1(bare-buffer@3.7.1)
