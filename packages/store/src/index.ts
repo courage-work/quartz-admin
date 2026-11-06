@@ -56,3 +56,16 @@ export {
   type TablePrivilege,
   type UnusableTableSet,
 } from './detect/types.js';
+export {
+  ALL_GROUPS_PAUSED,
+  getJobDetail,
+  isActiveNode,
+  listExecuting,
+  listJobs,
+  listNodes,
+  listPausedGroups,
+  listTriggers,
+  type PageResult,
+  type SchedulerViewContext,
+} from './views/views.js';
+export { LIKE_ESCAPE, containsPattern } from './views/sql.js';

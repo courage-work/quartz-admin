@@ -8,6 +8,13 @@
       "when": 1793889196664,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793974581054,
+      "tag": "0001_scheduler_table_schema",
+      "breakpoints": true
     }
   ]
 }

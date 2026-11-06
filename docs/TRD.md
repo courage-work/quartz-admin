@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.12 (B-13 접속·스케줄러 관리 반영) |
+| 문서 버전 | v0.13 (B-14 조회 API 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -26,6 +26,7 @@
 | v0.10 | 2026-11-06 | §12.2: MVP 기능 개발 동안 PR CI 중지(main 머지 후와 수동 실행만) |
 | v0.11 | 2026-11-06 | B-12: §5.5 자동 감지 세부 규칙(스키마 해석, prefix 후보 거르기, 대소문자 매칭, Quartz 1.x 제외, 기능 키, 불리언 판정 순서, 권한 점검의 문장별 ROLLBACK, Oracle 23 `ORA-41900`)과 감지 결과 형식 확정 |
 | v0.12 | 2026-11-06 | B-13: §5.7 접속·스케줄러 관리 API 추가, §5.6 HTTP 상태 확정, §12.1 손 확인용 테스트베드(`testbed:up`) 추가 |
+| v0.13 | 2026-11-06 | B-14: §8.1~8.3 조회 API 응답 형식·검색·정렬·오래된 실행 기록·JobDataMap 판정 확정, LIKE 이스케이프 문자를 `!`로 변경, §3.2 `schedulers.table_schema` 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -133,7 +134,7 @@ quartz-admin/
 | `users` | id, username(unique), password_hash, is_admin, is_active, failed_login_count, locked_until, last_login_at, created_at, updated_at | |
 | `sessions` | id(토큰의 SHA-256), user_id, ip, user_agent, created_at, last_seen_at, expires_at | 원본 토큰은 쿠키에만 존재 |
 | `connections` | id, name, db_type, host, port, database, oracle_service_name, oracle_sid, schema_name, username, password_enc, options_json(SSL 등), env_label, tags_json, read_only(사용자 지정), write_capable(감지 결과), created_by, created_at, updated_at | |
-| `schedulers` | id, connection_id(FK, cascade), table_prefix, table_names_json(실제 테이블명), sched_name, display_name, features_json(선택 컬럼·테이블 존재 여부), bool_format, misfire_threshold_ms(기본 60000), overdue_grace_ms(기본 60000), checkin_multiplier(기본 3), expected_node_count, poll_interval_sec(기본 60), muted_until, detected_at, created_at, updated_at | unique(connection_id, table_prefix, sched_name) |
+| `schedulers` | id, connection_id(FK, cascade), table_prefix, table_schema(감지한 소유 스키마), table_names_json(실제 테이블명), sched_name, display_name, features_json(선택 컬럼·테이블 존재 여부), bool_format, misfire_threshold_ms(기본 60000), overdue_grace_ms(기본 60000), checkin_multiplier(기본 3), expected_node_count, poll_interval_sec(기본 60), muted_until, detected_at, created_at, updated_at | unique(connection_id, table_prefix, sched_name) |
 | `scheduler_snapshots` | scheduler_id(PK), polled_at, db_now, clock_skew_ms, status, trigger_counts_json, node_json, executing_count, error_code, error_message, consecutive_failures | 대시보드 캐시(§8.4) |
 | `known_nodes` | scheduler_id, instance_name, first_seen_at, last_seen_at, last_checkin_time, checkin_interval | 노드 이탈 판정용 |
 | `trigger_observations` | scheduler_id, trigger_group, trigger_name, state, first_seen_at | BLOCKED 지속 시간 추적. 재시작 후에도 유지 |
@@ -393,7 +394,7 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 - **연결 테스트**: 저장하지 않은 값으로 일회용 풀(`test:<uuid>`)을 만들어 감지까지 실행하고 풀을 바로 닫습니다. 결과는 스키마, 테이블 세트 수, 후보 수, 쓰기 가능 여부입니다. 수정 화면에서 비밀번호를 비우고 `connectionId`를 주면 저장된 비밀번호로 시험합니다.
 - **수정과 풀**: 연결에 쓰는 값(DB 종류, 호스트, 포트, DB·서비스·SID, 스키마, 계정, 비밀번호)이 바뀌면 그 접속의 풀을 버리고(`TargetPoolManager.invalidate`) `write_capable`을 비웁니다. 이름·환경·태그·읽기 전용만 바꾸면 그대로 둡니다.
 - **감지와 재감지**: 결과를 그대로 돌려주면서, 이미 등록된 스케줄러(같은 prefix와 SCHED_NAME)는 테이블 이름·기능·불리언 형식·`detected_at`을 새 결과로 갱신합니다(`refreshedSchedulerIds`). 등록돼 있지만 찾지 못한 스케줄러는 `missingSchedulerIds`로 알리고 지우지 않습니다. 접속의 `write_capable`은 테이블 세트가 하나 이상이고 모두 쓰기 가능하면 true, 세트가 없으면 null입니다.
-- **등록**: 화면이 보낸 테이블 이름을 믿지 않고 서버가 다시 감지해 카탈로그로 확인한 이름만 저장합니다(NFR-SEC-02). 고른 후보가 결과에 없으면 409 `SCHEDULER_NOT_DETECTED`, 이미 등록됐으면 409 `SCHEDULER_ALREADY_REGISTERED`이며 한 요청의 등록은 모두 성공하거나 모두 실패합니다. 기대 노드 수는 감지한 활성 노드 수, 표시 이름 기본값은 SCHED_NAME(같은 이름이 여러 prefix에 있으면 `이름 (prefix)`)입니다. 기본 알림 규칙 생성(§9.2)은 B-24에서 붙입니다.
+- **등록**: 화면이 보낸 테이블 이름을 믿지 않고 서버가 다시 감지해 카탈로그로 확인한 이름만 저장합니다(NFR-SEC-02). 고른 후보가 결과에 없으면 409 `SCHEDULER_NOT_DETECTED`, 이미 등록됐으면 409 `SCHEDULER_ALREADY_REGISTERED`이며 한 요청의 등록은 모두 성공하거나 모두 실패합니다. 감지한 스키마(`table_schema`)도 함께 저장해 조회 SQL이 `"스키마"."테이블"`로 씁니다(재감지 때도 갱신). 기대 노드 수는 감지한 활성 노드 수, 표시 이름 기본값은 SCHED_NAME(같은 이름이 여러 prefix에 있으면 `이름 (prefix)`)입니다. 기본 알림 규칙 생성(§9.2)은 B-24에서 붙입니다.
 - **감시 설정 범위**: misfire 임계값과 연체 유예 1초~1시간(유예 ≥ 임계값, §9.2), 체크인 배수 2~20, 기대 노드 수 0~100, 감시 주기 15~3600초.
 - **감사 기록**: `connection.create/update/delete`는 접속 값(비밀번호 제외)을 before/after로, 수정은 `passwordChanged`를 남깁니다. `connection.detect`는 세트별 prefix·쓰기 가능 여부·후보 이름과 갱신·누락 ID를, `scheduler.register`는 등록한 스케줄러 목록을, `scheduler.update`는 설정 전후를 남깁니다. 대상 DB 오류로 실패하면 `error_code`에 `TARGET_*` 코드가 남습니다.
 - **화면**(`apps/web`): 목록 `/connections`, 추가 `/connections/new`, 상세 `/connection?id=`(정보, 등록한 스케줄러, 감지·등록 패널), 수정 `/connection/edit?id=`. 새 접속을 저장하면 상세 화면으로 가서 바로 감지합니다(`&detect=1`). 삭제와 등록 해제는 영향 범위를 보여 준 뒤 확인합니다.
@@ -625,19 +626,39 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 | GET | `/schedulers/:id/executing` | FIRED_TRIGGERS 기반 실행 중 목록 |
 
 - 잡과 트리거 키는 `/` 같은 문자를 포함할 수 있으므로 경로가 아니라 쿼리 파라미터로 받습니다.
-- 목록은 OFFSET 페이지네이션입니다. 스케줄러당 트리거 10,000개 규모면 충분합니다.
-- 상세 조회는 대상 DB에서 직접 읽고(타임아웃 10초), 응답에 `dbNow`를 넣어 화면이 데이터 기준 시각을 표시합니다(FR-VIEW-06).
+- 목록은 OFFSET 페이지네이션입니다(`page` 1부터, `size` 기본 50·최대 200). 응답은 `{ dbNow, items, total, page, size }`입니다. 스케줄러당 트리거 10,000개 규모면 충분합니다. 같은 조건의 `COUNT(*)`로 전체 개수를 함께 돌려줍니다.
+- 조회는 대상 DB에서 직접 읽습니다(조회 제한 10초). 요청마다 같은 커넥션에서 DB 현재 시각을 먼저 읽어 응답의 `dbNow`에 넣고, 화면은 이 값을 데이터 기준 시각으로 표시합니다(FR-VIEW-06). 노드 활성 판정, 경과 시간도 이 값을 기준으로 계산합니다.
+- 상태를 바꾸지 않으므로 감사 로그를 남기지 않습니다. 대상 DB 오류는 §5.6대로 응답합니다.
+- 구현: 쿼리는 `@qa/store`의 `views/`(`listNodes`, `listPausedGroups`, `listJobs`, `getJobDetail`, `listTriggers`, `listExecuting`), API는 `apps/api/src/views/`입니다. 테이블은 `TableSet`(감지한 `table_schema`와 실제 테이블 이름), 선택 컬럼은 `features_json`으로 넣고 뺍니다.
+
+| 경로 | 응답 내용 |
+| --- | --- |
+| `nodes` | 인스턴스명, 마지막 체크인 시각, 체크인 간격, 활성 여부(§9.2, 스케줄러의 `checkin_multiplier`), 마지막 체크인 후 경과 시간 |
+| `paused-groups` | 일시정지된 그룹 목록. `pauseAll` 표시 행(`_$_ALL_GROUPS_PAUSED_$_`)은 목록에서 빼고 `allPaused`로 알립니다 |
+| `jobs` | 그룹, 이름, 잡 클래스, 설명, durable, 동시 실행 금지, 데이터 갱신, 복구 요청, 트리거 수. 정렬은 그룹·이름 |
+| `jobs/detail` | 잡, 연결된 트리거 전체(목록과 같은 형식), JobDataMap 판정(§8.3). 없는 잡은 404 |
+| `triggers` | 그룹, 이름, 대상 잡, 설명, 타입, 상태, 다음·이전 실행 시각, 시작·종료 시각, 우선순위, `MISFIRE_INSTR` 원래 값, 캘린더, 일정(CRON: 표현식·타임존, SIMPLE: 반복 횟수·간격·실행 횟수, CAL_INT·DAILY_I: `SIMPROP_TRIGGERS` 원래 값) |
+| `executing` | `FIRED_TRIGGERS` 행: 엔트리 ID, 트리거·잡 키, 인스턴스, 상태(EXECUTING/ACQUIRED 등), 실행 시각, 예정 시각, 우선순위, 경과 시간, `stale` |
+
+- 시각 컬럼은 §5.4대로 `NULL`과 0 이하를 `null`로 바꿉니다. 화면은 사용자 타임존으로 표시하고 CRON 트리거의 타임존을 함께 보여 줍니다(FR-VIEW-09). `MISFIRE_INSTR`의 의미는 트리거 타입마다 달라 화면이 라벨로 바꿉니다.
+- **오래된 실행 기록**(`stale`): 활성 노드가 아닌 인스턴스의 `FIRED_TRIGGERS` 행입니다. 살아 있는 노드의 ClusterManager가 복구하기 전이거나 클러스터 전체가 내려간 경우입니다. 도구는 표시만 하고 지우지 않습니다(PRD FR-CTL-12 삭제, §13 제안 3).
 
 ### 8.2 주요 쿼리
 
-- 트리거 목록: `TRIGGERS LEFT JOIN CRON_TRIGGERS LEFT JOIN SIMPLE_TRIGGERS` (+ `SIMPROP_TRIGGERS`가 있으면 표시용으로)
-- 상태별 개수: `SELECT TRIGGER_STATE, COUNT(*) … GROUP BY TRIGGER_STATE`. Quartz 공식 스크립트의 `IDX_QRTZ_T_STATE` 인덱스를 씁니다. 인덱스가 없는 설치는 감지 단계에서 경고합니다.
-- 검색: `UPPER(TRIGGER_NAME) LIKE UPPER(?) ESCAPE '\'`. 그룹명에도 같은 방식을 씁니다.
+- 트리거 목록: `TRIGGERS t LEFT JOIN CRON_TRIGGERS LEFT JOIN SIMPLE_TRIGGERS` (+ `SIMPROP_TRIGGERS`가 있으면 표시용으로). 조인 조건은 세 키 컬럼(SCHED_NAME, TRIGGER_NAME, TRIGGER_GROUP)이며 하위 테이블의 기본키를 씁니다.
+- 필터: 상태와 타입은 `IN`(여러 개), 그룹은 **정확히 일치**(`=`)입니다. 그룹명에 `%`, `_`, `/`가 있어도 그 그룹만 찾습니다.
+- 검색: `UPPER(col) LIKE UPPER(?) ESCAPE '!'`로 부분 일치합니다. 트리거는 이름·그룹·잡 이름, 잡은 이름·그룹·클래스에 겁니다. 검색어의 `%`, `_`, `!`는 앞에 `!`를 붙여 글자 그대로 찾습니다. 이스케이프 문자를 `\`가 아니라 `!`로 정한 이유는 MySQL이 문자열 리터럴 안의 `\`를 다시 이스케이프해야 해서, DB 4종에서 같은 SQL을 쓰기 위해서입니다. 컬럼마다 바인드를 따로 씁니다(MySQL의 `?`는 번호로 다시 가리킬 수 없음).
+- 정렬: `key`는 그룹·이름, `nextFireTime`은 다음 실행 시각이 없는 트리거(`NULL`, -1)를 뒤로 보낸 뒤(`CASE WHEN NEXT_FIRE_TIME > 0 …`) 시각·그룹·이름 순입니다. 정렬 끝에 항상 키 컬럼을 둬 페이지가 겹치지 않습니다.
+- 잡의 트리거 수: `JOB_DETAILS`에서 `(SELECT COUNT(*) FROM TRIGGERS WHERE … JOB_NAME, JOB_GROUP)` 상관 서브쿼리로 셉니다(`IDX_QRTZ_T_J`). 목록에서는 `JOB_DATA`(BLOB)를 읽지 않습니다.
+- 상태별 개수: `SELECT TRIGGER_STATE, COUNT(*) … GROUP BY TRIGGER_STATE`. Quartz 공식 스크립트의 `IDX_QRTZ_T_STATE` 인덱스를 씁니다(대시보드, B-15).
+- 성능(B-14 통합 테스트, Oracle Free 23, 트리거 10,005개): 정렬·필터·검색·마지막 페이지를 섞은 목록 요청 40회가 p50 8ms, p95 17ms였습니다(DB 시각 조회 포함).
 
 ### 8.3 JobDataMap 표시 (FR-VIEW-08)
 
-- BLOB이 `0xACED`(Java 직렬화 매직 넘버)로 시작하면 "Java 직렬화 형식이라 표시할 수 없음"으로 응답합니다.
-- 그렇지 않으면 `@qa/core/props`로 파싱해 키-값 목록을 돌려줍니다. 비밀값이 들어 있을 수 있으므로 화면에서는 기본으로 값을 가리고, 펼치면 보이게 합니다.
+- BLOB이 `0xACED`(Java 직렬화 매직 넘버)로 시작하면 `java-serialized`(표시 불가)로 응답합니다. 클래스 정보 없이 읽을 수 없기 때문입니다.
+- Quartz `useProperties=true`면 `java.util.Properties` 텍스트로 저장됩니다. `@qa/core`의 `parseJavaPropertiesBytes`로 파싱해 키 순서로 정렬한 키-값 목록(`properties`)을 돌려줍니다.
+- 탭·줄바꿈·폼피드 외의 제어 문자가 있거나 파싱에 실패하면 `unreadable`, BLOB이 없으면 `empty`입니다. 어느 경우에도 원본 바이트는 돌려주지 않습니다.
+- 비밀값이 들어 있을 수 있으므로 화면에서는 기본으로 값을 가리고, 펼치면 보이게 합니다(B-16).
 
 ### 8.4 대시보드 스냅샷
 

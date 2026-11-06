@@ -51,6 +51,7 @@ export function toSchedulerDto(row: SchedulerRow): SchedulerDto {
     id: row.id,
     connectionId: row.connectionId,
     tablePrefix: row.tablePrefix,
+    tableSchema: row.tableSchema,
     schedName: row.schedName,
     displayName: row.displayName,
     tableNames: row.tableNames,
@@ -308,6 +309,7 @@ export class ConnectionsService {
         if (!set?.schedulers.some((c) => c.schedName === scheduler.schedName)) continue;
         tx.update(schedulers)
           .set({
+            tableSchema: detection.schema,
             tableNames: set.tableNames,
             features: { ...set.features },
             boolFormat: set.boolFormat,
@@ -408,6 +410,7 @@ export class ConnectionsService {
             .values({
               connectionId,
               tablePrefix: set.prefix,
+              tableSchema: detection.schema,
               tableNames: set.tableNames,
               schedName: candidate.schedName,
               displayName:

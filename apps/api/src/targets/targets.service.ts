@@ -7,6 +7,7 @@ import {
   dialectFor,
   type PoolTarget,
   type QuartzDetection,
+  type TargetConn,
   type TargetConnectInfo,
 } from '@qa/store';
 import { SecretBox, secretAad } from '../crypto/secret-box.js';
@@ -72,6 +73,19 @@ export class TargetsService implements OnApplicationShutdown {
     }
   }
 
+  /**
+   * 저장된 접속의 풀에서 커넥션을 빌려 `fn`을 실행한다(조회·감시·제어).
+   * 실패하면 접속 정보를 지운 원문을 서버 로그에 남기고 `TargetError`를 그대로 던진다.
+   */
+  async withConnection<T>(row: ConnectionRow, fn: (conn: TargetConn) => Promise<T>): Promise<T> {
+    try {
+      return await this.pools.withConnection(this.target(row), fn);
+    } catch (err) {
+      this.logTargetError(row.id, err);
+      throw err;
+    }
+  }
+
   /** 접속을 고치거나 지우면 그 풀을 버린다 */
   async forget(connectionId: number): Promise<void> {
     await this.pools.invalidate(connectionId);
@@ -92,13 +106,16 @@ export class TargetsService implements OnApplicationShutdown {
         this.detector(conn, dialect, { schema }),
       );
     } catch (err) {
-      if (err instanceof TargetError) {
-        // 접속 정보를 지운 원문만 남긴다 (TRD §5.6)
-        this.logger.warn(
-          `대상 DB 감지 실패 (${String(target.id)}): ${err.code} ${err.driverCode ?? ''} ${err.detail ?? ''}`.trim(),
-        );
-      }
+      this.logTargetError(target.id, err, '감지');
       throw err;
     }
+  }
+
+  /** 접속 정보를 지운 원문만 남긴다 (TRD §5.6) */
+  private logTargetError(id: string | number, err: unknown, what = '접근'): void {
+    if (!(err instanceof TargetError)) return;
+    this.logger.warn(
+      `대상 DB ${what} 실패 (${String(id)}): ${err.code} ${err.driverCode ?? ''} ${err.detail ?? ''}`.trim(),
+    );
   }
 }

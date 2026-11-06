@@ -3,7 +3,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   OracleAdapter,
   TargetPoolManager,
+  createTableSet,
   detectQuartz,
+  listNodes,
+  listTriggers,
   oracleDialect,
   queryDbNowMillis,
   type DetectedTableSet,
@@ -271,6 +274,42 @@ describe(`자동 감지 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
     expect(qrtz.writeCapable).toBe(false);
     expect(qrtz.missingPrivileges).toEqual([
       { table: 'LOCKS', privilege: 'UPDATE', driverCode: PRIVILEGE_ERROR },
+    ]);
+  });
+
+  it('감지 결과로 만든 TableSet으로 실제 Quartz가 저장한 트리거와 노드를 조회한다 (B-14)', async () => {
+    const set = setOf(await detect(owner), 'QRTZ_');
+    const ctx = {
+      dialect: oracleDialect,
+      tables: createTableSet(oracleDialect, { schema: 'QUARTZ', tables: set.tableNames }),
+      features: set.features,
+      schedName: cluster.schedulerName,
+    };
+    const { dbNow } = await detect(owner);
+    const [triggers, nodes] = await pools.withConnection(
+      target(owner),
+      async (conn) =>
+        [
+          await listTriggers(conn, ctx, { sort: 'key', page: 1, size: 50 }),
+          await listNodes(conn, ctx, { dbNow, checkinMultiplier: 3 }),
+        ] as const,
+    );
+    expect(triggers.items).toEqual([
+      expect.objectContaining({
+        group: 'detect',
+        name: 'detect-trigger',
+        jobName: 'detect-job',
+        type: 'SIMPLE',
+        simple: {
+          repeatCount: -1,
+          repeatIntervalMs: 3_600_000,
+          timesTriggered: expect.any(Number) as number,
+        },
+      }),
+    ]);
+    expect(nodes.map((n) => [n.instanceName, n.active])).toEqual([
+      ['node-1', true],
+      ['node-2', true],
     ]);
   });
 
