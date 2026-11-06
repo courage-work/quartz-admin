@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.8 (B-10 cron 이식 반영) |
+| 문서 버전 | v0.9 (B-11 `@qa/store` 기반 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -22,6 +22,7 @@
 | v0.6 | 2026-11-06 | B-06: §2.2 화면 서빙 규칙과 개발 서버 프록시, §4.3 화면 HTML의 CSP(인라인 스크립트 해시), §10 감사 기록 단건 조회 추가 |
 | v0.7 | 2026-11-06 | B-07: §11.1 이미지·compose·헬스체크 세부, §11.3 로그 형식과 마스킹 확정 |
 | v0.8 | 2026-11-06 | B-10: §6 이식 범위·지원 범위(2.3.2와 2.5.x 차이)·Java Calendar 흉내·벡터 생성 방식 확정, §12.1 `core-vectors` 추가 |
+| v0.9 | 2026-11-06 | B-11(S3): §5.2 풀 구현 방식(직접 관리, 연결 중 자리 유지, 끊긴 커넥션 폐기, 강제 시간 제한)과 oracledb 설정, §5.3 Oracle 바인드를 `:p1`로 변경, §5.4 `readTime`, §5.6 오류 분류 추가, §12.3 S3 완료 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -245,9 +246,19 @@ quartz-admin/
 | 조회 쿼리 실행 제한 | 10초 (PG `statement_timeout`, MySQL `MAX_EXECUTION_TIME` 힌트, MariaDB `max_statement_time`, Oracle `callTimeout`) |
 | 세션 보호 | PG `idle_in_transaction_session_timeout=30s`, TCP keepalive 사용 |
 
+구현(`packages/store/src/pool-manager.ts`):
+
+- 드라이버 풀 대신 `TargetPoolManager`가 직접 관리합니다. 드라이버마다 대기 제한과 유휴 종료 방식이 달라(mysql2 풀에는 대기 제한이 없음) 4종에서 같은 규칙을 맞추기 위해서입니다. 어댑터(`DriverAdapter`)는 커넥션을 하나씩 열기만 합니다.
+- 접속마다 풀이 따로 있어서, 한 대상이 응답하지 않으면 그 접속의 요청만 기다리거나 실패합니다. 다른 접속의 요청은 영향을 받지 않습니다(NFR-REL-01).
+- 접속 정보가 바뀌었는지는 접속 정보 전체(비밀번호 포함)의 SHA-256으로 판단합니다. 접속을 수정·삭제하면 `invalidate(id)`로 풀을 버립니다. 사용 중인 커넥션은 돌려받을 때 닫습니다.
+- 연결 중인 커넥션도 개수에 넣습니다. 연결 제한을 넘기면 호출자에게는 바로 `TARGET_TIMEOUT`을 주지만, 드라이버의 연결 시도가 끝날 때까지 자리를 비우지 않습니다. 응답 없는 대상에 소켓이 계속 쌓이지 않게 하려는 것입니다.
+- `TARGET_UNREACHABLE`·`TARGET_TIMEOUT`으로 끝난 커넥션은 끊긴 것으로 보고 풀에 돌려놓지 않습니다. 커밋하지 않은 트랜잭션이 남은 커넥션은 롤백한 뒤 돌려놓습니다.
+- 유휴 커넥션을 빌려줄 때 따로 확인(ping)하지 않습니다. 대상 DB가 재시작돼 끊긴 커넥션이면 그 요청이 `TARGET_UNREACHABLE`로 한 번 실패하고, 커넥션은 버려지며 다음 요청이 새로 연결합니다.
+
 드라이버별 설정:
 
-- **oracledb**: `fetchAsBuffer = [oracledb.BLOB]`, `outFormat = OUT_FORMAT_OBJECT`. NUMBER는 JS number로 받습니다(epoch ms는 2^53 미만).
+- **oracledb**: Thin 모드. 접속은 Easy Connect(`host:port/service`), SID는 접속 기술자로 만듭니다. `connectTimeout`·`transportConnectTimeout`은 연결 제한(초), `callTimeout`은 조회 제한, `expireTime=1`(분)로 끊긴 연결을 감지합니다. BLOB은 Buffer로, 행은 객체 형식으로 받되 전역 `oracledb.fetchAsBuffer`·`outFormat`은 바꾸지 않고 쿼리마다 `fetchTypeHandler`·`outFormat`을 넘깁니다(같은 프로세스의 다른 oracledb 사용처에 영향을 주지 않기 위해). NUMBER는 JS number로 받습니다(epoch ms는 2^53 미만).
+  - S3에서 확인: Thin 모드의 `callTimeout`은 시간이 지나면 서버에 중단을 요청하고 그 응답을 기다립니다. 서버가 PL/SQL을 끝까지 실행하거나 네트워크가 멈추면 호출이 돌아오지 않습니다. 그래서 어댑터가 제한 + 1초가 지나면 드라이버 응답을 기다리지 않고 `TARGET_TIMEOUT`으로 끝내고, 그 커넥션은 버립니다.
 - **pg**: 풀마다 `types` 옵션으로 int8(OID 20)을 Number로 파싱합니다. 전역 `setTypeParser`는 쓰지 않습니다.
 - **mysql2**: `supportBigNumbers: true`, `bigNumberStrings: false`, `dateStrings: true`, `timezone: 'Z'`
 
@@ -274,7 +285,7 @@ interface QuartzDialect {
 
 | 동작 | Oracle | PostgreSQL | MySQL / MariaDB |
 | --- | --- | --- | --- |
-| 바인드 | `:1` | `$1` | `?` |
+| 바인드 | `:p1` | `$1` | `?` |
 | 식별자 | `"QRTZ_TRIGGERS"` | `"qrtz_triggers"` (감지한 실제 대소문자) | `` `QRTZ_TRIGGERS` `` |
 | 페이지네이션 | `OFFSET :n ROWS FETCH NEXT :m ROWS ONLY` | `LIMIT $m OFFSET $n` | `LIMIT ? OFFSET ?` |
 | 잠금 대기 제한 | `FOR UPDATE WAIT 5`(락 행과 대상 행 모두) | `SET LOCAL lock_timeout = '5s'` | `SET SESSION innodb_lock_wait_timeout = 5` (트랜잭션 후 원복) |
@@ -282,11 +293,14 @@ interface QuartzDialect {
 | 현재 시각(ms) | `(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400000 + TO_NUMBER(TO_CHAR(SYSTIMESTAMP,'FF3'))` | `(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint` | `ROUND(UNIX_TIMESTAMP(NOW(3)) * 1000)` |
 | 카탈로그 | `ALL_TABLES`, `ALL_TAB_COLUMNS` (OWNER) | `information_schema` (table_schema) | `information_schema` (`DATABASE()`) |
 
-Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상 트리거 행도 `SELECT … FOR UPDATE WAIT 5`로 먼저 잠근 뒤 UPDATE합니다.
+Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상 트리거 행도 `SELECT … FOR UPDATE WAIT 5`로 먼저 잠근 뒤 UPDATE합니다. 대기 초과는 Oracle 23에서 `ORA-00054`, 이전 버전에서 `ORA-30006`이며 둘 다 `LOCK_TIMEOUT`입니다.
+
+- Oracle 바인드 이름이 `:1`이 아니라 `:p1`인 이유: oracledb는 배열 바인드를 이름의 숫자가 아니라 SQL에 나온 순서대로 붙입니다. `OFFSET :2 ROWS FETCH NEXT :1 ROWS ONLY`에 `[limit, offset]`을 넘기면 둘이 뒤바뀝니다(S3에서 확인). 어댑터가 배열을 `{ p1, p2, … }` 이름 바인드로 바꿔 넘기므로 `param(n)`의 번호가 그대로 자리를 가리킵니다.
+- `TableSet`(`createTableSet`)은 감지 결과(`table_names_json`)의 실제 이름에 스키마를 붙이고 따옴표로 감싼 식별자(`"QUARTZ"."QRTZ_TRIGGERS"`)를 돌려줍니다. 필수 테이블이 빠졌거나 따옴표를 깨뜨리는 이름은 받지 않습니다.
 
 ### 5.4 Quartz 테이블 접근 규칙
 
-- 시각 컬럼(NEXT_FIRE_TIME 등)은 epoch ms입니다. 값이 없을 때 Quartz가 저장하는 값은 경로마다 다릅니다. `NEXT_FIRE_TIME`은 INSERT(`Delegate.insertTrigger`)에서는 SQL `NULL`, UPDATE(`Delegate.updateTrigger`)에서는 `-1`이고, `PREV_FIRE_TIME`은 항상 `-1`, `END_TIME`은 `0`입니다. Quartz는 읽을 때 `> 0`인 값만 유효로 봅니다(`Delegate.selectTriggerStatus`). 도구도 `NULL`과 `0` 이하를 모두 `null`로 바꿉니다.
+- 시각 컬럼(NEXT_FIRE_TIME 등)은 epoch ms입니다. 값이 없을 때 Quartz가 저장하는 값은 경로마다 다릅니다. `NEXT_FIRE_TIME`은 INSERT(`Delegate.insertTrigger`)에서는 SQL `NULL`, UPDATE(`Delegate.updateTrigger`)에서는 `-1`이고, `PREV_FIRE_TIME`은 항상 `-1`, `END_TIME`은 `0`입니다. Quartz는 읽을 때 `> 0`인 값만 유효로 봅니다(`Delegate.selectTriggerStatus`). 도구도 `NULL`과 `0` 이하를 모두 `null`로 바꿉니다(`readTime`). 이 규칙은 시각 컬럼에만 씁니다. `REPEAT_COUNT`의 -1(무한 반복)이나 `TIMES_TRIGGERED`의 0처럼 의미 있는 값을 지우지 않도록, 정수 컬럼은 `readLong`(SQL `NULL`만 `null`)으로 읽습니다.
 - 불리언 컬럼은 읽을 때만 정규화합니다. MVP의 쓰기 작업은 불리언 컬럼을 건드리지 않습니다. 새로 넣는 행은 `TRIGGERS`, `SIMPLE_TRIGGERS`, `PAUSED_TRIGGER_GRPS`, `LOCKS`뿐이고, 이 테이블들에는 불리언 컬럼이 없습니다.
 - JOB_DATA(BLOB)는 읽기만 합니다. 즉시 실행 트리거의 JOB_DATA는 `NULL`로 넣습니다. Quartz도 맵이 비어 있으면 `NULL`을 넣습니다(`Delegate.insertTrigger`의 `getJobDataMap().size() > 0` 검사).
 - Oracle에서는 빈 문자열이 NULL이 되므로, DESCRIPTION 비교는 `IS NULL`과 함께 처리합니다.
@@ -311,6 +325,23 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
    | LOCKS | SELECT, INSERT, UPDATE |
    | FIRED_TRIGGERS, SCHEDULER_STATE, CALENDARS | SELECT |
 7. **기대 노드 수 초기값**: 감지 시점의 활성 노드 수를 `expected_node_count` 초기값으로 씁니다(§9.2).
+
+### 5.6 대상 DB 오류 분류
+
+드라이버 오류는 어댑터가 `TargetError`로 바꿉니다. 코드는 `@qa/shared`의 `TARGET_ERROR_CODES`이고 API 오류 코드에도 포함됩니다. 화면 문구는 코드마다 고정된 한국어이며, 드라이버 원문은 쓰지 않습니다.
+
+| 코드 | 뜻 | Oracle 예 | 재시도 | HTTP(예정) |
+| --- | --- | --- | --- | --- |
+| `TARGET_UNREACHABLE` | 호스트·포트·서비스에 닿지 못함, 커넥션 끊김 | `NJS-503`, `NJS-511`, `NJS-518`, `NJS-500`, `ORA-12514`, `ECONNREFUSED` | 가능 | 502 |
+| `TARGET_AUTH_FAILED` | 인증 실패, 계정 잠김·만료, `CREATE SESSION` 없음 | `ORA-01017`, `ORA-28000`, `ORA-28001`, `ORA-01045`, `NJS-116` | 불가 | 502 |
+| `TARGET_TIMEOUT` | 연결 또는 쿼리 실행 제한 초과 | `NJS-510`, `NJS-123`, `ORA-01013`, 어댑터 강제 제한(§5.2) | 가능 | 504 |
+| `TARGET_BUSY` | 커넥션 대기 제한 초과(§5.2) | - | 가능 | 503 |
+| `LOCK_TIMEOUT` | 행 잠금 대기 초과 | `ORA-00054`, `ORA-30006` | 가능 | 409 |
+| `TARGET_ERROR` | 그 밖의 오류. 교착 롤백(`ORA-00060`)은 재시도 가능 | `ORA-00942` 등 | 경우에 따라 | 502 |
+
+- `TargetError`에는 원래 드라이버 오류를 `cause`로 붙이지 않습니다. 로거가 `cause`를 그대로 직렬화하면 접속 문자열이 로그에 남기 때문입니다. 대신 `driverCode`(`ORA-01017` 같은 코드)와 `detail`(접속 정보를 지운 원문, 500자 이내)을 남깁니다. `detail`은 서버 로그용이고 API 응답에는 넣지 않습니다.
+- 접속 정보 제거(`redactConnectionInfo`): 그 접속의 호스트, 계정, 비밀번호, 서비스·SID·DB 이름을 값으로 찾아 지우고, 드라이버 메시지 형식(`host X port N`, `(HOST=…)`, `CONNECTION_ID=…`, IP 주소, `ENOTFOUND <host>`, `user "<name>"`)도 지웁니다. 포트는 `:`·공백·`=` 뒤에 올 때만 지워 `ORA-01521` 같은 오류 번호는 그대로 둡니다.
+- HTTP 상태 매핑은 대상 DB를 다루는 첫 API(B-13)에서 정합니다.
 
 ## 6. Quartz 로직 이식 (`@qa/core`)
 
@@ -746,7 +777,7 @@ S2에서 확인한 사항:
 | --- | --- | --- |
 | S1 | Quartz 2.3.2 `JobStoreSupport`, `StdJDBCDelegate`, `StdRowLockSemaphore`를 읽고 §7.2와 §7.3의 상태 전이, 잠금, `rescheduleJob` 동작을 확인 | **완료**(B-08). §5.4, §7.1~7.6, §9.2, 부록 A에 반영. 2.5.2도 같은 동작 |
 | S2 | quartz-testbed와 Testcontainers 4종 DB 골격. 2노드 클러스터 기동 확인 | **완료**(B-09, Oracle). `tools/quartz-testbed`, `packages/store/test/support/`, §12.1. 나머지 3종 DB는 B-27~B-29 |
-| S3 | `oracledb` Thin 모드로 Oracle XE 21과 Free 23에 접속하고 BLOB과 NUMBER 매핑 확인 | 어댑터 프로토타입 |
+| S3 | `oracledb` Thin 모드로 Oracle XE 21과 Free 23에 접속하고 BLOB과 NUMBER 매핑 확인 | **완료**(B-11, Free 23). `@qa/store` 어댑터·풀·`QuartzDialect`, §5.2·§5.3·§5.6에 반영(배열 바인드 순서, Thin `callTimeout` 한계, Oracle 23 잠금 오류 코드). XE 21은 amd64 전용이라 CI 매트릭스(B-30)에서 확인 |
 | S4 | `CronExpression` 이식 범위와 Luxon으로 Java Calendar의 DST 처리(존재하지 않는 시각, 중복 시각)를 재현할 수 있는지 확인 | 벡터 50개 통과 프로토타입 |
 
 ## 13. PRD 변경 제안

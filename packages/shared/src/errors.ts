@@ -4,6 +4,26 @@
  * 모든 오류 응답 본문은 `ApiErrorBody`다. 화면은 `code`로 분기하고 `message`(한국어)를 그대로 보여준다.
  */
 
+/**
+ * 대상 DB(Quartz가 쓰는 DB)에 접근하다 생긴 오류 코드 (TRD §5.6). `@qa/store`가 드라이버 오류를 이 코드로 분류한다.
+ * 메시지는 코드마다 고정된 한국어 문구이고, 드라이버 원문(접속 정보 포함 가능)은 넣지 않는다.
+ */
+export const TARGET_ERROR_CODES = [
+  /** 호스트·포트·서비스에 닿지 못함, 또는 커넥션이 끊김 (502) */
+  'TARGET_UNREACHABLE',
+  /** 계정 인증 실패, 잠김, 만료, 접속 권한 없음 (502) */
+  'TARGET_AUTH_FAILED',
+  /** 연결 또는 쿼리가 실행 제한 시간을 넘김 (504) */
+  'TARGET_TIMEOUT',
+  /** 이 접속의 커넥션 2개가 모두 사용 중이고 대기 시간도 넘김 (503) */
+  'TARGET_BUSY',
+  /** 행 잠금 대기가 제한 시간을 넘김. 아무것도 바뀌지 않음 (409) */
+  'LOCK_TIMEOUT',
+  /** 그 밖의 대상 DB 오류. 교착 롤백 포함 (502) */
+  'TARGET_ERROR',
+] as const;
+export type TargetErrorCode = (typeof TARGET_ERROR_CODES)[number];
+
 export const API_ERROR_CODES = [
   /** 요청 본문·쿼리가 스키마와 맞지 않음 (400) */
   'VALIDATION_FAILED',
@@ -29,6 +49,7 @@ export const API_ERROR_CODES = [
   'RATE_LIMITED',
   /** 처리하지 못한 서버 오류 (500) */
   'INTERNAL_ERROR',
+  ...TARGET_ERROR_CODES,
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 

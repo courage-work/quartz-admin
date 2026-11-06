@@ -123,7 +123,7 @@ docker/       Dockerfile, compose.yaml, 컨테이너 스모크 테스트
 docs/         PRD, TRD, BACKLOG, DESIGN
 ```
 
-의존 방향은 `api → store → core`, `api → shared`, `web → shared`입니다.
+의존 방향은 `api → store → core`, `api → shared`, `store → shared`, `web → shared`입니다.
 
 ## 기여 방식
 
