@@ -40,3 +40,19 @@ export { OracleAdapter } from './oracle/adapter.js';
 export { oracleDialect } from './oracle/dialect.js';
 export { oracleConnectString } from './oracle/connect-string.js';
 export { createDriverAdapters, dialectFor } from './registry.js';
+export { detectQuartz, type DetectOptions } from './detect/detect.js';
+export { REQUIRED_PRIVILEGES } from './detect/privileges.js';
+export {
+  BOOL_FORMATS,
+  type BoolFormat,
+  type BoolFormatSource,
+  type DetectedTableSet,
+  type DetectionWarning,
+  type MissingPrivilege,
+  type QuartzDetection,
+  type QuartzFeatureKey,
+  type QuartzFeatures,
+  type SchedulerCandidate,
+  type TablePrivilege,
+  type UnusableTableSet,
+} from './detect/types.js';

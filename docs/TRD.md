@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.10 (MVP 동안 PR CI 중지) |
+| 문서 버전 | v0.11 (B-12 자동 감지 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -24,6 +24,7 @@
 | v0.8 | 2026-11-06 | B-10: §6 이식 범위·지원 범위(2.3.2와 2.5.x 차이)·Java Calendar 흉내·벡터 생성 방식 확정, §12.1 `core-vectors` 추가 |
 | v0.9 | 2026-11-06 | B-11(S3): §5.2 풀 구현 방식(직접 관리, 연결 중 자리 유지, 끊긴 커넥션 폐기, 강제 시간 제한)과 oracledb 설정, §5.3 Oracle 바인드를 `:p1`로 변경, §5.4 `readTime`, §5.6 오류 분류 추가, §12.3 S3 완료 |
 | v0.10 | 2026-11-06 | §12.2: MVP 기능 개발 동안 PR CI 중지(main 머지 후와 수동 실행만) |
+| v0.11 | 2026-11-06 | B-12: §5.5 자동 감지 세부 규칙(스키마 해석, prefix 후보 거르기, 대소문자 매칭, Quartz 1.x 제외, 기능 키, 불리언 판정 순서, 권한 점검의 문장별 ROLLBACK, Oracle 23 `ORA-41900`)과 감지 결과 형식 확정 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -308,14 +309,33 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 
 ### 5.5 자동 감지 (FR-CON-03, FR-CON-04)
 
-1. **테이블 탐색**: 카탈로그에서 스키마의 테이블 목록을 읽습니다. 이름을 대문자로 바꿨을 때 `<prefix>TRIGGERS`로 끝나는 테이블마다 prefix 후보를 뽑습니다.
-2. **필수 세트 확인**: prefix마다 아래 필수 테이블이 모두 있는지 대소문자 무시로 확인합니다. 있으면 실제 이름을 `table_names_json`에 기록합니다.
+구현은 `packages/store/src/detect/`(`detectQuartz`)입니다. 조회와 결과 0행 쓰기만 하고 ROLLBACK하므로 대상 행을 바꾸거나 행 잠금을 잡지 않습니다.
+
+0. **스키마**: 접속의 `schema_name`이 있으면 그 스키마, 없으면 접속 계정의 현재 스키마(Oracle `SYS_CONTEXT('USERENV','CURRENT_SCHEMA')`)를 봅니다. Oracle에서 입력한 이름 그대로는 테이블이 없고 대문자로 바꾸면 있을 수 있으므로(따옴표 없이 만든 계정은 대문자), 입력 그대로 찾아 없으면 대문자로 봅니다. 카탈로그(`ALL_TABLES`)에는 계정이 권한을 가진 테이블만 보이므로, 다른 스키마의 Quartz 테이블도 권한만 있으면 감지합니다.
+1. **테이블 탐색**: 카탈로그에서 스키마의 테이블 목록을 읽습니다. 이름을 대문자로 바꿨을 때 `TRIGGERS`로 끝나는 테이블마다 그 앞부분을 prefix 후보로 뽑습니다(prefix는 실제 대소문자 그대로, 빈 prefix도 허용). `QRTZ_SIMPLE_TRIGGERS`에서 나온 `QRTZ_SIMPLE_` 같은 가짜 후보를 버리려고 `<prefix>JOB_DETAILS`도 있는 후보만 남깁니다.
+2. **필수 세트 확인**: prefix마다 아래 테이블을 찾아 실제 이름을 `table_names_json`에 기록합니다. 먼저 `TRIGGERS` 테이블과 같은 대소문자(전부 대문자 또는 전부 소문자)로 찾고, 없으면 대소문자를 무시해 하나뿐인 이름을 씁니다. 그래서 같은 스키마에 `QRTZ_` 세트와 따옴표 소문자 `qrtz_` 세트가 함께 있어도 섞이지 않습니다. 필수 테이블이 빠진 prefix는 `unusable`(`MISSING_TABLES`)로 빠진 테이블과 함께 돌려줍니다.
    - 필수: `JOB_DETAILS`, `TRIGGERS`, `SIMPLE_TRIGGERS`, `CRON_TRIGGERS`, `BLOB_TRIGGERS`, `CALENDARS`, `PAUSED_TRIGGER_GRPS`, `FIRED_TRIGGERS`, `SCHEDULER_STATE`, `LOCKS`
    - 선택: `SIMPROP_TRIGGERS`
-3. **스키마 기능 감지**: 버전 차이가 나는 테이블과 컬럼(`SIMPROP_TRIGGERS` 테이블, `FIRED_TRIGGERS.SCHED_TIME`, `TRIGGERS.PRIORITY` 등)이 있는지 `features_json`에 기록합니다. 쿼리 빌더는 이 값에 따라 컬럼을 넣거나 뺍니다.
-4. **불리언 형식 감지**: 컬럼 타입이 BOOL이면 `native`로 봅니다. 문자 타입이면 `JOB_DETAILS.IS_DURABLE`의 DISTINCT 값으로 `10`/`YN`/`TF` 중 하나를 판정합니다.
-5. **SCHED_NAME 목록**: `TRIGGERS`, `JOB_DETAILS`, `SCHEDULER_STATE`, `LOCKS`에서 DISTINCT `SCHED_NAME`을 모아 후보로 제시합니다. 각 후보에 잡 수, 트리거 수, 활성 노드 수를 붙입니다.
-6. **쓰기 권한 점검**: 트랜잭션 안에서 결과 행이 0개인 쓰기 문(`UPDATE … WHERE 1=0`, `INSERT … SELECT … WHERE 1=0`, `DELETE … WHERE 1=0`)을 실행한 뒤 ROLLBACK합니다. 권한 검사는 실행 단계에서 일어나므로 행을 건드리거나 잠그지 않고도 권한 유무를 판정할 수 있습니다. 하나라도 실패하면 `write_capable=false`로 둡니다.
+   - `JOB_DETAILS`, `TRIGGERS`, `SCHEDULER_STATE`, `LOCKS`에 `SCHED_NAME` 컬럼이 없으면 Quartz 1.x 스키마이므로 지원하지 않고 `unusable`(`NO_SCHED_NAME`)로 돌려줍니다(NFR-COMP-01은 2.x).
+3. **스키마 기능 감지**: 버전 차이가 나는 테이블과 컬럼의 존재 여부를 `features_json`에 기록합니다. 쿼리 빌더는 이 값에 따라 컬럼을 넣거나 뺍니다.
+
+   | 키 | 확인 대상 |
+   | --- | --- |
+   | `simpropTriggers` | `SIMPROP_TRIGGERS` 테이블 |
+   | `triggerPriority` | `TRIGGERS.PRIORITY` |
+   | `firedPriority` | `FIRED_TRIGGERS.PRIORITY` |
+   | `firedSchedTime` | `FIRED_TRIGGERS.SCHED_TIME` |
+   | `jobNonconcurrent` | `JOB_DETAILS.IS_NONCONCURRENT` |
+   | `jobUpdateData` | `JOB_DETAILS.IS_UPDATE_DATA` |
+   | `cronTimeZone` | `CRON_TRIGGERS.TIME_ZONE_ID` |
+4. **불리언 형식 감지**: `JOB_DETAILS.IS_DURABLE`의 컬럼 타입이 BOOLEAN(Oracle 23 `BOOLEAN`, PostgreSQL `bool`)이면 `native`로 봅니다. 문자·숫자 타입이면 `JOB_DETAILS`의 불리언 컬럼 4개(`IS_DURABLE`, `IS_NONCONCURRENT`, `IS_UPDATE_DATA`, `REQUESTS_RECOVERY`)의 DISTINCT 값으로 `10`/`YN`/`TF` 중 하나를 판정합니다(대소문자와 CHAR 공백 무시, `TRUE`/`FALSE`는 `TF`).
+   - 값이 하나도 없으면(잡이 없음) `10`으로 둡니다. Quartz는 `setBoolean`으로 저장하므로 문자 컬럼에는 `'1'`/`'0'`이 들어갑니다. 판정 근거는 `boolFormatSource`(`column-type`/`values`/`default`)로 함께 돌려줍니다.
+   - 형식이 섞여 있으면 가장 많이 보이는 형식을 고르고 `BOOL_FORMAT_MIXED`, 알아볼 수 없는 값이 있으면 `BOOL_FORMAT_UNKNOWN_VALUE` 경고를 붙입니다.
+5. **SCHED_NAME 목록**: `TRIGGERS`, `JOB_DETAILS`, `SCHEDULER_STATE`, `LOCKS`에서 DISTINCT `SCHED_NAME`을 모아 후보로 제시합니다. 각 후보에 잡 수, 트리거 수, `SCHEDULER_STATE` 행 수, 활성 노드 수(§9.2 정의, 배수 기본 3, 기준은 감지 시점의 DB 현재 시각)를 붙입니다. 잠금 행만 있는 SCHED_NAME(아직 잡을 등록하지 않은 스케줄러)도 후보입니다.
+6. **쓰기 권한 점검**: 트랜잭션 안에서 결과 행이 0개인 문장(`SELECT … WHERE 1 = 0`, `UPDATE … SET SCHED_NAME = SCHED_NAME WHERE 1 = 0`, `INSERT INTO t SELECT * FROM t WHERE 1 = 0`, `DELETE … WHERE 1 = 0`)을 실행한 뒤 ROLLBACK합니다. 권한 검사는 실행 단계에서 일어나므로 행을 건드리거나 행 잠금을 잡지 않고도 권한 유무를 판정할 수 있습니다. 하나라도 실패하면 `write_capable=false`로 두고 빠진 권한을 `missingPrivileges`로 돌려줍니다.
+   - 실패한 문장마다 바로 ROLLBACK합니다. Oracle은 실패한 문장만 되돌리지만 PostgreSQL은 트랜잭션 전체가 중단돼 다음 문장이 실패하기 때문입니다.
+   - 권한 부족은 `TARGET_ERROR`로 오는 오류만 셉니다. 연결이 끊기거나 시간이 넘으면(`TARGET_UNREACHABLE`·`TARGET_TIMEOUT`) 판정할 수 없으므로 감지 전체를 실패시킵니다. Oracle 23은 권한 부족을 `ORA-41900`(없는 권한을 알려줌)으로, 이전 버전은 `ORA-01031`로 알립니다.
+   - Oracle DML은 0행이라도 테이블에 RX 모드 TM 잠금을 잡습니다. 행 잠금이 아니라서 Quartz의 DML과 충돌하지 않고, ROLLBACK하면 바로 풀립니다. 다른 세션이 행을 잠그고 있어도 감지는 기다리지 않습니다(통합 테스트로 확인).
 
    | 테이블 | 필요 권한 |
    | --- | --- |
@@ -325,7 +345,9 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
    | PAUSED_TRIGGER_GRPS | SELECT, INSERT, DELETE |
    | LOCKS | SELECT, INSERT, UPDATE |
    | FIRED_TRIGGERS, SCHEDULER_STATE, CALENDARS | SELECT |
-7. **기대 노드 수 초기값**: 감지 시점의 활성 노드 수를 `expected_node_count` 초기값으로 씁니다(§9.2).
+7. **기대 노드 수 초기값**: 감지 시점의 활성 노드 수를 `expected_node_count` 초기값으로 씁니다(§9.2). 클러스터가 내려가 있으면 0이 되며, 이때는 `NODE_MISSING` 대신 `CLUSTER_DOWN`이 잡힙니다. 등록 화면(B-13)에서 바꿀 수 있습니다.
+
+감지 결과(`QuartzDetection`)는 스키마, DB 현재 시각, 쓸 수 있는 테이블 세트 목록(`tableSets`: prefix, 실제 테이블 이름, 기능, 불리언 형식, 쓰기 가능 여부와 빠진 권한, SCHED_NAME 후보, 경고), 쓸 수 없는 prefix 목록(`unusable`)입니다. 화면은 테이블 세트 × SCHED_NAME을 스케줄러 후보로 보여주고, 운영자가 고른 것을 `schedulers` 행으로 저장합니다(B-13). `BOOL_FORMATS`는 `@qa/store`가 정의하고 메타 저장소 스키마가 가져다 씁니다.
 
 ### 5.6 대상 DB 오류 분류
 

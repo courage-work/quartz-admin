@@ -17,7 +17,7 @@ import {
   SCHEDULER_HEALTH,
   SEVERITIES,
 } from '@qa/shared';
-import { DB_KINDS } from '@qa/store';
+import { BOOL_FORMATS, DB_KINDS } from '@qa/store';
 import { sql } from 'drizzle-orm';
 import {
   index,
@@ -29,9 +29,6 @@ import {
 } from 'drizzle-orm/sqlite-core';
 
 /** 자동 감지한 불리언 저장 형식 (TRD §5.5) */
-export const BOOL_FORMATS = ['native', '10', 'YN', 'TF'] as const;
-export type BoolFormat = (typeof BOOL_FORMATS)[number];
-
 export type AlertScope =
   | { kind: 'all' }
   | { kind: 'groups'; groups: string[] }
