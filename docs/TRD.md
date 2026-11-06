@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.5 (B-05 감사 로그 반영) |
+| 문서 버전 | v0.6 (B-06 웹 셸 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -19,6 +19,7 @@
 | v0.3 | 2026-11-06 | B-04: §1 API 행(nestjs-zod 대신 자체 `ZodPipe`), §2.3 API 공통 규칙 추가, §4.2·§4.3 인증·세션·CSRF 세부 규칙 확정, §11.2 초기 관리자·프록시 규칙 보완 |
 | v0.4 | 2026-11-06 | B-37: §1 UI 구성 행에 테마(tweakcn nature), 폰트, `@shadcn/lint`, 디자인 문서(`docs/DESIGN.md`) 추가 |
 | v0.5 | 2026-11-06 | B-05: §10 기록 방식(`pending` 흐름, 작업 종류, 마스킹 규칙, 기록하지 않는 요청, 조회 API 형식) 확정, §2.3에 요청 ID와 전역 `CLOCK` 추가 |
+| v0.6 | 2026-11-06 | B-06: §2.2 화면 서빙 규칙과 개발 서버 프록시, §4.3 화면 HTML의 CSP(인라인 스크립트 해시), §10 감사 기록 단건 조회 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -92,7 +93,11 @@ quartz-admin/
 
 - 런타임 ID가 들어가는 동적 라우트(`/schedulers/[id]`)는 정적 export로 만들 수 없습니다. 그래서 **ID를 쿼리 파라미터로 전달**합니다. 예: `/scheduler?id=12&tab=triggers`, `/connection?id=3`.
 - 서버 컴포넌트에서 데이터를 가져오거나 Next 미들웨어를 쓰지 않습니다. 인증 확인은 클라이언트에서 `GET /api/v1/auth/me`로 합니다. 실제 접근 통제는 API가 맡습니다.
-- NestJS는 `/api/*` 이외의 경로 중 파일이 없는 요청에 해당 HTML(`*.html`) 또는 `404.html`을 돌려줍니다.
+- 빌드(`pnpm build`)는 웹 결과물(`apps/web/out`)을 `apps/api/public`으로 복사합니다(`apps/api/scripts/copy-web.mjs`, Turbo에서 API 빌드가 웹 빌드 뒤에 실행). 파일이 없으면 API만 제공합니다.
+- NestJS는 `/api` 이외의 GET/HEAD 요청을 Nest 라우터보다 먼저 처리합니다(`apps/api/src/web/web-assets.ts`). 찾는 순서는 파일 그대로 → `<경로>.html` → `<경로>/index.html`이고, 없으면 `404.html`을 404로 돌려줍니다. 그래서 `/scheduler?id=12`를 새로고침해도 `scheduler.html`이 뜹니다.
+  - 파일 목록은 기동 시 한 번 읽습니다. 목록에 없는 경로(`..` 포함)는 열지 않습니다.
+  - HTML은 `Cache-Control: no-cache`, 해시가 붙은 `_next/static/*`은 1년 `immutable`로 응답합니다.
+- 개발 중에는 웹 개발 서버(`next dev`, 포트 3001)가 `/api`를 API(`QA_API_URL`, 기본 3000)로 프록시합니다(개발 모드에서만 rewrites 사용). 브라우저 기준으로 같은 오리진이 되도록 API의 `QA_PUBLIC_URL`을 `http://localhost:3001`로 둡니다.
 
 ### 2.3 API 공통 규칙
 
@@ -199,7 +204,7 @@ quartz-admin/
 ### 4.3 웹 보안 (NFR-SEC-04)
 
 - CSRF: 상태를 바꾸는 요청(GET/HEAD/OPTIONS 이외)은 `Origin` 헤더가 `QA_PUBLIC_URL`의 origin과 같고 `X-QA-Request: 1` 헤더가 있어야 받습니다. `Origin`이 없어도 거부합니다. 로그인 요청에도 적용해 로그인 CSRF를 막습니다. 실패하면 403 `CSRF_REJECTED`입니다. `SameSite=Strict`와 함께 이중으로 방어합니다. 전역 가드 순서는 CSRF 검사 → 인증·권한입니다.
-- helmet 기본값으로 CSP(`default-src 'self'`), `X-Content-Type-Options`, `Referrer-Policy: no-referrer` 등을 설정하고 `X-Powered-By`를 뺍니다(`apps/api/src/app.setup.ts`). Next.js 정적 export가 넣는 인라인 스크립트는 기본 CSP에 막히므로, B-06에서 화면을 서빙할 때 CSP를 조정합니다.
+- helmet 기본값으로 CSP(`default-src 'self'`), `X-Content-Type-Options`, `Referrer-Policy: no-referrer` 등을 설정하고 `X-Powered-By`를 뺍니다(`apps/api/src/app.setup.ts`). Next.js 정적 export는 HTML마다 인라인 스크립트(RSC 페이로드 등)를 넣으므로, 화면 HTML은 helmet 기본값에서 `script-src`에 **그 파일의 인라인 스크립트 SHA-256 해시만** 더한 CSP로 응답합니다. 해시는 기동 시 HTML을 읽어 미리 계산하고, `'unsafe-inline'`은 쓰지 않습니다. `QA_PUBLIC_URL`이 http면 `upgrade-insecure-requests`를 뺍니다(사내망 http 주소에서 정적 파일 요청이 https로 바뀌어 깨지는 것 방지). API 응답의 CSP는 helmet 기본값 그대로입니다.
 - TLS는 앞단 리버스 프록시에서 종단하는 것을 기본으로 합니다. 이때 `QA_TRUST_PROXY=1`로 실제 클라이언트 IP를 감사 로그와 로그인 속도 제한에 씁니다. 프록시는 한 단계만 신뢰합니다(Express `trust proxy` = 1). 클라이언트가 보낸 `X-Forwarded-For`로 IP를 속일 수 없게 하기 위해서입니다.
 
 ### 4.4 대상 DB 접근 통제 (NFR-SEC-02)
@@ -621,6 +626,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 - `GET /audit-logs`: 로그인한 사용자 누구나 조회합니다(PRD 권한 모델).
   - 필터: `from`(포함)·`to`(제외, epoch ms), `userId`, `username`, `schedulerId`, `action`, `result`
   - 페이지: 최신순(id 내림차순). `limit`(기본 50, 최대 200)과 이전 응답의 `nextCursor`를 `cursor`로 넘기는 키셋 방식입니다. 응답은 `{ items, nextCursor }`이고 `nextCursor`가 null이면 마지막 페이지입니다.
+- `GET /audit-logs/:id`: 기록 하나(상세 화면 `/audit-log?id=N`용). 없으면 404 `NOT_FOUND`
 - `GET /audit-logs/export.csv`(P1, 스트리밍, B-34)
 
 ## 11. 배포와 운영

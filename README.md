@@ -30,8 +30,11 @@ pnpm format      # Prettier 적용
 
 ```bash
 pnpm --filter @qa/api dev   # NestJS, http://localhost:3000/api/v1 (데이터: apps/api/data/)
-pnpm --filter @qa/web dev   # Next.js 개발 서버. /design에서 디자인 시스템 확인
+pnpm --filter @qa/web dev   # Next.js 개발 서버 http://localhost:3001. /design에서 디자인 시스템 확인
 ```
+
+- 개발 중에는 브라우저로 `http://localhost:3001`에 접속합니다. 웹 개발 서버가 `/api` 요청을 API(`QA_API_URL`, 기본 `http://localhost:3000`)로 넘겨 화면과 API가 같은 오리진처럼 동작합니다. 이때 API의 `QA_PUBLIC_URL`은 `http://localhost:3001`로 둡니다(CSRF Origin 검사).
+- `pnpm build`는 웹 정적 결과물(`apps/web/out`)을 `apps/api/public`으로 복사합니다. 빌드한 API(`pnpm --filter @qa/api start`)는 화면과 API를 한 포트에서 함께 서빙합니다. 웹을 빌드하지 않았으면 API만 제공합니다.
 
 API는 처음 실행하기 전에 `apps/api/.env`가 필요합니다. 암호화 키는 필수입니다.
 

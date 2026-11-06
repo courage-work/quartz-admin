@@ -1,8 +1,9 @@
-import type { SchedulerHealth, Severity } from '@qa/shared';
+import type { AuditResult, SchedulerHealth, Severity } from '@qa/shared';
 
 import { Badge } from '@/components/ui/badge';
 
 import {
+  AUDIT_RESULT_META,
   SCHEDULER_HEALTH_META,
   SEVERITY_META,
   type StatusMeta,
@@ -31,4 +32,8 @@ export function SchedulerHealthBadge({ health }: { health: SchedulerHealth }) {
 
 export function SeverityBadge({ severity }: { severity: Severity }) {
   return <StatusBadge meta={SEVERITY_META[severity]} />;
+}
+
+export function AuditResultBadge({ result }: { result: AuditResult }) {
+  return <StatusBadge meta={AUDIT_RESULT_META[result]} code={result} />;
 }
