@@ -80,3 +80,14 @@ jobs:
 
       - name: Integration test
         run: pnpm turbo run test:integration --filter=@qa/store
+
+  container:
+    name: container (docker compose smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # 이미지 빌드, compose 기동, 헬스체크, 읽기 전용 파일시스템, 재시작 후 데이터 유지, JSON 로그 (B-07)
+      - name: Smoke test
+        run: bash docker/smoke.sh

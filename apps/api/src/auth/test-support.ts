@@ -14,6 +14,25 @@ import { FixedWindowRateLimiter } from './rate-limiter.js';
 
 export const ADMIN = { username: 'admin', password: 'admin-password-1' } as const;
 
+/**
+ * 테스트 로그 출력 대상. nestjs-pino는 프로세스(테스트 파일)마다 pino-http 인스턴스를 하나만 만들고
+ * 처음 만든 앱의 출력 대상을 계속 쓰므로, 모든 테스트 앱이 이 객체 하나를 공유한다.
+ * `createTestApp`이 앱을 만들 때마다 비운다.
+ */
+export const testLogs = {
+  lines: [] as Record<string, unknown>[],
+  write(line: string): void {
+    testLogs.lines.push(JSON.parse(line) as Record<string, unknown>);
+  },
+  /** 접근 로그(요청 한 건당 한 줄)만 */
+  access(): Record<string, unknown>[] {
+    return testLogs.lines.filter((l) => typeof l.durationMs === 'number');
+  },
+  clear(): void {
+    testLogs.lines.length = 0;
+  },
+};
+
 export interface TestApp {
   app: NestExpressApplication;
   config: AppConfig;
@@ -54,8 +73,9 @@ export async function createTestApp(
       this.now += ms;
     },
   };
+  testLogs.clear();
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.forRoot(config)],
+    imports: [AppModule.forRoot(config, { logStream: testLogs })],
   })
     .overrideProvider(CLOCK)
     .useValue(() => clock.now)

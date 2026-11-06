@@ -1,0 +1,37 @@
+# 단일 호스트 배포 (NFR-OPS-01, TRD §11.1)
+#
+#   cp docker/.env.example docker/.env   # 값을 채운다
+#   docker compose -f docker/compose.yaml up -d --build
+#
+# 메타데이터는 이름 있는 볼륨 하나(qa-data)에 남는다. `down -v`는 볼륨까지 지우므로 주의한다.
+name: quartz-admin
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ${QA_IMAGE:-quartz-admin:local}
+    restart: unless-stopped
+    env_file:
+      - path: ${QA_ENV_FILE:-.env}
+        required: true
+    environment:
+      QA_DATA_DIR: /data
+      PORT: '3000'
+    ports:
+      - '${QA_HOST_PORT:-3000}:3000'
+    volumes:
+      - qa-data:/data
+    # 루트 파일시스템은 읽기 전용이고, 쓰기는 /data(볼륨)와 메모리 /tmp만 가능하다
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 20s
+
+volumes:
+  qa-data:

@@ -4,6 +4,7 @@ import { API_PREFIX } from '@qa/shared';
 import helmet from 'helmet';
 import { requestIdMiddleware } from './common/request-id.js';
 import type { AppConfig } from './config/env.js';
+import { HEALTH_PATHS } from './health/paths.js';
 import { WebAssets, webAssetsMiddleware } from './web/web-assets.js';
 
 export interface ConfigureOptions {
@@ -19,7 +20,8 @@ export function configureApp(
   config: AppConfig,
   options: ConfigureOptions = {},
 ): void {
-  app.setGlobalPrefix(API_PREFIX);
+  // 헬스체크는 컨테이너 런타임이 부르므로 /api/v1 밖에 둔다 (TRD §11.1)
+  app.setGlobalPrefix(API_PREFIX, { exclude: HEALTH_PATHS.map((p) => p.slice(1)) });
   // 리버스 프록시 한 단계만 신뢰한다. 클라이언트가 보낸 X-Forwarded-For로 IP를 속일 수 없게 하기 위해서다
   app.set('trust proxy', config.trustProxy ? 1 : false);
   app.disable('x-powered-by');
