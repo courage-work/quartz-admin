@@ -15,6 +15,7 @@ import {
   type SchedulerDto,
   type SchedulerSettings,
   schedulerSettingsSchema,
+  type SnapshotDto,
 } from '@qa/shared';
 import { actorOf } from '../audit/actor.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -37,6 +38,12 @@ export class SchedulersController {
   @Get(':id')
   get(@Param('id', ParseIntPipe) id: number): SchedulerDto {
     return toSchedulerDto(this.connections.requireScheduler(id));
+  }
+
+  /** 대시보드 캐시(감시 루프의 마지막 결과). 대상 DB를 조회하지 않는다 */
+  @Get(':id/snapshot')
+  snapshot(@Param('id', ParseIntPipe) id: number): { snapshot: SnapshotDto | null } {
+    return { snapshot: this.connections.snapshot(id) };
   }
 
   @Put(':id/settings')

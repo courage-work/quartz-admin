@@ -9,6 +9,7 @@ import { CLOCK } from '../common/clock.js';
 import type { AppConfig } from '../config/env.js';
 import { testConfig } from '../config/test-support.js';
 import { tempDataDir } from '../meta-db/test-support.js';
+import { MONITOR_OPTIONS, type MonitorOptions } from '../monitor/monitor.service.js';
 import { LOGIN_RATE_LIMITER } from './auth.controller.js';
 import { FixedWindowRateLimiter } from './rate-limiter.js';
 
@@ -61,6 +62,8 @@ export async function createTestApp(
     webDir?: string;
     /** 바꿔 끼울 provider. 대상 DB 없이 접속 기능을 시험할 때 쓴다 */
     overrides?: { provide: unknown; useValue: unknown }[];
+    /** 감시 루프 설정. 기본은 꺼 둔다(대상 DB가 없는 테스트에서 백그라운드 감시가 돌지 않게) */
+    monitor?: Partial<MonitorOptions>;
   } = {},
 ): Promise<TestApp> {
   const tmp = options.dataDir ? undefined : tempDataDir();
@@ -82,7 +85,9 @@ export async function createTestApp(
     .overrideProvider(CLOCK)
     .useValue(() => clock.now)
     .overrideProvider(LOGIN_RATE_LIMITER)
-    .useValue(new FixedWindowRateLimiter(options.loginRateLimit ?? 1_000, 60_000));
+    .useValue(new FixedWindowRateLimiter(options.loginRateLimit ?? 1_000, 60_000))
+    .overrideProvider(MONITOR_OPTIONS)
+    .useValue({ enabled: false, concurrency: 8, roundTimeoutMs: 30_000, ...options.monitor });
   for (const o of options.overrides ?? []) {
     builder = builder.overrideProvider(o.provide).useValue(o.useValue);
   }

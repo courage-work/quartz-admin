@@ -13,9 +13,6 @@ import type {
 } from '@qa/shared';
 import {
   ALL_GROUPS_PAUSED,
-  TargetError,
-  createTableSet,
-  dialectFor,
   getJobDetail,
   listExecuting,
   listJobs,
@@ -29,6 +26,7 @@ import {
 import { notFound } from '../common/api-error.js';
 import { ConnectionsService, type SchedulerRow } from '../connections/connections.service.js';
 import { TargetsService } from '../targets/targets.service.js';
+import { schedulerViewContext } from './context.js';
 import { describeJobData } from './job-data.js';
 
 interface ViewScope {
@@ -113,24 +111,9 @@ export class SchedulerViewsService {
   private async withScheduler<T>(id: number, fn: (scope: ViewScope) => Promise<T>): Promise<T> {
     const scheduler = this.connections.requireScheduler(id);
     const connection = this.connections.require(scheduler.connectionId);
-    const dialect = dialectFor(connection.dbType);
-    if (!dialect) {
-      throw new TargetError('TARGET_ERROR', {
-        message: `아직 지원하지 않는 DB 종류입니다: ${connection.dbType}`,
-      });
-    }
-    const ctx: SchedulerViewContext = {
-      dialect,
-      // 0001 마이그레이션 전에 등록한 스케줄러는 감지 스키마가 없어 접속의 스키마 설정을 쓴다
-      tables: createTableSet(dialect, {
-        schema: scheduler.tableSchema ?? connection.schemaName ?? undefined,
-        tables: scheduler.tableNames,
-      }),
-      features: scheduler.features,
-      schedName: scheduler.schedName,
-    };
+    const ctx = schedulerViewContext(scheduler, connection);
     return this.targets.withConnection(connection, async (conn) => {
-      const dbNow = await queryDbNowMillis(conn, dialect);
+      const dbNow = await queryDbNowMillis(conn, ctx.dialect);
       return fn({ conn, ctx, scheduler, dbNow });
     });
   }

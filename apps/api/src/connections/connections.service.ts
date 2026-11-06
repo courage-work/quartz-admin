@@ -10,6 +10,7 @@ import type {
   RegisterSchedulersInput,
   SchedulerDto,
   SchedulerSettings,
+  SnapshotDto,
   TestConnectionInput,
   UpdateConnectionInput,
 } from '@qa/shared';
@@ -19,7 +20,15 @@ import { ApiError, notFound } from '../common/api-error.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { SecretBox, secretAad } from '../crypto/secret-box.js';
 import { MetaDbService } from '../meta-db/meta-db.service.js';
-import { alertRules, alerts, connections, schedulers } from '../meta-db/schema.js';
+import {
+  alertRules,
+  alerts,
+  connections,
+  schedulerSnapshots,
+  schedulers,
+} from '../meta-db/schema.js';
+import { SchedulerEvents } from '../monitor/scheduler-events.js';
+import { toSnapshotDto } from '../monitor/monitor.service.js';
 import { TargetsService, type ConnectionRow } from '../targets/targets.service.js';
 
 export type SchedulerRow = typeof schedulers.$inferSelect;
@@ -124,6 +133,7 @@ export class ConnectionsService {
     private readonly metaDb: MetaDbService,
     private readonly secrets: SecretBox,
     private readonly targets: TargetsService,
+    private readonly events: SchedulerEvents,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -213,7 +223,13 @@ export class ConnectionsService {
       .where(eq(connections.id, id))
       .returning()
       .get();
-    if (targetChanged) await this.targets.forget(id);
+    if (targetChanged) {
+      await this.targets.forget(id);
+      // 새 접속 정보로 바로 다시 감시한다
+      for (const sid of this.schedulerIdsOf(id)) {
+        this.events.emit({ type: 'upsert', schedulerId: sid, immediate: true });
+      }
+    }
     return { before, after, passwordChanged: input.password !== undefined };
   }
 
@@ -238,6 +254,7 @@ export class ConnectionsService {
     const row = this.require(id);
     const impact = this.deleteImpact(id);
     this.metaDb.db.delete(connections).where(eq(connections.id, id)).run();
+    for (const s of impact.schedulers) this.events.emit({ type: 'remove', schedulerId: s.id });
     await this.targets.forget(id);
     return { row, impact };
   }
@@ -383,7 +400,7 @@ export class ConnectionsService {
       return { sel, set, candidate };
     });
 
-    return this.metaDb.db.transaction((tx) => {
+    const created = this.metaDb.db.transaction((tx) => {
       const created: SchedulerRow[] = [];
       for (const { sel, set, candidate } of picked) {
         const exists = tx
@@ -432,6 +449,10 @@ export class ConnectionsService {
         .run();
       return created;
     });
+    // 대시보드에 바로 나타나도록 첫 감시를 기다리지 않고 돌린다
+    for (const row of created)
+      this.events.emit({ type: 'upsert', schedulerId: row.id, immediate: true });
+    return created;
   }
 
   findScheduler(id: number): SchedulerRow | undefined {
@@ -447,12 +468,26 @@ export class ConnectionsService {
   /** 스케줄러 설정 (FR-CON-07) */
   updateSettings(id: number, settings: SchedulerSettings): SchedulerRow {
     this.requireScheduler(id);
-    return this.metaDb.db
+    const row = this.metaDb.db
       .update(schedulers)
       .set({ ...settings, updatedAt: this.clock() })
       .where(eq(schedulers.id, id))
       .returning()
       .get();
+    // 감시 주기나 판정 기준이 바뀌었을 수 있다
+    this.events.emit({ type: 'upsert', schedulerId: id });
+    return row;
+  }
+
+  /** 감시 루프가 남긴 마지막 스냅샷 (TRD §8.4). 아직 감시하지 않았으면 null */
+  snapshot(id: number): SnapshotDto | null {
+    this.requireScheduler(id);
+    const row = this.metaDb.db
+      .select()
+      .from(schedulerSnapshots)
+      .where(eq(schedulerSnapshots.schedulerId, id))
+      .get();
+    return row ? toSnapshotDto(row) : null;
   }
 
   schedulerDeleteImpact(id: number): DeleteImpactDto {
@@ -468,6 +503,7 @@ export class ConnectionsService {
     const impact = this.schedulerDeleteImpact(id);
     const row = this.requireScheduler(id);
     this.metaDb.db.delete(schedulers).where(eq(schedulers.id, id)).run();
+    this.events.emit({ type: 'remove', schedulerId: id });
     return { row, impact };
   }
 
@@ -488,6 +524,15 @@ export class ConnectionsService {
       tags: input.tags,
       readOnly: input.readOnly,
     };
+  }
+
+  private schedulerIdsOf(connectionId: number): number[] {
+    return this.metaDb.db
+      .select({ id: schedulers.id })
+      .from(schedulers)
+      .where(eq(schedulers.connectionId, connectionId))
+      .all()
+      .map((r) => r.id);
   }
 
   private encrypt(password: string, id: number): string {
