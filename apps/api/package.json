@@ -3,6 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "files": [
+    "dist",
+    "drizzle",
+    "public"
+  ],
   "scripts": {
     "build": "nest build && node scripts/copy-web.mjs",
     "dev": "nest start --watch --exec \"node --env-file-if-exists=.env\"",
@@ -23,6 +28,9 @@
     "better-sqlite3": "catalog:",
     "drizzle-orm": "catalog:",
     "helmet": "catalog:",
+    "nestjs-pino": "catalog:",
+    "pino": "catalog:",
+    "pino-http": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:",
     "zod": "catalog:"

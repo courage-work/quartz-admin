@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.6 (B-06 웹 셸 반영) |
+| 문서 버전 | v0.7 (B-07 컨테이너 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -20,6 +20,7 @@
 | v0.4 | 2026-11-06 | B-37: §1 UI 구성 행에 테마(tweakcn nature), 폰트, `@shadcn/lint`, 디자인 문서(`docs/DESIGN.md`) 추가 |
 | v0.5 | 2026-11-06 | B-05: §10 기록 방식(`pending` 흐름, 작업 종류, 마스킹 규칙, 기록하지 않는 요청, 조회 API 형식) 확정, §2.3에 요청 ID와 전역 `CLOCK` 추가 |
 | v0.6 | 2026-11-06 | B-06: §2.2 화면 서빙 규칙과 개발 서버 프록시, §4.3 화면 HTML의 CSP(인라인 스크립트 해시), §10 감사 기록 단건 조회 추가 |
+| v0.7 | 2026-11-06 | B-07: §11.1 이미지·compose·헬스체크 세부, §11.3 로그 형식과 마스킹 확정 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -633,9 +634,11 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 ### 11.1 컨테이너
 
-- 멀티 스테이지 빌드: pnpm install → web 빌드(export) → api 빌드 → 운영 의존성만 남긴 `node:24-bookworm-slim` 이미지
-- 비루트 사용자로 실행하고, `/data`만 쓰기 가능하게 둡니다(NFR-SEC-05, 파일 권한 600).
-- 헬스체크: `GET /healthz`(프로세스), `GET /readyz`(SQLite 접근, 마이그레이션 완료)
+- 멀티 스테이지 빌드(`docker/Dockerfile`): `pnpm fetch`(잠금 파일만으로 의존성 레이어 캐시) → `pnpm install --offline` → `turbo run build --filter=@qa/api`(웹 export 후 API 빌드와 `public/` 복사) → `pnpm deploy --prod --legacy`로 운영 의존성과 `@qa/api`의 `files`(`dist`, `drizzle`, `public`)만 모아 `node:24-bookworm-slim` 실행 이미지로 옮깁니다. better-sqlite3 소스 빌드에 대비해 빌드 단계에만 `python3`, `make`, `g++`를 둡니다.
+- 실행 이미지의 앱 파일은 root 소유이고, 비루트 사용자(`node`)로 실행합니다. `/data`(권한 700)만 쓸 수 있고, DB와 백업 파일은 600입니다(NFR-SEC-05).
+- `docker/compose.yaml`: 서비스 하나, 이름 있는 볼륨 하나(`qa-data:/data`), `read_only: true`(루트 파일시스템 읽기 전용), 메모리 `/tmp`(tmpfs 64MB, SQLite 임시 파일용), `cap_drop: ALL`, `no-new-privileges`. 환경변수는 `docker/.env`(`QA_ENV_FILE`로 바꿀 수 있음)에서 받습니다.
+- 헬스체크(로그인 불필요, `/api/v1` 밖): `GET /healthz`(프로세스), `GET /readyz`(SQLite 응답, 마이그레이션 기록 존재). `/readyz`가 실패하면 503과 항목별 결과(`checks`)를 주고, 내부 오류 메시지는 넣지 않습니다. 이미지 `HEALTHCHECK`는 `node`로 `/readyz`를 부릅니다(slim 이미지에 curl 없음).
+- `docker/smoke.sh`가 이미지 빌드, compose 기동, 같은 포트의 화면·API, 비루트 실행과 `/data` 밖 쓰기 실패, 재시작 후 데이터 유지, JSON 로그를 확인합니다. CI `container` 잡에서 PR마다 실행합니다.
 
 ### 11.2 환경변수
 
@@ -661,8 +664,12 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 ### 11.3 로깅
 
-- pino JSON 로그에 `requestId`, `userId`, `schedulerId`, `command`, `durationMs`를 넣습니다.
-- `password`, `password_enc`, `config_enc`, `authorization`, `cookie` 경로는 마스킹합니다. 드라이버 오류 메시지는 접속 문자열을 지운 뒤 기록합니다(NFR-SEC-03).
+- nestjs-pino(pino-http)로 Nest 로그와 접근 로그를 모두 표준 출력에 JSON 한 줄씩 남깁니다(`apps/api/src/logging/http-logger.ts`). 시각은 ISO 문자열, 레벨은 문자열(`info`)이고, Nest 로그의 클래스 이름은 `context`입니다.
+- 접근 로그 한 줄: `requestId`(요청 ID 미들웨어 값, §2.3), `userId`(로그인한 요청), `req.method`, `req.url`(쿼리 문자열 제외), `res.statusCode`, `durationMs`. 요청·응답 헤더와 본문은 남기지 않습니다. 5xx는 `error`, 나머지는 `info`이고, 헬스체크 요청은 남기지 않습니다.
+- 제어 명령과 감시 루프는 해당 작업에서 `schedulerId`, `command`를 더합니다.
+- `password`, `currentPassword`, `newPassword`, `passwordEnc`, `password_enc`, `configEnc`, `config_enc`, `authorization`, `cookie` 키(최상위와 한 단계 아래)는 `***`로 마스킹합니다. 드라이버 오류 메시지는 접속 문자열을 지운 뒤 기록합니다(NFR-SEC-03, B-11).
+- Nest가 뜨기 전 기동 실패(설정 오류, 인스턴스 중복)도 같은 형식으로 남깁니다(`level: fatal`).
+- nestjs-pino는 프로세스마다 pino-http 인스턴스를 하나만 만듭니다. 테스트는 앱마다 출력 대상을 바꾸지 않고 공유 객체(`testLogs`)를 비워 씁니다.
 
 ## 12. 테스트 전략
 

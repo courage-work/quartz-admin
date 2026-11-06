@@ -48,6 +48,24 @@ pnpm --filter @qa/api cli gen-key   # 출력값을 .env의 QA_ENCRYPTION_KEYS에
 
 Windows에 Visual Studio C++ 빌드 도구가 없으면 `pnpm install`이 better-sqlite3의 `node-gyp` 단계에서 실패합니다. better-sqlite3에는 Windows용 사전 빌드 바이너리가 들어 있으므로 `pnpm install --ignore-scripts`로 설치하면 됩니다.
 
+## Docker로 실행
+
+운영 배포는 Docker Compose 한 서비스입니다(NFR-OPS-01). 화면과 API를 한 포트(3000)에서 서빙하고, 메타데이터는 이름 있는 볼륨 `qa-data`(`/data`)에 남습니다.
+
+```bash
+docker build -f docker/Dockerfile -t quartz-admin:local .
+docker run --rm quartz-admin:local node dist/cli.js gen-key   # 출력값을 QA_ENCRYPTION_KEYS에 넣는다
+cp docker/.env.example docker/.env                            # 값을 채운다
+docker compose -f docker/compose.yaml up -d
+```
+
+- 비루트 사용자(`node`)로 실행하고 루트 파일시스템은 읽기 전용입니다. 쓰기는 `/data`와 메모리 `/tmp`만 됩니다.
+- 헬스체크: `GET /healthz`(프로세스), `GET /readyz`(SQLite, 마이그레이션). 이미지의 `HEALTHCHECK`가 `/readyz`를 부릅니다.
+- 로그는 표준 출력에 JSON 한 줄씩 남습니다(`requestId`, `userId`, `durationMs` 포함, 비밀값은 `***`). `QA_LOG_LEVEL`로 레벨을 바꿉니다.
+- 운영 CLI는 실행 중인 컨테이너에서 씁니다: `docker compose -f docker/compose.yaml exec app node dist/cli.js backup`
+- `docker compose down -v`는 볼륨까지 지웁니다. 데이터를 남기려면 `-v` 없이 내립니다.
+- `bash docker/smoke.sh`는 이미지 빌드부터 재시작 후 데이터 유지까지 확인합니다(CI `container` 잡).
+
 ## 로그인과 사용자
 
 - 처음 기동할 때 `users` 테이블이 비어 있으면 `QA_ADMIN_USERNAME`, `QA_ADMIN_PASSWORD`로 관리자를 만듭니다. 계정이 하나라도 있으면 이 값은 쓰지 않습니다.
@@ -101,14 +119,15 @@ packages/
               test/support: Testcontainers 통합 테스트 헬퍼
 tools/
   quartz-testbed/  Java Quartz 테스트 노드, cron 벡터 생성기 (README 참고)
-docs/         PRD, TRD, BACKLOG
+docker/       Dockerfile, compose.yaml, 컨테이너 스모크 테스트
+docs/         PRD, TRD, BACKLOG, DESIGN
 ```
 
 의존 방향은 `api → store → core`, `api → shared`, `web → shared`입니다.
 
 ## 기여 방식
 
-작업은 [BACKLOG](docs/BACKLOG.md) §1 규칙을 따릅니다. 작업 하나가 `feat/B-xx-<slug>` 브랜치와 PR 하나이며, CI(format, build, lint, typecheck, test)를 통과해야 머지합니다.
+작업은 [BACKLOG](docs/BACKLOG.md) §1 규칙을 따릅니다. 작업 하나가 `feat/B-xx-<slug>` 브랜치와 PR 하나이며, CI(format, build, lint, typecheck, test)를 통과해야 머지합니다. Oracle 통합 테스트와 컨테이너 스모크 테스트도 PR마다 돕니다.
 
 ## 라이선스
 

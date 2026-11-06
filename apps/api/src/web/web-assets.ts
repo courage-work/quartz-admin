@@ -4,6 +4,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
+import { HEALTH_PATHS } from '../health/paths.js';
 
 /** `apps/api/public`. 빌드 시 웹 정적 export 결과물을 복사해 둔다 (`scripts/copy-web.mjs`) */
 export function defaultWebDir(): string {
@@ -129,6 +130,7 @@ export function webAssetsMiddleware(assets: WebAssets, apiPrefix: string) {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
     if (req.path === apiRoot || req.path.startsWith(`${apiRoot}/`)) return next();
+    if (HEALTH_PATHS.includes(req.path)) return next();
 
     const key = assets.resolve(req.path);
     const target = key ?? (assets.resolve('/404.html') ? '404.html' : null);
