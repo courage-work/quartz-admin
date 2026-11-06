@@ -1,6 +1,7 @@
 import { HttpStatus, Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import type { CreateUserRequest, UserDto } from '@qa/shared';
 import { asc, count, eq, sql } from 'drizzle-orm';
+import { AuditService, SYSTEM_ACTOR } from '../audit/audit.service.js';
 import { ApiError, notFound } from '../common/api-error.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { APP_CONFIG } from '../config/config.module.js';
@@ -38,6 +39,7 @@ export class UsersService implements OnModuleInit {
     private readonly metaDb: MetaDbService,
     private readonly hasher: PasswordHasher,
     private readonly sessions: SessionsService,
+    private readonly audit: AuditService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -57,6 +59,14 @@ export class UsersService implements OnModuleInit {
       return null;
     }
     const created = await this.create({ ...admin, isAdmin: true });
+    this.audit.success({
+      actor: SYSTEM_ACTOR,
+      action: 'user.create',
+      targetType: 'user',
+      target: { id: created.id, username: created.username },
+      after: { isAdmin: created.isAdmin, isActive: created.isActive },
+      reason: '환경변수(QA_ADMIN_USERNAME)로 만든 초기 관리자',
+    });
     this.logger.log(`초기 관리자를 만들었습니다: ${created.username}`);
     return created;
   }

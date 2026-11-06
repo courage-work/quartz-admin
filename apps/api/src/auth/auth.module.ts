@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { CLOCK, systemClock } from '../common/clock.js';
+import { AuditModule } from '../audit/audit.module.js';
 import { AuthController, LOGIN_RATE_LIMITER } from './auth.controller.js';
 import { AuthGuard } from './auth.guard.js';
 import { AUTH_PROVIDER } from './auth-provider.js';
@@ -15,9 +15,10 @@ import { UsersService } from './users.service.js';
 
 /** 인증, 세션, 사용자 관리 (TRD §4.2, §4.3) */
 @Module({
+  // 전역 모듈이지만 명시해 둔다. 미완료 감사 기록 정리가 초기 관리자 생성보다 먼저 돌아야 한다
+  imports: [AuditModule],
   controllers: [AuthController, UsersController],
   providers: [
-    { provide: CLOCK, useValue: systemClock },
     PasswordHasher,
     SessionsService,
     UsersService,
@@ -31,6 +32,6 @@ import { UsersService } from './users.service.js';
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
-  exports: [CLOCK, SessionsService, UsersService],
+  exports: [SessionsService, UsersService],
 })
 export class AuthModule {}

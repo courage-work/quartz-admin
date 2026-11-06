@@ -1,7 +1,9 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
+import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { ApiExceptionFilter } from './common/api-exception.filter.js';
+import { ClockModule } from './common/clock.module.js';
 import { ConfigModule } from './config/config.module.js';
 import type { AppConfig } from './config/env.js';
 import { CryptoModule } from './crypto/crypto.module.js';
@@ -15,8 +17,10 @@ export class AppModule {
       module: AppModule,
       imports: [
         ConfigModule.forRoot(config),
+        ClockModule,
         CryptoModule,
         MetaDbModule.forRoot({ dataDir: config.dataDir }),
+        AuditModule,
         AuthModule,
       ],
       providers: [{ provide: APP_FILTER, useClass: ApiExceptionFilter }],
