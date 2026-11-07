@@ -1,4 +1,4 @@
-import type { SchedulerDetailDto } from '@qa/shared';
+import type { SchedulerDetailDto, SnapshotDto } from '@qa/shared';
 import {
   ActivityIcon,
   ListChecksIcon,
@@ -46,8 +46,13 @@ function StatTile({
   );
 }
 
+/** 지표 띠가 읽는 값만 고른 모양. `SchedulerDetailDto`를 그대로 넘길 수 있다 */
+export type SchedulerStatsInput = Pick<SchedulerDetailDto, 'expectedNodeCount'> & {
+  snapshot: Pick<SnapshotDto, 'nodes' | 'triggerCounts' | 'executingCount'> | null;
+};
+
 /** 스케줄러 상세 맨 위 지표 띠. 마지막 감시 스냅샷 기준이다 */
-export function SchedulerStats({ s }: { s: SchedulerDetailDto }) {
+export function SchedulerStats({ s }: { s: SchedulerStatsInput }) {
   const snap = s.snapshot;
   const nodes = snap?.nodes ?? null;
   const active = nodes?.filter((n) => n.active).length ?? null;

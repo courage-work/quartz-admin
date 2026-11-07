@@ -18,7 +18,7 @@ import {
 import Link from 'next/link';
 import { type FormEvent, useState } from 'react';
 
-import { HealthSummary } from '@/components/dashboard/health-summary';
+import { countByHealth, HealthSummary } from '@/components/dashboard/health-summary';
 import { TriggerDistribution } from '@/components/dashboard/trigger-distribution';
 import { FormAlert } from '@/components/form/form-alert';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
@@ -370,7 +370,12 @@ export function DashboardView() {
         }
       />
       {dashboard.data && dashboard.data.items.length > 0 ? (
-        <HealthSummary items={dashboard.data.items} value={health} onChange={setHealth} />
+        <HealthSummary
+          total={dashboard.data.items.length}
+          counts={countByHealth(dashboard.data.items)}
+          value={health}
+          onChange={setHealth}
+        />
       ) : null}
       {/* 필터를 지우면 입력칸도 비우도록 다시 만든다 */}
       <Filters

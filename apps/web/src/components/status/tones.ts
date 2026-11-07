@@ -70,30 +70,40 @@ export const AUDIT_RESULT_META = {
  * - rail: 카드 위 상태 띠, 점
  * - fill: SVG 막대 조각
  * - soft: 아이콘 바탕·강조 영역(-subtle 쌍)
+ * - text: 글자 없이 쓰는 작은 아이콘(대비 3:1 기준)
  */
 export const TONE_CLASSES = {
   success: {
     rail: 'bg-success',
     fill: 'fill-success',
     soft: 'bg-success-subtle text-success-subtle-foreground',
+    text: 'text-success',
   },
   warning: {
     rail: 'bg-warning',
     fill: 'fill-warning',
     soft: 'bg-warning-subtle text-warning-subtle-foreground',
+    text: 'text-warning',
   },
-  info: { rail: 'bg-info', fill: 'fill-info', soft: 'bg-info-subtle text-info-subtle-foreground' },
+  info: {
+    rail: 'bg-info',
+    fill: 'fill-info',
+    soft: 'bg-info-subtle text-info-subtle-foreground',
+    text: 'text-info',
+  },
   destructive: {
     rail: 'bg-destructive',
     fill: 'fill-destructive',
     soft: 'bg-destructive-subtle text-destructive-subtle-foreground',
+    text: 'text-destructive',
   },
   neutral: {
     rail: 'bg-muted-foreground',
     fill: 'fill-muted-foreground',
     soft: 'bg-muted text-muted-foreground',
+    text: 'text-muted-foreground',
   },
-} as const satisfies Record<Tone, { rail: string; fill: string; soft: string }>;
+} as const satisfies Record<Tone, { rail: string; fill: string; soft: string; text: string }>;
 
 /** 대시보드 정렬 순서: 손봐야 할 것을 먼저 보여 준다. 감시 전(null)은 맨 뒤 */
 export const HEALTH_ORDER: Record<SchedulerHealth, number> = {

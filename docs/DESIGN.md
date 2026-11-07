@@ -194,11 +194,13 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 | `components/dashboard/health-summary.tsx` | 대시보드 요약 띠. 전체·장애·연결 불가·경고·정상 수. 누르면 그 상태만 화면에서 거른다(`aria-pressed`) |
 | `components/dashboard/trigger-distribution.tsx` | 트리거 상태 분포 막대. 인라인 스타일 없이 SVG 좌표로 그리고, 상태별 수를 `aria-label`로 전한다 |
 | `components/schedulers/scheduler-stats.tsx` | 스케줄러 상세 지표 띠(활성 노드, 트리거+분포, 실행 중, 오류·차단) |
-| `components/status/tones.ts`의 `TONE_CLASSES` | 톤별 정적 클래스(띠 `rail`, SVG `fill`, 아이콘 바탕 `soft`). `bg-${tone}`처럼 만들지 않는다 |
+| `components/status/tones.ts`의 `TONE_CLASSES` | 톤별 정적 클래스(띠 `rail`, SVG `fill`, 아이콘 바탕 `soft`, 작은 아이콘 `text`). `bg-${tone}`처럼 만들지 않는다 |
 
 - 손볼 것이 먼저 보이게 합니다. 대시보드 카드는 장애 → 연결 불가 → 경고 → 정상 → 감시 전 순서이고, 같은 상태는 이름순입니다.
 - 강조는 문제가 있을 때만 씁니다. 요약 띠와 지표 타일은 값이 0이면 중립(muted) 아이콘 바탕, 0보다 크면 해당 톤의 `-subtle` 바탕을 씁니다.
 - 카드 위 4px 상태 띠(`rail`)는 보조 표시입니다. 상태의 뜻은 항상 배지(아이콘 + 글자)가 전합니다.
+- 요약 띠는 좁은 화면(`sm` 미만)에서 톤 바탕 아이콘을 숨기고, 라벨 옆에 톤 색 작은 아이콘(`text`)을 둡니다. 3열로 두 줄에 들어갑니다.
+- 이 부품들은 `/design`의 "상태 요약" 구역에서 예시 값으로 확인합니다.
 - 분포 막대는 범례 배지와 함께 둡니다. 막대만으로 수를 읽게 하지 않습니다.
 - 목록 위 필터는 한 면(`FilterPanel`: 테두리 + `bg-card`)에 모아 표와 구분합니다. 필터 지우기는 그 안의 ghost 버튼입니다.
 - 상세 화면 탭은 `TabsList variant="line"`과 아래 테두리로 표 위 구역을 나눕니다.
