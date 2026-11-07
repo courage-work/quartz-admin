@@ -2,9 +2,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.2 |
+| 문서 버전 | v0.3 |
 | 작성일 | 2026-11-06 |
-| 관련 작업 | B-37(`docs/BACKLOG.md`) |
+| 관련 작업 | B-37, B-39(`docs/BACKLOG.md`) |
 | 확인 화면 | `/design` (`apps/web/src/app/design/`) |
 
 화면을 만들 때 이 문서와 `/design` 화면을 기준으로 삼습니다. 규칙 대부분은 `@shadcn/lint`가 `pnpm lint`에서 검사합니다.
@@ -21,6 +21,7 @@
 | 다크 모드 | 라이트 + 다크, 기본은 시스템 설정. 헤더에서 전환 | nature가 두 테마를 모두 제공 |
 | 상태 색 | success, warning, info, destructive + neutral | 트리거·스케줄러 상태와 알림 심각도 표현 |
 | prod 구분 | 빨간 채운 배지 + 상세 화면·확인 대화상자 맨 위 빨간 띠 | NFR-UX-02 |
+| 면 계층 | 사이드바 < 바탕 < 카드 3단, 카드에 옅은 그림자 | 바탕과 카드가 같은 색이면 면이 테두리로만 구분돼 화면이 납작해 보임(B-39) |
 | 밀도 | shadcn 기본(컨트롤 높이 36px) | |
 | 둥글기 | nature 기본 `--radius: 0.5rem` | |
 | 린트 | `@shadcn/lint` 6개 규칙 모두 error | 화면 코드가 아직 없을 때 엄격하게 시작 |
@@ -50,6 +51,13 @@ shadcn 표준 토큰(background, foreground, card, popover, primary, secondary, 
 | `accent`, `sidebar-accent` | 다크 | `oklch(0.5752 0.1446 144)` | `oklch(0.47 0.12 144)` | 위 글자 대비 3.5 → 5.5 |
 | `destructive` | 다크 | `oklch(0.5386 0.1937 26.7)` | `oklch(0.68 0.18 25)` | 다크 바탕 위 대비 2.7 → 4.8 |
 | `destructive-foreground` | 다크 | 밝은 베이지 | `oklch(0.2 0.03 25)` | 밝아진 빨강 위 글자 대비 확보 |
+| `background` | 라이트 | `oklch(0.9711 0.0074 80.7)` | `oklch(0.958 0.0105 79)` | 카드보다 한 단 어둡게(B-39) |
+| `card`, `popover` | 라이트 | 바탕과 같음 | `oklch(0.993 0.0035 85)` | 바탕 위로 떠 보이게(B-39) |
+| `sidebar` | 라이트 | `oklch(0.937 0.0142 74.4)` | `oklch(0.928 0.0175 75)` | 바탕보다 한 단 어둡게 |
+| `sidebar` | 다크 | 바탕과 같음 | `oklch(0.232 0.024 151)` | 바탕보다 한 단 어둡게 |
+| `shadow-2xs`, `shadow-xs` | 라이트 | 검정 5% | 따뜻한 갈색 4~5% 두 겹 | 베이지 바탕에서 회색 그림자가 탁해 보임 |
+
+면은 세 단으로 씁니다. 사이드바(가장 어둡게) → 바탕 → 카드·표 틀·필터 묶음(가장 밝게, `shadow-xs`). 바꾼 뒤 대비는 `muted-foreground`가 바탕·카드·사이드바 위에서 라이트 6.1:1 이상, 다크 7.7:1 이상입니다.
 
 ### 3.2 상태 토큰 (프로젝트 추가)
 
@@ -119,6 +127,7 @@ shadcn 표준 토큰(background, foreground, card, popover, primary, secondary, 
 | --- | --- | --- |
 | 페이지 제목 | `text-2xl font-semibold` | 24px |
 | 섹션 제목, 카드 제목 | `text-lg font-semibold` | 18px |
+| 지표 숫자(요약 띠·지표 타일 / 대시보드 카드) | `text-2xl` / `text-xl font-semibold tabular-nums leading-none` | 24px / 20px |
 | 본문 | `text-base` | 16px |
 | 표, 폼, 메뉴, 보조 본문 | `text-sm` | 14px |
 | 캡션, 데이터 기준 시각 | `text-xs text-muted-foreground` | 12px |
@@ -176,6 +185,24 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - 필터 결과가 비면 "필터 모두 지우기"를 함께 보여 줍니다. placeholder는 형식 예시에만 쓰고, 검색 범위는 라벨에 씁니다(예: `검색어(이름·그룹·잡)`).
 - `prefers-reduced-motion: reduce`이면 애니메이션·전환을 즉시 끝냅니다(`globals.css`). 새로고침 스피너는 100ms 넘게 걸릴 때만 보입니다.
 - 폼은 `@qa/shared`의 zod 스키마를 `zodResolver`로 그대로 씁니다. 서버와 같은 규칙으로 검증하기 위해서입니다. 폼 값과 요청 형태가 다르면(접속 폼: 포트 문자열, 쉼표 태그, Oracle 접속 방식) 값을 요청 형태로 바꾼 뒤 같은 스키마로 검사하는 resolver를 씁니다(`components/connections/connection-form.tsx`).
+
+### 8.1.2 상태가 보이는 화면 (B-39)
+
+| 경로 | 내용 |
+| --- | --- |
+| `components/shell/brand-mark.tsx` | 브랜드 마크. 사이드바 머리와 로그인 화면에 쓴다 |
+| `components/dashboard/health-summary.tsx` | 대시보드 요약 띠. 전체·장애·연결 불가·경고·정상 수. 누르면 그 상태만 화면에서 거른다(`aria-pressed`) |
+| `components/dashboard/trigger-distribution.tsx` | 트리거 상태 분포 막대. 인라인 스타일 없이 SVG 좌표로 그리고, 상태별 수를 `aria-label`로 전한다 |
+| `components/schedulers/scheduler-stats.tsx` | 스케줄러 상세 지표 띠(활성 노드, 트리거+분포, 실행 중, 오류·차단) |
+| `components/status/tones.ts`의 `TONE_CLASSES` | 톤별 정적 클래스(띠 `rail`, SVG `fill`, 아이콘 바탕 `soft`). `bg-${tone}`처럼 만들지 않는다 |
+
+- 손볼 것이 먼저 보이게 합니다. 대시보드 카드는 장애 → 연결 불가 → 경고 → 정상 → 감시 전 순서이고, 같은 상태는 이름순입니다.
+- 강조는 문제가 있을 때만 씁니다. 요약 띠와 지표 타일은 값이 0이면 중립(muted) 아이콘 바탕, 0보다 크면 해당 톤의 `-subtle` 바탕을 씁니다.
+- 카드 위 4px 상태 띠(`rail`)는 보조 표시입니다. 상태의 뜻은 항상 배지(아이콘 + 글자)가 전합니다.
+- 분포 막대는 범례 배지와 함께 둡니다. 막대만으로 수를 읽게 하지 않습니다.
+- 목록 위 필터는 한 면(`FilterPanel`: 테두리 + `bg-card`)에 모아 표와 구분합니다. 필터 지우기는 그 안의 ghost 버튼입니다.
+- 상세 화면 탭은 `TabsList variant="line"`과 아래 테두리로 표 위 구역을 나눕니다.
+- 표 틀(`TableFrame`)의 머리 줄은 `bg-muted/60`입니다.
 
 ### 8.2 추가하는 방법
 

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -83,11 +84,13 @@ export function RefreshControls({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {REFRESH_INTERVALS.map((o) => (
-            <SelectItem key={o.value} value={String(o.value)}>
-              {o.label}
-            </SelectItem>
-          ))}
+          <SelectGroup>
+            {REFRESH_INTERVALS.map((o) => (
+              <SelectItem key={o.value} value={String(o.value)}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
         </SelectContent>
       </Select>
       <Button variant="outline" onClick={onRefresh} aria-busy={busy}>

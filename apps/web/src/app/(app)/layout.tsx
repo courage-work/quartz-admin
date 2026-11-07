@@ -16,13 +16,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <AppSidebar />
         {/* min-w-0: 넓은 표가 본문을 늘리지 않고 표 안에서 가로로 스크롤하게 한다 */}
         <SidebarInset className="min-w-0">
-          <header className="flex h-14 items-center gap-2 border-b border-border px-4">
+          <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background px-4">
             <SidebarTrigger />
             <div className="flex-1" />
             <ThemeToggle />
             <UserMenu />
           </header>
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6">{children}</div>
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">{children}</div>
         </SidebarInset>
       </SidebarProvider>
     </AuthGate>

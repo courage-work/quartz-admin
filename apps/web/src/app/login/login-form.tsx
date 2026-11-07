@@ -3,13 +3,13 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { APP_NAME, type LoginRequest, loginRequestSchema, type MeResponse } from '@qa/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClockIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { FormAlert } from '@/components/form/form-alert';
 import { TextField } from '@/components/form/text-field';
+import { BrandMark } from '@/components/shell/brand-mark';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,14 +57,18 @@ export function LoginForm() {
         <ThemeToggle />
       </div>
       <main className="flex flex-1 items-start justify-center px-6 pt-16">
-        <div className="w-full max-w-sm">
+        <div className="flex w-full max-w-sm flex-col gap-6">
+          <div className="flex items-center gap-3">
+            <BrandMark />
+            <div className="flex flex-col gap-0.5">
+              <span className="font-semibold">{APP_NAME}</span>
+              <span className="text-xs text-muted-foreground">Quartz 클러스터 관리</span>
+            </div>
+          </div>
           <Card>
             <CardHeader>
               <CardTitle>
-                <span className="flex items-center gap-2">
-                  <CalendarClockIcon aria-hidden />
-                  {APP_NAME}
-                </span>
+                <h1 className="text-lg font-semibold">로그인</h1>
               </CardTitle>
               <CardDescription>계정 아이디와 비밀번호로 로그인하세요.</CardDescription>
             </CardHeader>
@@ -97,7 +101,7 @@ export function LoginForm() {
               </form>
             </CardContent>
           </Card>
-          <p className="mt-4 text-center text-xs text-muted-foreground">
+          <p className="text-center text-xs text-muted-foreground">
             비밀번호를 잊었으면 관리자에게 초기화를 요청하세요.
           </p>
         </div>

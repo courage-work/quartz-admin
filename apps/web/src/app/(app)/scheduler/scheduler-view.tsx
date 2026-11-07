@@ -8,6 +8,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { FormAlert } from '@/components/form/form-alert';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
+import { SchedulerStats } from '@/components/schedulers/scheduler-stats';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge, ProdStripe } from '@/components/status/environment';
 import { SchedulerHealthBadge } from '@/components/status/status-badge';
@@ -67,9 +68,8 @@ function NotFound() {
 
 function Summary({ s }: { s: SchedulerDetailDto }) {
   const snap = s.snapshot;
-  const active = snap?.nodes?.filter((n) => n.active).length;
   return (
-    <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+    <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
       <span>
         접속{' '}
         <Link
@@ -84,11 +84,6 @@ function Summary({ s }: { s: SchedulerDetailDto }) {
         {' · '}
         {s.schedName}
       </span>
-      {snap?.nodes ? (
-        <span>
-          활성 노드 {active}/{snap.nodes.length} (기대 {s.expectedNodeCount})
-        </span>
-      ) : null}
       {snap?.status === 'unreachable' ? (
         <span>
           {snap.errorMessage} (연속 {snap.consecutiveFailures}회)
@@ -98,7 +93,7 @@ function Summary({ s }: { s: SchedulerDetailDto }) {
       {s.connection.readOnly || s.connection.writeCapable === false ? (
         <Badge variant="neutral">읽기 전용</Badge>
       ) : null}
-    </p>
+    </span>
   );
 }
 
@@ -152,13 +147,16 @@ export function SchedulerView() {
       <PageHeader
         title={s.displayName}
         description={
-          <span className="flex flex-wrap items-center gap-2">
-            <EnvBadge environment={s.connection.envLabel} />
-            {s.snapshot ? (
-              <SchedulerHealthBadge health={s.snapshot.status} />
-            ) : (
-              <Badge variant="neutral">감시 전</Badge>
-            )}
+          <span className="flex flex-col gap-2">
+            <span className="flex flex-wrap items-center gap-2">
+              <EnvBadge environment={s.connection.envLabel} />
+              {s.snapshot ? (
+                <SchedulerHealthBadge health={s.snapshot.status} />
+              ) : (
+                <Badge variant="neutral">감시 전</Badge>
+              )}
+            </span>
+            <Summary s={s} />
           </span>
         }
         actions={
@@ -172,10 +170,10 @@ export function SchedulerView() {
           />
         }
       />
-      <Summary s={s} />
+      <SchedulerStats s={s} />
       <Tabs value={tab} onValueChange={setTab}>
-        <div className="overflow-x-auto overflow-y-hidden pb-2">
-          <TabsList>
+        <div className="overflow-x-auto overflow-y-hidden border-b border-border pb-0.5">
+          <TabsList variant="line">
             {TABS.map((t) => (
               <TabsTrigger key={t.value} value={t.value}>
                 {t.label}

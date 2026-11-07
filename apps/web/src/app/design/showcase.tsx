@@ -59,6 +59,7 @@ import { Kbd } from '@/components/ui/kbd';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -339,9 +340,11 @@ export function DesignShowcase() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="prod">prod</SelectItem>
-                        <SelectItem value="stage">stage</SelectItem>
-                        <SelectItem value="dev">dev</SelectItem>
+                        <SelectGroup>
+                          <SelectItem value="prod">prod</SelectItem>
+                          <SelectItem value="stage">stage</SelectItem>
+                          <SelectItem value="dev">dev</SelectItem>
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </Field>

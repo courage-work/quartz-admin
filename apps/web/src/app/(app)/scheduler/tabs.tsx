@@ -33,6 +33,7 @@ import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -202,6 +203,15 @@ export function PausedGroupsTab({ schedulerId, refreshMs }: TabProps) {
 
 // ── 잡 ────────────────────────────────────────────────
 
+/** 목록 위 필터 묶음. 표와 구분되도록 한 면에 모은다 */
+function FilterPanel({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-xs">
+      {children}
+    </div>
+  );
+}
+
 function SearchForm({
   group,
   q,
@@ -251,16 +261,18 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <SearchForm
-        key={JSON.stringify(filter)}
-        group={filter.group ?? ''}
-        q={filter.q ?? ''}
-        qScope="이름·그룹·클래스"
-        onSubmit={(group, q) => {
-          setFilter({ group: group || undefined, q: q.trim() || undefined });
-          setPage(1);
-        }}
-      />
+      <FilterPanel>
+        <SearchForm
+          key={JSON.stringify(filter)}
+          group={filter.group ?? ''}
+          q={filter.q ?? ''}
+          qScope="이름·그룹·클래스"
+          onSubmit={(group, q) => {
+            setFilter({ group: group || undefined, q: q.trim() || undefined });
+            setPage(1);
+          }}
+        />
+      </FilterPanel>
       {res.isError ? <FormAlert message={res.error.message} /> : null}
       <DbTime dbNow={res.data?.dbNow} />
       <TableFrame>
@@ -345,86 +357,93 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">상태</span>
-        <ToggleGroup
-          type="multiple"
-          variant="outline"
-          value={states}
-          onValueChange={(v) => {
-            setStates(v);
-            setPage(1);
-          }}
-          aria-label="상태 필터"
-          className="flex-wrap"
-        >
-          {TRIGGER_STATES.filter((s) => s !== 'DELETED').map((s) => (
-            <ToggleGroupItem key={s} value={s}>
-              {TRIGGER_STATE_META[s].label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </div>
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">타입</span>
-        <ToggleGroup
-          type="multiple"
-          variant="outline"
-          value={types}
-          onValueChange={(v) => {
-            setTypes(v);
-            setPage(1);
-          }}
-          aria-label="타입 필터"
-          className="flex-wrap"
-        >
-          {TRIGGER_TYPES.map((t) => (
-            <ToggleGroupItem key={t} value={t}>
-              {TRIGGER_TYPE_LABELS[t]}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </div>
-      <div className="flex flex-wrap items-end gap-3">
-        <SearchForm
-          key={JSON.stringify(text)}
-          group={text.group ?? ''}
-          q={text.q ?? ''}
-          qScope="이름·그룹·잡"
-          onSubmit={(group, q) => {
-            setText({ group: group || undefined, q: q.trim() || undefined });
-            setPage(1);
-          }}
-        />
-        <Field className="w-44">
-          <FieldLabel htmlFor="view-sort">정렬</FieldLabel>
-          <Select value={sort} onValueChange={(v) => setSort(v as TriggerSort)}>
-            <SelectTrigger id="view-sort">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="key">그룹·이름 순</SelectItem>
-              <SelectItem value="nextFireTime">다음 실행 시각 순</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
-      </div>
-      {filtered ? (
-        <div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setStates([]);
-              setTypes([]);
-              setText({});
+      <FilterPanel>
+        <div className="flex flex-wrap gap-x-8 gap-y-4">
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-medium">상태</span>
+            <ToggleGroup
+              type="multiple"
+              variant="outline"
+              value={states}
+              onValueChange={(v) => {
+                setStates(v);
+                setPage(1);
+              }}
+              aria-label="상태 필터"
+              className="flex-wrap"
+            >
+              {TRIGGER_STATES.filter((s) => s !== 'DELETED').map((s) => {
+                const meta = TRIGGER_STATE_META[s];
+                return (
+                  <ToggleGroupItem key={s} value={s}>
+                    <meta.icon data-icon="inline-start" aria-hidden />
+                    {meta.label}
+                  </ToggleGroupItem>
+                );
+              })}
+            </ToggleGroup>
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-medium">타입</span>
+            <ToggleGroup
+              type="multiple"
+              variant="outline"
+              value={types}
+              onValueChange={(v) => {
+                setTypes(v);
+                setPage(1);
+              }}
+              aria-label="타입 필터"
+              className="flex-wrap"
+            >
+              {TRIGGER_TYPES.map((t) => (
+                <ToggleGroupItem key={t} value={t}>
+                  {TRIGGER_TYPE_LABELS[t]}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <SearchForm
+            key={JSON.stringify(text)}
+            group={text.group ?? ''}
+            q={text.q ?? ''}
+            qScope="이름·그룹·잡"
+            onSubmit={(group, q) => {
+              setText({ group: group || undefined, q: q.trim() || undefined });
               setPage(1);
             }}
-          >
-            필터 모두 지우기
-          </Button>
+          />
+          <Field className="w-44">
+            <FieldLabel htmlFor="view-sort">정렬</FieldLabel>
+            <Select value={sort} onValueChange={(v) => setSort(v as TriggerSort)}>
+              <SelectTrigger id="view-sort">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="key">그룹·이름 순</SelectItem>
+                  <SelectItem value="nextFireTime">다음 실행 시각 순</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          {filtered ? (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setStates([]);
+                setTypes([]);
+                setText({});
+                setPage(1);
+              }}
+            >
+              필터 모두 지우기
+            </Button>
+          ) : null}
         </div>
-      ) : null}
+      </FilterPanel>
       {res.isError ? <FormAlert message={res.error.message} /> : null}
       <DbTime dbNow={res.data?.dbNow} />
       <TableFrame>
