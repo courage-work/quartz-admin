@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -94,12 +95,14 @@ function FilterForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">전체</SelectItem>
-                {AUDIT_ACTIONS.map((action) => (
-                  <SelectItem key={action} value={action}>
-                    {AUDIT_ACTION_LABELS[action]}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  <SelectItem value="all">전체</SelectItem>
+                  {AUDIT_ACTIONS.map((action) => (
+                    <SelectItem key={action} value={action}>
+                      {AUDIT_ACTION_LABELS[action]}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </Field>
@@ -110,12 +113,14 @@ function FilterForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">전체</SelectItem>
-                {AUDIT_RESULTS.map((result) => (
-                  <SelectItem key={result} value={result}>
-                    {AUDIT_RESULT_META[result].label}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  <SelectItem value="all">전체</SelectItem>
+                  {AUDIT_RESULTS.map((result) => (
+                    <SelectItem key={result} value={result}>
+                      {AUDIT_RESULT_META[result].label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </Field>

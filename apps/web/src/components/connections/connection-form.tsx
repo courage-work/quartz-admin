@@ -41,6 +41,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -142,7 +143,6 @@ function TargetFields({
   const oracleModeId = useId();
   const dbType = form.watch('dbType');
   const oracleMode = form.watch('oracleMode');
-  const oracleNameError = form.getFieldState('oracleName', form.formState).error;
   const dbTypeError = form.getFieldState('dbType', form.formState).error;
 
   return (
@@ -164,16 +164,26 @@ function TargetFields({
                 field.onChange(kind);
               }}
             >
-              <SelectTrigger id={dbTypeId} className="w-full sm:w-64">
+              <SelectTrigger
+                id={dbTypeId}
+                aria-invalid={dbTypeError ? true : undefined}
+                className="w-full sm:w-64"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {DB_KINDS.map((kind) => (
-                  <SelectItem key={kind} value={kind} disabled={!SUPPORTED_DB_KINDS.includes(kind)}>
-                    {DB_KIND_LABELS[kind]}
-                    {SUPPORTED_DB_KINDS.includes(kind) ? '' : ' (지원 예정)'}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {DB_KINDS.map((kind) => (
+                    <SelectItem
+                      key={kind}
+                      value={kind}
+                      disabled={!SUPPORTED_DB_KINDS.includes(kind)}
+                    >
+                      {DB_KIND_LABELS[kind]}
+                      {SUPPORTED_DB_KINDS.includes(kind) ? '' : ' (지원 예정)'}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
             <FieldError errors={[dbTypeError]} />
@@ -187,28 +197,32 @@ function TargetFields({
         <TextField form={form} name="port" label="포트" autoComplete="off" />
       </div>
       {dbType === 'oracle' ? (
-        <Field data-invalid={oracleNameError ? true : undefined}>
-          <FieldLabel id={oracleModeId}>접속 방식</FieldLabel>
-          <Controller
-            control={form.control}
-            name="oracleMode"
-            render={({ field }) => (
-              <RadioGroup
-                aria-labelledby={oracleModeId}
-                value={field.value}
-                onValueChange={field.onChange}
-              >
-                <Field orientation="horizontal">
-                  <RadioGroupItem id={`${oracleModeId}-service`} value="service" />
-                  <FieldLabel htmlFor={`${oracleModeId}-service`}>서비스 이름</FieldLabel>
-                </Field>
-                <Field orientation="horizontal">
-                  <RadioGroupItem id={`${oracleModeId}-sid`} value="sid" />
-                  <FieldLabel htmlFor={`${oracleModeId}-sid`}>SID</FieldLabel>
-                </Field>
-              </RadioGroup>
-            )}
-          />
+        <>
+          <FieldSet>
+            <FieldLegend id={oracleModeId} variant="label">
+              접속 방식
+            </FieldLegend>
+            <Controller
+              control={form.control}
+              name="oracleMode"
+              render={({ field }) => (
+                <RadioGroup
+                  aria-labelledby={oracleModeId}
+                  value={field.value}
+                  onValueChange={field.onChange}
+                >
+                  <Field orientation="horizontal">
+                    <RadioGroupItem id={`${oracleModeId}-service`} value="service" />
+                    <FieldLabel htmlFor={`${oracleModeId}-service`}>서비스 이름</FieldLabel>
+                  </Field>
+                  <Field orientation="horizontal">
+                    <RadioGroupItem id={`${oracleModeId}-sid`} value="sid" />
+                    <FieldLabel htmlFor={`${oracleModeId}-sid`}>SID</FieldLabel>
+                  </Field>
+                </RadioGroup>
+              )}
+            />
+          </FieldSet>
           <TextField
             form={form}
             name="oracleName"
@@ -216,7 +230,7 @@ function TargetFields({
             autoComplete="off"
             description={oracleMode === 'sid' ? '예: ORCL' : '예: ORCLPDB1'}
           />
-        </Field>
+        </>
       ) : (
         <TextField form={form} name="database" label="DB 이름" autoComplete="off" />
       )}

@@ -157,13 +157,15 @@ function SchedulersCard({
               {schedulers.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell>
-                    <span className="font-medium">{s.displayName}</span>
-                    {missingIds.includes(s.id) ? (
-                      <Badge variant="warning" className="ml-2">
-                        <TriangleAlertIcon data-icon="inline-start" aria-hidden />
-                        최근 감지에서 찾지 못함
-                      </Badge>
-                    ) : null}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{s.displayName}</span>
+                      {missingIds.includes(s.id) ? (
+                        <Badge variant="warning">
+                          <TriangleAlertIcon data-icon="inline-start" aria-hidden />
+                          최근 감지에서 찾지 못함
+                        </Badge>
+                      ) : null}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <span className="font-mono">{s.schedName}</span>

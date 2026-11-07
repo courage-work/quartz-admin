@@ -2,7 +2,6 @@
 
 import { APP_NAME } from '@qa/shared';
 import {
-  CalendarClockIcon,
   DatabaseIcon,
   LayoutDashboardIcon,
   type LucideIcon,
@@ -12,6 +11,7 @@ import {
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { BrandMark } from '@/components/shell/brand-mark';
 import {
   Sidebar,
   SidebarContent,
@@ -83,10 +83,16 @@ export function AppSidebar() {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild size="lg">
+            <SidebarMenuButton asChild size="lg" tooltip={APP_NAME}>
               <Link href="/">
-                <CalendarClockIcon aria-hidden />
-                <span className="font-semibold">{APP_NAME}</span>
+                {/* 브랜드 마크: 접힌 사이드바(아이콘만)에서도 같은 자리에 남는다 */}
+                <BrandMark />
+                <span className="flex min-w-0 flex-col gap-0.5 leading-none">
+                  <span className="truncate font-semibold">{APP_NAME}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    Quartz 클러스터 관리
+                  </span>
+                </span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

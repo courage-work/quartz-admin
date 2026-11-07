@@ -1,6 +1,6 @@
 'use client';
 
-import { SCHEDULER_HEALTH, SEVERITIES } from '@qa/shared';
+import { type NodeDto, SCHEDULER_HEALTH, type SchedulerHealth, SEVERITIES } from '@qa/shared';
 import {
   InboxIcon,
   PauseIcon,
@@ -9,10 +9,14 @@ import {
   SearchIcon,
   Trash2Icon,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Code } from '@/components/code';
+import { type HealthCounts, HealthSummary } from '@/components/dashboard/health-summary';
+import { TriggerDistribution } from '@/components/dashboard/trigger-distribution';
+import { SchedulerStats, type SchedulerStatsInput } from '@/components/schedulers/scheduler-stats';
+import { BrandMark } from '@/components/shell/brand-mark';
 import { EnvBadge, ProdStripe } from '@/components/status/environment';
 import {
   SchedulerHealthBadge,
@@ -59,6 +63,7 @@ import { Kbd } from '@/components/ui/kbd';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -134,6 +139,40 @@ const SAMPLE_TRIGGERS: {
   },
 ];
 
+const SAMPLE_HEALTH: HealthCounts = { critical: 1, unreachable: 1, warning: 2, ok: 8 };
+
+const SAMPLE_TRIGGER_COUNTS: Record<string, number> = {
+  WAITING: 42,
+  ACQUIRED: 3,
+  EXECUTING: 5,
+  PAUSED: 6,
+  BLOCKED: 2,
+  ERROR: 1,
+};
+
+const sampleNode = (instanceName: string, active: boolean): NodeDto => ({
+  instanceName,
+  lastCheckinTime: null,
+  checkinInterval: 7_500,
+  active,
+  sinceCheckinMs: null,
+});
+
+/** 노드 하나가 빠지고 오류 트리거가 있는 상태 (지표 타일이 톤을 입는 경우) */
+const SAMPLE_STATS: SchedulerStatsInput = {
+  expectedNodeCount: 3,
+  snapshot: {
+    nodes: [sampleNode('node-1', true), sampleNode('node-2', true), sampleNode('node-3', false)],
+    triggerCounts: SAMPLE_TRIGGER_COUNTS,
+    executingCount: 5,
+  },
+};
+
+function HealthSummaryDemo() {
+  const [value, setValue] = useState<SchedulerHealth | undefined>(undefined);
+  return <HealthSummary total={12} counts={SAMPLE_HEALTH} value={value} onChange={setValue} />;
+}
+
 function Section({
   id,
   title,
@@ -163,7 +202,8 @@ export function DesignShowcase() {
     <div className="min-h-svh">
       <header className="sticky top-0 z-10 border-b bg-background">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
-          <div className="flex items-baseline gap-3">
+          <div className="flex items-center gap-3">
+            <BrandMark />
             <span className="font-semibold">quartz-admin</span>
             <span className="text-sm text-muted-foreground">디자인 시스템</span>
           </div>
@@ -339,9 +379,11 @@ export function DesignShowcase() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="prod">prod</SelectItem>
-                        <SelectItem value="stage">stage</SelectItem>
-                        <SelectItem value="dev">dev</SelectItem>
+                        <SelectGroup>
+                          <SelectItem value="prod">prod</SelectItem>
+                          <SelectItem value="stage">stage</SelectItem>
+                          <SelectItem value="dev">dev</SelectItem>
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </Field>
@@ -527,15 +569,61 @@ export function DesignShowcase() {
           </div>
         </Section>
 
-        <Section id="tabs" title="탭" description="상세 화면의 하위 보기 전환.">
+        <Section
+          id="overview"
+          title="상태 요약"
+          description="손볼 것이 먼저 보이게 한다. 값이 0이면 중립, 0보다 크면 톤 색. 막대는 범례 배지와 함께 둔다(DESIGN §8.1.2)."
+        >
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium">
+                대시보드 요약 띠 (누르면 그 상태만 거른다)
+              </span>
+              <HealthSummaryDemo />
+            </div>
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium">스케줄러 상세 지표 띠</span>
+              <SchedulerStats s={SAMPLE_STATS} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium">트리거 상태 분포</span>
+              <Card>
+                <CardContent>
+                  <div className="flex flex-col gap-2">
+                    <TriggerDistribution counts={SAMPLE_TRIGGER_COUNTS} />
+                    <div className="flex flex-wrap gap-1">
+                      {Object.entries(SAMPLE_TRIGGER_COUNTS).map(([state, n]) => {
+                        const meta = TRIGGER_STATE_META[state as TriggerState];
+                        return (
+                          <Badge key={state} variant={meta.tone} title={state}>
+                            <meta.icon data-icon="inline-start" aria-hidden />
+                            {meta.label} {n}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </Section>
+
+        <Section
+          id="tabs"
+          title="탭"
+          description='상세 화면의 하위 보기 전환. 선 탭(variant="line")과 아래 테두리로 표 위 구역을 나눈다.'
+        >
           <Tabs defaultValue="triggers">
-            <TabsList>
-              <TabsTrigger value="triggers">트리거</TabsTrigger>
-              <TabsTrigger value="jobs">잡</TabsTrigger>
-              <TabsTrigger value="nodes">
-                노드 <Badge variant="neutral">3</Badge>
-              </TabsTrigger>
-            </TabsList>
+            <div className="overflow-x-auto overflow-y-hidden border-b border-border pb-0.5">
+              <TabsList variant="line">
+                <TabsTrigger value="triggers">트리거</TabsTrigger>
+                <TabsTrigger value="jobs">잡</TabsTrigger>
+                <TabsTrigger value="nodes">
+                  노드 <Badge variant="neutral">3</Badge>
+                </TabsTrigger>
+              </TabsList>
+            </div>
             <TabsContent value="triggers">
               <p className="text-sm text-muted-foreground">트리거 목록이 들어갑니다.</p>
             </TabsContent>

@@ -88,12 +88,12 @@
 :root {
   --radius: 0.5rem;
 
-  /* tweakcn nature (light) */
-  --background: oklch(0.9711 0.0074 80.7211);
+  /* tweakcn nature (light). 면 3단(사이드바 < 바탕 < 카드)은 프로젝트에서 바꾼 값 (DESIGN §3.1) */
+  --background: oklch(0.958 0.0105 79);
   --foreground: oklch(0.3 0.0358 30.2042);
-  --card: oklch(0.9711 0.0074 80.7211);
+  --card: oklch(0.993 0.0035 85);
   --card-foreground: oklch(0.3 0.0358 30.2042);
-  --popover: oklch(0.9711 0.0074 80.7211);
+  --popover: oklch(0.993 0.0035 85);
   --popover-foreground: oklch(0.3 0.0358 30.2042);
   --primary: oklch(0.5234 0.1347 144.1672);
   --primary-foreground: oklch(1 0 0);
@@ -113,7 +113,7 @@
   --chart-3: oklch(0.5234 0.1347 144.1672);
   --chart-4: oklch(0.4254 0.1159 144.3078);
   --chart-5: oklch(0.2157 0.0453 145.7256);
-  --sidebar: oklch(0.937 0.0142 74.4218);
+  --sidebar: oklch(0.928 0.0175 75);
   --sidebar-foreground: oklch(0.3 0.0358 30.2042);
   --sidebar-primary: oklch(0.5234 0.1347 144.1672);
   --sidebar-primary-foreground: oklch(1 0 0);
@@ -138,8 +138,8 @@
   --destructive-subtle: oklch(0.94 0.03 25);
   --destructive-subtle-foreground: oklch(0.45 0.16 27);
 
-  --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-  --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+  --shadow-2xs: 0 1px 2px 0px oklch(0.3 0.04 40 / 0.04);
+  --shadow-xs: 0 1px 2px 0px oklch(0.3 0.04 40 / 0.05), 0 1px 3px 0px oklch(0.3 0.04 40 / 0.04);
   --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
   --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
   --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
@@ -175,7 +175,7 @@
   --chart-3: oklch(0.6731 0.1624 144.2083);
   --chart-4: oklch(0.6291 0.1543 144.2031);
   --chart-5: oklch(0.5752 0.1446 144.1813);
-  --sidebar: oklch(0.2683 0.0279 150.7681);
+  --sidebar: oklch(0.232 0.024 151);
   --sidebar-foreground: oklch(0.9423 0.0097 72.6595);
   --sidebar-primary: oklch(0.6731 0.1624 144.2083);
   --sidebar-primary-foreground: oklch(0.2157 0.0453 145.7256);

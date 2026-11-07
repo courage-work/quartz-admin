@@ -4,6 +4,7 @@ import {
   CLOCK_SKEW_WARN_MS,
   type DashboardQuery,
   type DashboardResponse,
+  type SchedulerHealth,
   type SchedulerSummaryDto,
 } from '@qa/shared';
 import { useQuery } from '@tanstack/react-query';
@@ -17,12 +18,20 @@ import {
 import Link from 'next/link';
 import { type FormEvent, useState } from 'react';
 
+import { countByHealth, HealthSummary } from '@/components/dashboard/health-summary';
+import { TriggerDistribution } from '@/components/dashboard/trigger-distribution';
 import { FormAlert } from '@/components/form/form-alert';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge } from '@/components/status/environment';
 import { SchedulerHealthBadge } from '@/components/status/status-badge';
-import { TRIGGER_STATE_META } from '@/components/status/tones';
+import {
+  HEALTH_ORDER,
+  SCHEDULER_HEALTH_META,
+  TONE_CLASSES,
+  TRIGGER_STATE_META,
+} from '@/components/status/tones';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -39,6 +48,7 @@ import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -50,14 +60,14 @@ import { DASHBOARD_KEY, formatAgo } from '@/lib/schedulers';
 
 const ALL = 'all';
 
-/** 카드에 보여 줄 트리거 상태와 순서. 나머지는 "그 밖"으로 묶는다 */
+/** 카드에 보여 줄 트리거 상태와 순서 */
 const CARD_STATES = ['WAITING', 'EXECUTING', 'ACQUIRED', 'PAUSED', 'BLOCKED', 'ERROR'] as const;
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1 px-3 first:pl-0">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-lg font-semibold tabular-nums" title={hint}>
+      <span className="text-xl leading-none font-semibold tabular-nums" title={hint}>
         {value}
       </span>
     </div>
@@ -75,15 +85,18 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
     snap?.clockSkewMs !== undefined &&
     Math.abs(snap.clockSkewMs) > CLOCK_SKEW_WARN_MS;
   const unreachable = snap?.status === 'unreachable';
+  const tone = snap ? SCHEDULER_HEALTH_META[snap.status].tone : 'neutral';
 
   return (
-    <Card>
+    <Card className="relative">
+      {/* 상태 띠: 카드 묶음에서 손볼 카드를 먼저 눈에 띄게 한다. 의미는 배지가 글자로 전한다 */}
+      <div aria-hidden className={`absolute inset-x-0 top-0 h-1 ${TONE_CLASSES[tone].rail}`} />
       <CardHeader>
         <CardTitle>
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-start justify-between gap-2">
             <Link
               href={`/scheduler?id=${item.id}`}
-              className="underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
+              className="text-lg font-semibold underline decoration-muted-foreground/50 underline-offset-4 hover:decoration-foreground"
             >
               {item.displayName}
             </Link>
@@ -99,14 +112,14 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
             <EnvBadge environment={item.connection.envLabel} />
             <span>{item.connection.name}</span>
             {item.schedName !== item.displayName ? (
-              <span className="font-mono">{item.schedName}</span>
+              <span className="font-mono text-xs">{item.schedName}</span>
             ) : null}
           </span>
         </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-4 divide-x divide-border">
             <Stat
               label="활성 노드"
               value={active === null ? '-' : `${active}/${nodes!.length}`}
@@ -120,42 +133,59 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
             <Stat label="열린 알림" value={String(item.openAlertCount)} />
           </div>
           {counts ? (
-            <div className="flex flex-wrap gap-1">
-              {CARD_STATES.filter((s) => (counts[s] ?? 0) > 0).map((s) => {
-                const meta = TRIGGER_STATE_META[s];
-                return (
-                  <Badge key={s} variant={meta.tone} title={s}>
-                    <meta.icon data-icon="inline-start" aria-hidden />
-                    {meta.label} {counts[s]}
-                  </Badge>
-                );
-              })}
+            <div className="flex flex-col gap-2">
+              <TriggerDistribution counts={counts} />
+              <div className="flex flex-wrap gap-1">
+                {CARD_STATES.filter((s) => (counts[s] ?? 0) > 0).map((s) => {
+                  const meta = TRIGGER_STATE_META[s];
+                  return (
+                    <Badge key={s} variant={meta.tone} title={s}>
+                      <meta.icon data-icon="inline-start" aria-hidden />
+                      {meta.label} {counts[s]}
+                    </Badge>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
           {unreachable ? (
-            <p className="flex items-start gap-2 text-sm text-muted-foreground">
-              <UnplugIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
-              <span>
-                {snap.errorMessage} (연속 {snap.consecutiveFailures}회)
-                {snap.dbNow !== null ? ` · 위 값은 ${formatDateTime(snap.dbNow)} 기준` : ''}
-              </span>
-            </p>
+            <Alert>
+              <UnplugIcon aria-hidden />
+              <AlertTitle>
+                대상 DB에 연결하지 못했습니다 (연속 {snap.consecutiveFailures}회)
+              </AlertTitle>
+              <AlertDescription>
+                {snap.errorMessage}
+                {snap.dbNow !== null ? ` 위 값은 ${formatDateTime(snap.dbNow)} 기준입니다.` : ''}
+              </AlertDescription>
+            </Alert>
           ) : null}
           {skewWarn ? (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <ClockAlertIcon className="size-4 shrink-0" aria-hidden />
-              도구 서버와 DB의 시계가 {Math.round(Math.abs(snap.clockSkewMs!) / 1000)}초 차이 납니다
-            </p>
+            <Alert variant="warning">
+              <ClockAlertIcon aria-hidden />
+              <AlertDescription>
+                도구 서버와 DB의 시계가 {Math.round(Math.abs(snap.clockSkewMs!) / 1000)}초 차이
+                납니다
+              </AlertDescription>
+            </Alert>
           ) : null}
-          <p className="text-xs text-muted-foreground">
-            {snap
-              ? `마지막 감시 ${formatAgo(now - snap.polledAt)} · ${item.pollIntervalSec}초마다`
-              : '첫 감시를 기다리는 중입니다'}
-          </p>
         </div>
       </CardContent>
+      <div className="mt-auto border-t border-border px-6 pt-4">
+        <p className="text-xs text-muted-foreground">
+          {snap
+            ? `마지막 감시 ${formatAgo(now - snap.polledAt)} · ${item.pollIntervalSec}초마다`
+            : '첫 감시를 기다리는 중입니다'}
+        </p>
+      </div>
     </Card>
   );
+}
+
+/** 손볼 상태가 먼저, 같은 상태끼리는 이름순 */
+function bySeverity(a: SchedulerSummaryDto, b: SchedulerSummaryDto): number {
+  const rank = (i: SchedulerSummaryDto) => (i.snapshot ? HEALTH_ORDER[i.snapshot.status] : 9);
+  return rank(a) - rank(b) || a.displayName.localeCompare(b.displayName, 'ko');
 }
 
 function Filters({
@@ -184,12 +214,14 @@ function Filters({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>전체</SelectItem>
-            {data?.envs.map((env) => (
-              <SelectItem key={env} value={env}>
-                {env}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              <SelectItem value={ALL}>전체</SelectItem>
+              {data?.envs.map((env) => (
+                <SelectItem key={env} value={env}>
+                  {env}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
       </Field>
@@ -203,12 +235,14 @@ function Filters({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>전체</SelectItem>
-            {data?.tags.map((tag) => (
-              <SelectItem key={tag} value={tag}>
-                {tag}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              <SelectItem value={ALL}>전체</SelectItem>
+              {data?.tags.map((tag) => (
+                <SelectItem key={tag} value={tag}>
+                  {tag}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
       </Field>
@@ -254,6 +288,7 @@ function NoSchedulers() {
  */
 export function DashboardView() {
   const [filter, setFilter] = useState<DashboardQuery>({});
+  const [health, setHealth] = useState<SchedulerHealth | undefined>(undefined);
   const [refreshMs, setRefreshMs] = useRefreshInterval();
   const dashboard = useQuery({
     queryKey: [...DASHBOARD_KEY, filter],
@@ -289,14 +324,34 @@ export function DashboardView() {
         </EmptyContent>
       </Empty>
     );
-  else
+  else {
+    const items = dashboard.data.items
+      .filter((i) => health === undefined || i.snapshot?.status === health)
+      .sort(bySeverity);
     body = (
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {dashboard.data.items.map((item) => (
-          <SchedulerCard key={item.id} item={item} now={now} />
-        ))}
-      </div>
+      <>
+        {items.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>이 상태인 스케줄러가 없습니다</EmptyTitle>
+              <EmptyDescription>위 요약에서 다른 상태를 고르거나 전체를 보세요.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button variant="outline" onClick={() => setHealth(undefined)}>
+                전체 보기
+              </Button>
+            </EmptyContent>
+          </Empty>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {items.map((item) => (
+              <SchedulerCard key={item.id} item={item} now={now} />
+            ))}
+          </div>
+        )}
+      </>
     );
+  }
 
   return (
     <>
@@ -314,6 +369,14 @@ export function DashboardView() {
           />
         }
       />
+      {dashboard.data && dashboard.data.items.length > 0 ? (
+        <HealthSummary
+          total={dashboard.data.items.length}
+          counts={countByHealth(dashboard.data.items)}
+          value={health}
+          onChange={setHealth}
+        />
+      ) : null}
       {/* 필터를 지우면 입력칸도 비우도록 다시 만든다 */}
       <Filters
         key={JSON.stringify(filter)}
