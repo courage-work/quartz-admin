@@ -164,6 +164,7 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - 스크린 리더용 영문 문구(Close, Toggle Sidebar, Loading 등)를 한국어로 바꿨습니다(NFR-UX-01). 다시 받을 때 확인합니다.
 - `hooks/use-mobile.ts`는 effect 안에서 setState를 부르지 않도록 `useSyncExternalStore`로 바꿨습니다(react-hooks 린트).
 - `alert`에 상태 톤 variant `success`, `warning`을 더했습니다(B-13, 연결 테스트 결과 안내). 오류는 기존 `destructive`를 씁니다.
+- `dropdown-menu`의 메뉴 너비를 트리거 너비(`w-(--radix-dropdown-menu-trigger-width)`)에서 내용 너비(`w-max`, 화면 안 최대 너비까지)로 바꿨습니다. 아이콘 버튼(36px)으로 여는 메뉴가 최소 128px에 묶여 "시스템 설정" 같은 항목이 줄바꿈되던 문제입니다(B-39).
 
 ### 8.1.1 셸과 화면 공통 부품 (B-06)
 
