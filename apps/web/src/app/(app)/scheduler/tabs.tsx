@@ -16,7 +16,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { CircleCheckIcon, HistoryIcon, PauseIcon, SearchIcon, UnplugIcon } from 'lucide-react';
 import Link from 'next/link';
-import { type FormEvent, type ReactNode, useId, useState } from 'react';
+import { type FormEvent, type ReactNode, useId, useRef, useState } from 'react';
 
 import { FormAlert } from '@/components/form/form-alert';
 import { TableFrame } from '@/components/table-frame';
@@ -48,6 +48,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { useSlashFocus } from '@/hooks/use-slash-focus';
 import { api, type Query } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { formatAgo, formatInterval, schedulerViewKey, TRIGGER_TYPE_LABELS } from '@/lib/schedulers';
@@ -102,7 +103,7 @@ function EmptyRow({ columns, children }: { columns: number; children: ReactNode 
 /** 클러스터 노드 (FR-VIEW-02) */
 export function NodesTab({ schedulerId, refreshMs }: TabProps) {
   const res = useView<NodesResponse>(schedulerId, 'nodes', 'nodes', refreshMs);
-  if (res.isError) return <FormAlert message={res.error.message} />;
+  if (res.isError) return <FormAlert error={res.error} />;
   return (
     <div className="flex flex-col gap-2">
       <DbTime dbNow={res.data?.dbNow} />
@@ -169,7 +170,7 @@ export function NodesTab({ schedulerId, refreshMs }: TabProps) {
 /** 일시정지된 트리거 그룹 (FR-VIEW-02) */
 export function PausedGroupsTab({ schedulerId, refreshMs }: TabProps) {
   const res = useView<PausedGroupsResponse>(schedulerId, 'paused', 'paused-groups', refreshMs);
-  if (res.isError) return <FormAlert message={res.error.message} />;
+  if (res.isError) return <FormAlert error={res.error} />;
   if (!res.data) return <Skeleton className="h-16 w-full" />;
   return (
     <div className="flex flex-col gap-3">
@@ -186,16 +187,24 @@ export function PausedGroupsTab({ schedulerId, refreshMs }: TabProps) {
       {res.data.groups.length === 0 ? (
         <p className="text-sm text-muted-foreground">일시정지된 트리거 그룹이 없습니다.</p>
       ) : (
-        <ul className="flex flex-wrap gap-2">
-          {res.data.groups.map((g) => (
-            <li key={g}>
-              <Badge variant="neutral">
-                <PauseIcon data-icon="inline-start" aria-hidden />
-                <span className="font-mono">{g}</span>
-              </Badge>
-            </li>
-          ))}
-        </ul>
+        <TableFrame>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>일시정지된 트리거 그룹 ({res.data.groups.length})</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {res.data.groups.map((g) => (
+                <TableRow key={g}>
+                  <TableCell>
+                    <span className="font-mono">{g}</span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableFrame>
       )}
     </div>
   );
@@ -227,6 +236,8 @@ function SearchForm({
   const [g, setG] = useState(group);
   const [text, setText] = useState(q);
   const id = useId();
+  const qRef = useRef<HTMLInputElement>(null);
+  useSlashFocus(qRef);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     onSubmit(g, text);
@@ -239,7 +250,14 @@ function SearchForm({
       </Field>
       <Field className="w-64">
         <FieldLabel htmlFor={`${id}-q`}>검색어({qScope})</FieldLabel>
-        <Input id={`${id}-q`} value={text} onChange={(e) => setText(e.target.value)} />
+        <Input
+          ref={qRef}
+          id={`${id}-q`}
+          type="search"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          aria-keyshortcuts="/"
+        />
       </Field>
       <Button type="submit" variant="outline">
         <SearchIcon data-icon="inline-start" aria-hidden />
@@ -273,7 +291,7 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
           }}
         />
       </FilterPanel>
-      {res.isError ? <FormAlert message={res.error.message} /> : null}
+      {res.isError ? <FormAlert error={res.error} /> : null}
       <DbTime dbNow={res.data?.dbNow} />
       <TableFrame>
         <Table>
@@ -444,7 +462,7 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
           ) : null}
         </div>
       </FilterPanel>
-      {res.isError ? <FormAlert message={res.error.message} /> : null}
+      {res.isError ? <FormAlert error={res.error} /> : null}
       <DbTime dbNow={res.data?.dbNow} />
       <TableFrame>
         <TriggerTable
@@ -465,7 +483,7 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
 /** 실행 중이거나 획득된 트리거 (FR-VIEW-05). 활성 노드가 아닌 인스턴스의 기록은 구분해 보여 준다 */
 export function ExecutingTab({ schedulerId, refreshMs }: TabProps) {
   const res = useView<ExecutingResponse>(schedulerId, 'executing', 'executing', refreshMs);
-  if (res.isError) return <FormAlert message={res.error.message} />;
+  if (res.isError) return <FormAlert error={res.error} />;
   const stale = res.data?.items.filter((e) => e.stale).length ?? 0;
   return (
     <div className="flex flex-col gap-3">

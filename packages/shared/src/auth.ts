@@ -23,13 +23,24 @@ export const passwordSchema = z
 
 /** 로그인은 형식 검사를 느슨하게 한다. 규칙을 알려주면 계정 추측에 도움이 되기 때문이다 */
 export const loginRequestSchema = z.object({
-  username: z.string().trim().toLowerCase().min(1).max(64),
-  password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+  username: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .min(1, { error: '아이디를 입력하세요' })
+    .max(64, { error: '아이디는 64자까지입니다' }),
+  password: z
+    .string()
+    .min(1, { error: '비밀번호를 입력하세요' })
+    .max(PASSWORD_MAX_LENGTH, { error: '비밀번호가 너무 깁니다' }),
 });
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
 export const changePasswordRequestSchema = z.object({
-  currentPassword: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+  currentPassword: z
+    .string()
+    .min(1, { error: '현재 비밀번호를 입력하세요' })
+    .max(PASSWORD_MAX_LENGTH, { error: '비밀번호가 너무 깁니다' }),
   newPassword: passwordSchema,
 });
 export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;

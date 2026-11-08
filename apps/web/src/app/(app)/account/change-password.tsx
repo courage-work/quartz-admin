@@ -30,6 +30,7 @@ type FormValues = z.infer<typeof formSchema>;
 export function AccountView() {
   const user = useCurrentUser();
   const form = useForm<FormValues>({
+    mode: 'onTouched',
     resolver: zodResolver(formSchema),
     defaultValues: { currentPassword: '', newPassword: '', confirmPassword: '' },
   });

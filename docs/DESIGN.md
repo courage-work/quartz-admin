@@ -2,9 +2,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.3 |
+| 문서 버전 | v0.4 |
 | 작성일 | 2026-11-06 |
-| 관련 작업 | B-37, B-39(`docs/BACKLOG.md`) |
+| 관련 작업 | B-37, B-38, B-39(`docs/BACKLOG.md`), `.ux-profile.md` |
 | 확인 화면 | `/design` (`apps/web/src/app/design/`) |
 
 화면을 만들 때 이 문서와 `/design` 화면을 기준으로 삼습니다. 규칙 대부분은 `@shadcn/lint`가 `pnpm lint`에서 검사합니다.
@@ -22,7 +22,7 @@
 | 상태 색 | success, warning, info, destructive + neutral | 트리거·스케줄러 상태와 알림 심각도 표현 |
 | prod 구분 | 빨간 채운 배지 + 상세 화면·확인 대화상자 맨 위 빨간 띠 | NFR-UX-02 |
 | 면 계층 | 사이드바 < 바탕 < 카드 3단, 카드에 옅은 그림자 | 바탕과 카드가 같은 색이면 면이 테두리로만 구분돼 화면이 납작해 보임(B-39) |
-| 밀도 | shadcn 기본(컨트롤 높이 36px) | |
+| 밀도 | 마우스는 shadcn 기본(컨트롤 36px), 터치 기기는 44px | 넓은 표를 한눈에 보는 운영 화면이라 마우스 밀도는 유지하고, 터치에서만 WCAG 권장 크기로 키움(B-38) |
 | 둥글기 | nature 기본 `--radius: 0.5rem` | |
 | 린트 | `@shadcn/lint` 6개 규칙 모두 error | 화면 코드가 아직 없을 때 엄격하게 시작 |
 
@@ -56,6 +56,7 @@ shadcn 표준 토큰(background, foreground, card, popover, primary, secondary, 
 | `sidebar` | 라이트 | `oklch(0.937 0.0142 74.4)` | `oklch(0.928 0.0175 75)` | 바탕보다 한 단 어둡게 |
 | `sidebar` | 다크 | 바탕과 같음 | `oklch(0.232 0.024 151)` | 바탕보다 한 단 어둡게 |
 | `shadow-2xs`, `shadow-xs` | 라이트 | 검정 5% | 따뜻한 갈색 4~5% 두 겹 | 베이지 바탕에서 회색 그림자가 탁해 보임 |
+| `shadow-sm`~`shadow-2xl` | 라이트 | 검정 10~25% | 따뜻한 갈색 7% 이하, 넓게 퍼짐 | 라이트 그림자 알파는 0.08 미만(VectorLab colour-palette) |
 
 면은 세 단으로 씁니다. 사이드바(가장 어둡게) → 바탕 → 카드·표 틀·필터 묶음(가장 밝게, `shadow-xs`). 바꾼 뒤 대비는 `muted-foreground`가 바탕·카드·사이드바 위에서 라이트 6.1:1 이상, 다크 7.7:1 이상입니다.
 
@@ -142,6 +143,8 @@ D2Coding은 KS X 1001 서브셋을 씁니다. 서브셋에 없는 한글은 Pret
 
 - 간격은 Tailwind 4px 단위(`gap-2`, `p-4`)만 씁니다. 임의 값(`p-[13px]`)은 lint 오류입니다.
 - 컨트롤 높이는 shadcn 기본입니다. 버튼·입력 36px(`h-9`), 작은 버튼 32px(`size="sm"`), 큰 버튼 40px(`size="lg"`).
+- 터치 기기(`pointer: coarse`)에서는 조작 요소가 44px입니다. `components/ui/`의 버튼·입력·선택 상자·토글·탭·사이드바 항목에 `pointer-coarse:h-11`(아이콘 버튼 `pointer-coarse:size-11`)을, 메뉴 항목에 `pointer-coarse:py-3`을 넣었고, 체크박스·라디오·스위치는 `after:` 가상 요소로 보이지 않는 터치 영역을 44px까지 넓혔습니다. 표·문장 안의 텍스트 링크는 WCAG 인라인 예외로 둡니다(B-38).
+- 화면 폭 기준은 3개입니다. narrow 375px, medium 768px(`md:`), wide 1280px(`xl:`). 화면 코드에서는 `md:`, `xl:`만 씁니다(shadcn 원본 안의 `sm:`는 그대로 둠).
 - 둥글기는 `--radius: 0.5rem`에서 계산합니다(`rounded-md` 6.4px, `rounded-lg` 8px, `rounded-xl` 11.2px).
 - 페이지 본문 폭은 `max-w-6xl`, 좌우 여백은 `px-6`(모바일 375px에서도 가로 스크롤 없음)입니다.
 
@@ -165,6 +168,9 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - `hooks/use-mobile.ts`는 effect 안에서 setState를 부르지 않도록 `useSyncExternalStore`로 바꿨습니다(react-hooks 린트).
 - `alert`에 상태 톤 variant `success`, `warning`을 더했습니다(B-13, 연결 테스트 결과 안내). 오류는 기존 `destructive`를 씁니다.
 - `dropdown-menu`의 메뉴 너비를 트리거 너비(`w-(--radix-dropdown-menu-trigger-width)`)에서 내용 너비(`w-max`, 화면 안 최대 너비까지)로 바꿨습니다. 아이콘 버튼(36px)으로 여는 메뉴가 최소 128px에 묶여 "시스템 설정" 같은 항목이 줄바꿈되던 문제입니다(B-39).
+- 대화상자·시트 배경(overlay)의 흐림(`backdrop-blur-xs`)을 빼고 `bg-black/40`으로 가렸습니다. 흐림은 경계가 흐려 보여 쓰지 않습니다(VectorLab anti-slop, B-39 점검).
+- 드롭다운·팝오버·선택 상자·툴팁의 등장 효과에서 95% 확대(`zoom-in-95`)를 빼고 투명도만 바꿉니다(VectorLab transitions: 팝오버는 투명도, 크기 변화 1.02 이하).
+- 사이드바 접기·펼치기에서 너비·위치 전환(`transition-[width]` 등)을 빼 즉시 바뀌게 했습니다. 너비는 애니메이션하지 않습니다(VectorLab motion).
 
 ### 8.1.1 셸과 화면 공통 부품 (B-06)
 
@@ -206,6 +212,25 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - 목록 위 필터는 한 면(`FilterPanel`: 테두리 + `bg-card`)에 모아 표와 구분합니다. 필터 지우기는 그 안의 ghost 버튼입니다.
 - 상세 화면 탭은 `TabsList variant="line"`과 아래 테두리로 표 위 구역을 나눕니다.
 - 표 틀(`TableFrame`)의 머리 줄은 `bg-muted/60`입니다.
+- 정적인 메타데이터(접속 태그 등)는 알약 배지로 감싸지 않고 `·`로 이은 글자로 씁니다. 배지는 상태·환경처럼 뜻이 있는 값에만 씁니다.
+- 일시정지 그룹처럼 이름만 있는 목록도 표 틀 안의 목록으로 보여 줍니다.
+- 모든 폼은 `mode: 'onTouched'`입니다(처음 벗어날 때 검사, 그 뒤 고칠 때마다 다시 검사). 폼에 쓰는 zod 스키마는 한국어 오류 문구를 둡니다.
+
+### 8.1.3 목록·폼·오버레이 기준 (B-38)
+
+| 경로 | 내용 |
+| --- | --- |
+| `components/list/list-search.tsx` | 목록 검색칸. 보이는 라벨(`검색(범위)`), 돋보기, `/` 단축키 표시. Esc로 지운다 |
+| `hooks/use-slash-focus.ts` | 화면 어디서든 `/`로 검색칸에 포커스. 입력 중이거나 대화상자가 열려 있으면 건너뛴다 |
+| `lib/paging.ts` | 화면에서 나누는 목록의 페이지(50건)와 검색어 일치 |
+| `components/form/form-actions.tsx` | 폼 아래 취소·저장 줄. 화면 아래에 붙어 있다(`sticky bottom-0`) |
+| `components/form/form-alert.tsx` | 서버·네트워크 오류면 "오류 정보 복사"(시각, 요청, 상태, 요청 ID, 메시지)를 함께 둔다 |
+
+- **목록 화면**(접속, 사용자, 감사 로그): 검색칸은 항상 보이고 `/`로 포커스합니다. 표는 표 틀 안에 두고, 결과가 없으면 표 틀 안에서 알리며 지우기 버튼을 둡니다. 페이지 이동 줄은 한 쪽뿐이어도 보입니다. 기본 정렬은 접속 이름순, 사용자 아이디순, 감사 로그 최신순입니다.
+- **감사 로그 필터**는 "필터" 버튼 하나(팝오버)에 기간·작업 종류·결과를 모으고, 적용한 값은 툴바 아래 칩으로 보여 하나씩 지울 수 있게 합니다. 사용자 아이디는 검색칸에서 Enter로 찾습니다(정확히 일치).
+- `/` 단축키는 대시보드, 스케줄러의 트리거·잡 탭 검색칸에도 있습니다.
+- **오버레이 선택**: 10초 안쪽 작업은 오른쪽 시트(비밀번호 초기화), 그보다 긴 입력은 별도 화면(`/users/new` 사용자 추가, `/scheduler/settings?id=N` 스케줄러 설정)입니다. 삭제·해제·비활성화는 대상 이름을 쓴 확인 대화상자입니다.
+- **폼 안전장치**: 접속 추가·수정 폼은 입력을 1초 뒤 임시 저장합니다(비밀번호 제외, 수정은 접속마다 따로, 그 사이 접속이 바뀌었으면 버림). 저장하지 않은 변경이 있으면 새로고침·탭 닫기 전에 브라우저가 묻습니다.
 
 ### 8.2 추가하는 방법
 

@@ -50,7 +50,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="sm:col-span-3">{children}</dd>
+      <dd className="md:col-span-3">{children}</dd>
     </>
   );
 }
@@ -183,7 +183,7 @@ export function JobView() {
   let body: ReactNode;
   if (!valid || isApiError(detail.error, 'NOT_FOUND'))
     body = <NotFound schedulerId={schedulerId} />;
-  else if (detail.isError) body = <FormAlert message={detail.error.message} />;
+  else if (detail.isError) body = <FormAlert error={detail.error} />;
   else if (detail.isPending) body = <Skeleton className="h-64 w-full" />;
   else {
     const { job, triggers, jobData } = detail.data;
@@ -192,7 +192,7 @@ export function JobView() {
       <>
         <Card>
           <CardContent>
-            <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
+            <dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-4">
               <Row label="그룹">
                 <span className="font-mono">{job.group}</span>
               </Row>

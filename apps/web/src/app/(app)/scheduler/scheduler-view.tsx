@@ -118,7 +118,7 @@ export function SchedulerView() {
   });
 
   if (id === null || isApiError(detail.error, 'NOT_FOUND')) return <NotFound />;
-  if (detail.isError) return <FormAlert message={detail.error.message} />;
+  if (detail.isError) return <FormAlert error={detail.error} />;
   if (detail.isPending) return <Skeleton className="h-64 w-full" />;
   const s = detail.data;
 

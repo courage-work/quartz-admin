@@ -140,12 +140,13 @@
 
   --shadow-2xs: 0 1px 2px 0px oklch(0.3 0.04 40 / 0.04);
   --shadow-xs: 0 1px 2px 0px oklch(0.3 0.04 40 / 0.05), 0 1px 3px 0px oklch(0.3 0.04 40 / 0.04);
-  --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
-  --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 4px 6px -1px hsl(0 0% 0% / 0.1);
-  --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 8px 10px -1px hsl(0 0% 0% / 0.1);
-  --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+  /* 라이트 그림자는 알파 0.08 미만, 넓게 퍼지게 (VectorLab colour-palette) */
+  --shadow-sm: 0 1px 3px 0px oklch(0.3 0.04 40 / 0.06), 0 1px 2px -1px oklch(0.3 0.04 40 / 0.05);
+  --shadow: 0 1px 3px 0px oklch(0.3 0.04 40 / 0.06), 0 1px 2px -1px oklch(0.3 0.04 40 / 0.05);
+  --shadow-md: 0 2px 6px -1px oklch(0.3 0.04 40 / 0.07), 0 1px 3px -1px oklch(0.3 0.04 40 / 0.05);
+  --shadow-lg: 0 4px 12px -2px oklch(0.3 0.04 40 / 0.07), 0 2px 4px -2px oklch(0.3 0.04 40 / 0.05);
+  --shadow-xl: 0 8px 20px -4px oklch(0.3 0.04 40 / 0.07), 0 4px 8px -4px oklch(0.3 0.04 40 / 0.05);
+  --shadow-2xl: 0 16px 32px -8px oklch(0.3 0.04 40 / 0.07);
 }
 
 .dark {
