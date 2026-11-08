@@ -69,7 +69,7 @@ export function DeleteImpactDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
-        {impact.isError ? <FormAlert message={impact.error.message} /> : null}
+        {impact.isError ? <FormAlert error={impact.error} /> : null}
         {impact.isPending ? <Skeleton className="h-16 w-full" /> : null}
         {impact.data ? (
           <div className="flex flex-col gap-2 text-sm">

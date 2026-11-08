@@ -16,7 +16,7 @@ import {
   UnplugIcon,
 } from 'lucide-react';
 import Link from 'next/link';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useRef, useState } from 'react';
 
 import { countByHealth, HealthSummary } from '@/components/dashboard/health-summary';
 import { TriggerDistribution } from '@/components/dashboard/trigger-distribution';
@@ -54,6 +54,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useSlashFocus } from '@/hooks/use-slash-focus';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { DASHBOARD_KEY, formatAgo } from '@/lib/schedulers';
@@ -198,6 +199,8 @@ function Filters({
   onChange: (next: DashboardQuery) => void;
 }) {
   const [q, setQ] = useState(value.q ?? '');
+  const qRef = useRef<HTMLInputElement>(null);
+  useSlashFocus(qRef);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     onChange({ ...value, q: q.trim() || undefined });
@@ -247,8 +250,15 @@ function Filters({
         </Select>
       </Field>
       <Field className="w-64">
-        <FieldLabel htmlFor="dash-q">이름(스케줄러·접속)</FieldLabel>
-        <Input id="dash-q" value={q} onChange={(e) => setQ(e.target.value)} />
+        <FieldLabel htmlFor="dash-q">검색(스케줄러·접속 이름)</FieldLabel>
+        <Input
+          ref={qRef}
+          id="dash-q"
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-keyshortcuts="/"
+        />
       </Field>
       <Button type="submit" variant="outline">
         <SearchIcon data-icon="inline-start" aria-hidden />
@@ -300,7 +310,7 @@ export function DashboardView() {
   const now = dashboard.data?.generatedAt ?? 0;
 
   let body;
-  if (dashboard.isError) body = <FormAlert message={dashboard.error.message} />;
+  if (dashboard.isError) body = <FormAlert error={dashboard.error} />;
   else if (dashboard.isPending)
     body = (
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

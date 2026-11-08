@@ -40,12 +40,14 @@ const MAIN_NAV: NavItem[] = [
     href: '/connections',
     label: '접속',
     icon: DatabaseIcon,
-    match: ['/connection', '/connection/edit', '/connections/new'],
+    match: ['/connection', '/connection/edit', '/connections/new', '/scheduler/settings'],
   },
   { href: '/audit-logs', label: '감사 로그', icon: ScrollTextIcon, match: ['/audit-log'] },
 ];
 
-const ADMIN_NAV: NavItem[] = [{ href: '/users', label: '사용자', icon: UsersIcon }];
+const ADMIN_NAV: NavItem[] = [
+  { href: '/users', label: '사용자', icon: UsersIcon, match: ['/users/new'] },
+];
 
 function isActive(pathname: string, item: NavItem): boolean {
   const path = pathname.replace(/\.html$/, '').replace(/\/+$/, '') || '/';

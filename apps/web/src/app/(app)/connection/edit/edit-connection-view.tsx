@@ -33,7 +33,7 @@ export function EditConnectionView() {
 
   let body;
   if (id === null || isApiError(connection.error, 'NOT_FOUND')) body = <ConnectionNotFound />;
-  else if (connection.isError) body = <FormAlert message={connection.error.message} />;
+  else if (connection.isError) body = <FormAlert error={connection.error} />;
   else if (connection.isPending) body = <Skeleton className="h-96 w-full max-w-3xl" />;
   // 값을 다 받은 뒤에 폼을 만든다(react-hook-form 기본값은 처음 한 번만 쓰인다)
   else body = <ConnectionForm key={connection.data.updatedAt} connection={connection.data} />;

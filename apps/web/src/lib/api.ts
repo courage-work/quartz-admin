@@ -10,6 +10,8 @@ export class ApiRequestError extends Error {
     readonly code: ClientErrorCode,
     message: string,
     readonly details: ApiErrorBody['details'] = undefined,
+    /** 지원 문의용 정보. 서버 로그를 찾는 요청 ID(`X-Request-Id`)와 요청 경로 */
+    readonly context: { method?: string; path?: string; requestId?: string | null } = {},
   ) {
     super(message);
     this.name = 'ApiRequestError';
@@ -18,6 +20,22 @@ export class ApiRequestError extends Error {
   /** 다시 시도해도 결과가 같은 오류(4xx) */
   get isClientError(): boolean {
     return this.status >= 400 && this.status < 500;
+  }
+
+  /** 서버·네트워크 문제(5xx, 연결 실패). 화면에 "오류 정보 복사"를 함께 둔다 (VectorLab errors) */
+  get isTechnical(): boolean {
+    return this.status === 0 || this.status >= 500;
+  }
+
+  /** 지원 문의에 붙여 넣을 오류 정보. 스택이나 응답 원문은 넣지 않는다 */
+  supportText(now: Date = new Date()): string {
+    return [
+      `시각: ${now.toISOString()}`,
+      `요청: ${this.context.method ?? '-'} ${this.context.path ?? '-'}`,
+      `상태: ${this.status} ${this.code}`,
+      `요청 ID: ${this.context.requestId ?? '-'}`,
+      `메시지: ${this.message}`,
+    ].join('\n');
   }
 }
 
@@ -86,7 +104,7 @@ export function createApiClient(deps: ApiClientDeps) {
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') throw err;
-      throw new ApiRequestError(0, 'NETWORK_ERROR', NETWORK_MESSAGE);
+      throw new ApiRequestError(0, 'NETWORK_ERROR', NETWORK_MESSAGE, undefined, { method, path });
     }
 
     if (res.ok) {
@@ -95,9 +113,10 @@ export function createApiClient(deps: ApiClientDeps) {
     }
 
     const body: unknown = await res.json().catch(() => null);
+    const context = { method, path, requestId: res.headers.get('X-Request-Id') };
     const error = isErrorBody(body)
-      ? new ApiRequestError(res.status, body.code, body.message, body.details)
-      : new ApiRequestError(res.status, 'INTERNAL_ERROR', UNKNOWN_MESSAGE);
+      ? new ApiRequestError(res.status, body.code, body.message, body.details, context)
+      : new ApiRequestError(res.status, 'INTERNAL_ERROR', UNKNOWN_MESSAGE, undefined, context);
     if (error.status === 401 && error.code === 'UNAUTHENTICATED' && !options.skipAuthRedirect) {
       deps.onUnauthenticated?.();
     }
