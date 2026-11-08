@@ -40,7 +40,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="sm:col-span-3">{children}</dd>
+      <dd className="md:col-span-3">{children}</dd>
     </>
   );
 }
@@ -88,7 +88,7 @@ function Detail({ log }: { log: AuditLogDto }) {
     <>
       <Card>
         <CardContent>
-          <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
+          <dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-4">
             <Row label="시각">{formatDateTime(log.at)}</Row>
             <Row label="사용자">
               <span className="font-mono">{describeActor(log)}</span>
@@ -138,7 +138,7 @@ export function AuditLogDetail() {
 
   let body: ReactNode;
   if (id === null || isApiError(log.error, 'NOT_FOUND')) body = <NotFound />;
-  else if (log.isError) body = <FormAlert message={log.error.message} />;
+  else if (log.isError) body = <FormAlert error={log.error} />;
   else if (log.isPending) body = <Skeleton className="h-64 w-full" />;
   else body = <Detail log={log.data} />;
 

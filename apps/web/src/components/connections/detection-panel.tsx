@@ -274,7 +274,7 @@ export function DetectionPanel({
             <TableSetCard key={set.prefix} set={set} selected={selected} onToggle={toggle} />
           ))}
 
-          {register.isError ? <FormAlert message={register.error.message} /> : null}
+          {register.isError ? <FormAlert error={register.error} /> : null}
 
           {detection &&
           detection.tableSets.some((s) =>

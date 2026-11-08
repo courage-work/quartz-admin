@@ -64,7 +64,7 @@ export function SchedulerStats({ s }: { s: SchedulerStatsInput }) {
   const nodeShort = active !== null && active < s.expectedNodeCount;
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       <StatTile
         label="활성 노드"
         value={active === null ? '-' : `${active}/${nodes!.length}`}

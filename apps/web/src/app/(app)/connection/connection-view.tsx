@@ -17,7 +17,6 @@ import { toast } from 'sonner';
 import { ConnectionNotFound } from '@/components/connections/connection-not-found';
 import { DeleteImpactDialog } from '@/components/connections/delete-impact-dialog';
 import { DetectionPanel } from '@/components/connections/detection-panel';
-import { SchedulerSettingsDialog } from '@/components/connections/scheduler-settings-dialog';
 import { WriteStatusBadge } from '@/components/connections/write-status-badge';
 import { FormAlert } from '@/components/form/form-alert';
 import { PageHeader } from '@/components/shell/page-header';
@@ -66,7 +65,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="sm:col-span-3">{children}</dd>
+      <dd className="md:col-span-3">{children}</dd>
     </>
   );
 }
@@ -75,7 +74,7 @@ function InfoCard({ connection }: { connection: ConnectionDto }) {
   return (
     <Card>
       <CardContent>
-        <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
+        <dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-4">
           <Row label="DB">{DB_KIND_LABELS[connection.dbType]}</Row>
           <Row label="주소">
             <span className="font-mono">{describeAddress(connection)}</span>
@@ -104,12 +103,10 @@ function InfoCard({ connection }: { connection: ConnectionDto }) {
 function SchedulersCard({
   schedulers,
   missingIds,
-  onSettings,
   onDelete,
 }: {
   schedulers: SchedulerDto[] | undefined;
   missingIds: number[];
-  onSettings: (s: SchedulerDto) => void;
   onDelete: (s: SchedulerDto) => void;
 }) {
   return (
@@ -186,9 +183,11 @@ function SchedulersCard({
                           <TooltipContent>{s.displayName} 관리하기</TooltipContent>
                         </Tooltip>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => onSettings(s)}>
-                            <Settings2Icon aria-hidden />
-                            설정
+                          <DropdownMenuItem asChild>
+                            <Link href={`/scheduler/settings?id=${s.id}`}>
+                              <Settings2Icon aria-hidden />
+                              설정
+                            </Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem variant="destructive" onSelect={() => onDelete(s)}>
                             <Trash2Icon aria-hidden />
@@ -215,7 +214,6 @@ export function ConnectionView() {
   const autoDetect = params.get('detect') === '1';
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [settings, setSettings] = useState<SchedulerDto | null>(null);
   const [unregistering, setUnregistering] = useState<SchedulerDto | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -267,7 +265,7 @@ export function ConnectionView() {
   });
 
   if (id === null || isApiError(connection.error, 'NOT_FOUND')) return <ConnectionNotFound />;
-  if (connection.isError) return <FormAlert message={connection.error.message} />;
+  if (connection.isError) return <FormAlert error={connection.error} />;
   if (connection.isPending) return <Skeleton className="h-64 w-full" />;
   const conn = connection.data;
 
@@ -315,7 +313,6 @@ export function ConnectionView() {
       <SchedulersCard
         schedulers={schedulers.data}
         missingIds={detect.data?.missingSchedulerIds ?? []}
-        onSettings={setSettings}
         onDelete={setUnregistering}
       />
       <DetectionPanel
@@ -326,7 +323,6 @@ export function ConnectionView() {
         onDetect={() => detect.mutate()}
       />
 
-      <SchedulerSettingsDialog scheduler={settings} onClose={() => setSettings(null)} />
       <DeleteImpactDialog
         open={unregistering !== null}
         title={`${unregistering?.displayName ?? ''} 스케줄러 등록을 해제할까요?`}

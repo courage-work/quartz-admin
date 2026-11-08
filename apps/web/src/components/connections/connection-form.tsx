@@ -18,11 +18,12 @@ import {
   TriangleAlertIcon,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useId, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Controller, type Resolver, useForm, type UseFormReturn } from 'react-hook-form';
 import { toast } from 'sonner';
 import type { z } from 'zod';
 
+import { FormActions } from '@/components/form/form-actions';
 import { FormAlert } from '@/components/form/form-alert';
 import { TextField } from '@/components/form/text-field';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -63,8 +64,10 @@ import {
 import {
   clearConnectionDraft,
   connectionDraftSavedAt,
+  type DraftScope,
   isBlankDraft,
   loadConnectionDraft,
+  NEW_DRAFT,
   saveConnectionDraft,
 } from '@/lib/connection-draft';
 import { applyApiError } from '@/lib/form-errors';
@@ -167,7 +170,7 @@ function TargetFields({
               <SelectTrigger
                 id={dbTypeId}
                 aria-invalid={dbTypeError ? true : undefined}
-                className="w-full sm:w-64"
+                className="w-full md:w-64"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -190,8 +193,8 @@ function TargetFields({
           </Field>
         )}
       />
-      <div className="grid gap-4 sm:grid-cols-4">
-        <div className="sm:col-span-3">
+      <div className="grid gap-4 md:grid-cols-4">
+        <div className="md:col-span-3">
           <TextField form={form} name="host" label="호스트" autoComplete="off" />
         </div>
         <TextField form={form} name="port" label="포트" autoComplete="off" />
@@ -241,7 +244,7 @@ function TargetFields({
         autoComplete="off"
         description="Quartz 테이블이 있는 스키마입니다. 비워 두면 접속 계정의 기본 스키마를 봅니다."
       />
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2">
         <TextField form={form} name="username" label="계정" autoComplete="off" />
         <TextField
           form={form}
@@ -273,29 +276,39 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
     defaultValues: connection ? connectionFormValues(connection) : EMPTY_CONNECTION_FORM,
   });
 
-  // 새 접속 폼은 입력을 1초 뒤에 임시 저장하고(비밀번호 제외), 다시 열면 불러온다
+  // 입력을 1초 뒤에 임시 저장하고(비밀번호 제외), 다시 열면 불러온다. 수정 폼은 접속마다 따로 둔다
+  const baseValues = useMemo(
+    () => (connection ? connectionFormValues(connection) : EMPTY_CONNECTION_FORM),
+    [connection],
+  );
+  const scope = useMemo<DraftScope>(
+    () =>
+      connection
+        ? { kind: 'edit', id: connection.id, baseUpdatedAt: connection.updatedAt }
+        : NEW_DRAFT,
+    [connection],
+  );
   const draftSavedAt = useSyncExternalStore(
     () => () => undefined,
-    () => (editing ? null : connectionDraftSavedAt()),
+    () => connectionDraftSavedAt(scope),
     () => null,
   );
   const [draftDismissed, setDraftDismissed] = useState(false);
   useEffect(() => {
-    if (editing) return;
-    const draft = loadConnectionDraft();
-    if (draft) form.reset({ ...EMPTY_CONNECTION_FORM, ...draft.values, password: '' });
-  }, [editing, form]);
+    const draft = loadConnectionDraft(scope);
+    if (draft)
+      form.reset({ ...baseValues, ...draft.values, password: '' }, { keepDefaultValues: true });
+  }, [scope, baseValues, form]);
   useEffect(() => {
-    if (editing) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribe = form.subscribe({
       formState: { values: true },
       callback: ({ values }) => {
         clearTimeout(timer);
         timer = setTimeout(() => {
-          const v = { ...EMPTY_CONNECTION_FORM, ...values };
-          if (isBlankDraft(v, EMPTY_CONNECTION_FORM)) clearConnectionDraft();
-          else saveConnectionDraft(v);
+          const v = { ...baseValues, ...values };
+          if (isBlankDraft(v, baseValues)) clearConnectionDraft(scope);
+          else saveConnectionDraft(v, scope);
         }, 1_000);
       },
     });
@@ -303,7 +316,20 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
       clearTimeout(timer);
       unsubscribe();
     };
-  }, [editing, form]);
+  }, [scope, baseValues, form]);
+
+  // 저장하지 않은 변경이 있으면 새로고침·탭 닫기 전에 브라우저가 묻는다
+  const { isDirty } = form.formState;
+  const savedRef = useRef(false);
+  useEffect(() => {
+    if (!isDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (savedRef.current) return;
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [isDirty]);
 
   const save = useMutation({
     mutationFn: (values: ConnectionFormValues) =>
@@ -318,7 +344,8 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
       toast.success(
         editing ? `${saved.name} 접속을 저장했습니다` : `${saved.name} 접속을 추가했습니다`,
       );
-      if (!editing) clearConnectionDraft();
+      savedRef.current = true;
+      clearConnectionDraft(scope);
       // 새 접속은 바로 스케줄러를 감지한다
       router.push(`/connection?id=${saved.id}${editing ? '' : '&detect=1'}`);
     },
@@ -378,8 +405,9 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
                 type="button"
                 variant="link"
                 onClick={() => {
-                  clearConnectionDraft();
-                  form.reset(EMPTY_CONNECTION_FORM);
+                  clearConnectionDraft(scope);
+                  // 수정 폼은 저장된 접속 값으로, 새 폼은 빈 값으로 되돌린다
+                  form.reset(baseValues);
                   setDraftDismissed(true);
                 }}
               >
@@ -435,7 +463,7 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
               autoComplete="off"
               description="목록과 감사 로그에 보이는 이름입니다."
             />
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
               <TextField
                 form={form}
                 name="envLabel"
@@ -476,15 +504,15 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
         </CardContent>
       </Card>
 
-      <div className="flex gap-2">
+      <FormActions>
+        <Button type="button" variant="outline" onClick={() => router.back()}>
+          취소
+        </Button>
         <Button type="submit" disabled={save.isPending}>
           {save.isPending ? <Spinner data-icon="inline-start" /> : null}
           {editing ? '변경 사항 저장하기' : '접속 추가하기'}
         </Button>
-        <Button type="button" variant="outline" onClick={() => router.back()}>
-          취소
-        </Button>
-      </div>
+      </FormActions>
     </form>
   );
 }

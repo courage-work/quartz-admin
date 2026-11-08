@@ -217,7 +217,7 @@ export function DesignShowcase() {
           title="색"
           description="tweakcn nature 테마 + 상태 색 4종. 화면 코드에서는 토큰 이름(bg-primary, text-muted-foreground)만 쓴다."
         >
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
             {SWATCHES.map((swatch) => (
               <div key={swatch.name} className="overflow-hidden rounded-lg border">
                 <div className={swatch.className}>

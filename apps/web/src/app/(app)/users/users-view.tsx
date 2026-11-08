@@ -1,12 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  createUserRequestSchema,
-  type ResetPasswordRequest,
-  resetPasswordRequestSchema,
-  type UserDto,
-} from '@qa/shared';
+import { type ResetPasswordRequest, resetPasswordRequestSchema, type UserDto } from '@qa/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CircleCheckIcon,
@@ -17,13 +12,16 @@ import {
   ShieldIcon,
   UserPlusIcon,
 } from 'lucide-react';
-import { useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import Link from 'next/link';
+import { useEffect, useRef, useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
-import { z } from 'zod';
 
 import { FormAlert } from '@/components/form/form-alert';
 import { TextField } from '@/components/form/text-field';
+import { ListSearch } from '@/components/list/list-search';
+import { PaginationBar } from '@/components/schedulers/pagination-bar';
+import { TableFrame } from '@/components/table-frame';
 import { PageHeader } from '@/components/shell/page-header';
 import {
   AlertDialog,
@@ -37,15 +35,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,8 +48,16 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Spinner } from '@/components/ui/spinner';
 import {
   Table,
   TableBody,
@@ -74,11 +71,9 @@ import { api } from '@/lib/api';
 import { useCurrentUser } from '@/lib/auth';
 import { formatDateTime } from '@/lib/format';
 import { applyApiError } from '@/lib/form-errors';
+import { CLIENT_PAGE_SIZE, matchesQuery, paginate } from '@/lib/paging';
 
-const USERS_KEY = ['users'] as const;
-
-const createFormSchema = createUserRequestSchema.extend({ isAdmin: z.boolean() });
-type CreateFormValues = z.infer<typeof createFormSchema>;
+import { USERS_KEY } from './users-shared';
 
 function UserStatusBadge({ user }: { user: UserDto }) {
   if (!user.isActive) {
@@ -105,97 +100,27 @@ function UserStatusBadge({ user }: { user: UserDto }) {
   );
 }
 
-function CreateUserDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-}) {
-  const queryClient = useQueryClient();
-  const form = useForm<CreateFormValues>({
-    mode: 'onTouched',
-    resolver: zodResolver(createFormSchema),
-    defaultValues: { username: '', password: '', isAdmin: false },
-  });
-  const create = useMutation({
-    mutationFn: (body: CreateFormValues) => api<UserDto>('/users', { method: 'POST', body }),
-    onSuccess: (user) => {
-      void queryClient.invalidateQueries({ queryKey: USERS_KEY });
-      toast.success(`${user.username} 사용자를 추가했습니다`);
-      form.reset();
-      onOpenChange(false);
-    },
-    onError: (err) =>
-      applyApiError(err, form.setError, { USERNAME_TAKEN: 'username' }, ['username', 'password']),
-  });
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) form.reset();
-        onOpenChange(next);
-      }}
-    >
-      <DialogContent>
-        <form
-          noValidate
-          onSubmit={(e) => void form.handleSubmit((values) => create.mutate(values))(e)}
-        >
-          <FieldGroup>
-            <DialogHeader>
-              <DialogTitle>사용자 추가</DialogTitle>
-              <DialogDescription>
-                처음 쓸 비밀번호를 정해 전달하세요. 사용자는 로그인한 뒤 직접 바꿀 수 있습니다.
-              </DialogDescription>
-            </DialogHeader>
-            <FormAlert message={form.formState.errors.root?.message} />
-            <TextField
-              form={form}
-              name="username"
-              label="아이디"
-              autoComplete="off"
-              description="영문 소문자, 숫자, ., _, @, -로 3~64자"
-            />
-            <TextField
-              form={form}
-              name="password"
-              label="초기 비밀번호"
-              type="password"
-              autoComplete="new-password"
-              description="8자 이상"
-            />
-            <Controller
-              control={form.control}
-              name="isAdmin"
-              render={({ field }) => (
-                <Field orientation="horizontal">
-                  <Checkbox
-                    id="create-user-admin"
-                    checked={field.value}
-                    onCheckedChange={(v) => field.onChange(v === true)}
-                  />
-                  <FieldLabel htmlFor="create-user-admin">관리자 권한 주기</FieldLabel>
-                </Field>
-              )}
-            />
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                취소
-              </Button>
-              <Button type="submit" disabled={create.isPending}>
-                사용자 추가하기
-              </Button>
-            </DialogFooter>
-          </FieldGroup>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
+/**
+ * 비밀번호 초기화. 입력 하나로 끝나는 짧은 작업이라 화면을 떠나지 않는 오른쪽 시트로 연다
+ * (VectorLab surfaces: 10초 안쪽 작업은 slide-over).
+ */
+/** 메뉴 항목으로 연 오버레이는 닫힌 뒤 그 행의 관리 버튼으로 포커스를 돌려준다 */
+function focusUserMenu(id: number | undefined): (e: Event) => void {
+  return (e) => {
+    const target = document.querySelector<HTMLElement>(`[data-user-menu="${id}"]`);
+    if (target) {
+      e.preventDefault();
+      target.focus();
+    }
+  };
 }
 
-function ResetPasswordDialog({ user, onClose }: { user: UserDto | null; onClose: () => void }) {
+function ResetPasswordSheet({ user, onClose }: { user: UserDto | null; onClose: () => void }) {
+  // 닫히는 동안 user는 이미 null이므로 마지막 대상을 기억해 포커스를 돌려준다
+  const lastId = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (user) lastId.current = user.id;
+  }, [user]);
   const form = useForm<ResetPasswordRequest>({
     mode: 'onTouched',
     resolver: zodResolver(resetPasswordRequestSchema),
@@ -213,7 +138,7 @@ function ResetPasswordDialog({ user, onClose }: { user: UserDto | null; onClose:
   });
 
   return (
-    <Dialog
+    <Sheet
       open={user !== null}
       onOpenChange={(open) => {
         if (!open) {
@@ -222,20 +147,21 @@ function ResetPasswordDialog({ user, onClose }: { user: UserDto | null; onClose:
         }
       }}
     >
-      <DialogContent>
+      <SheetContent side="right" onCloseAutoFocus={(e) => focusUserMenu(lastId.current)(e)}>
         <form
           noValidate
+          className="flex h-full flex-col"
           onSubmit={(e) =>
             void form.handleSubmit((body) => user && reset.mutate({ id: user.id, body }))(e)
           }
         >
-          <FieldGroup>
-            <DialogHeader>
-              <DialogTitle>{user?.username} 비밀번호 초기화</DialogTitle>
-              <DialogDescription>
-                초기화하면 잠금이 풀리고 이 사용자의 모든 로그인이 끊깁니다.
-              </DialogDescription>
-            </DialogHeader>
+          <SheetHeader>
+            <SheetTitle>{user?.username} 비밀번호 초기화</SheetTitle>
+            <SheetDescription>
+              초기화하면 잠금이 풀리고 이 사용자의 모든 로그인이 끊깁니다.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-1 flex-col gap-4 px-4">
             <FormAlert message={form.formState.errors.root?.message} />
             <TextField
               form={form}
@@ -243,20 +169,22 @@ function ResetPasswordDialog({ user, onClose }: { user: UserDto | null; onClose:
               label="새 비밀번호"
               type="password"
               autoComplete="new-password"
+              autoFocus
               description="8자 이상"
             />
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
-                취소
-              </Button>
-              <Button type="submit" disabled={reset.isPending}>
-                비밀번호 초기화하기
-              </Button>
-            </DialogFooter>
-          </FieldGroup>
+          </div>
+          <SheetFooter>
+            <Button type="submit" disabled={reset.isPending}>
+              {reset.isPending ? <Spinner data-icon="inline-start" aria-hidden /> : null}
+              비밀번호 초기화하기
+            </Button>
+            <Button type="button" variant="outline" onClick={onClose}>
+              취소
+            </Button>
+          </SheetFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -278,7 +206,12 @@ function UserActions({
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label={`${user.username} 관리하기`}>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`${user.username} 관리하기`}
+              data-user-menu={user.id}
+            >
               <MoreHorizontalIcon aria-hidden />
             </Button>
           </DropdownMenuTrigger>
@@ -310,15 +243,28 @@ function UserActions({
 export function UsersView() {
   const me = useCurrentUser();
   const queryClient = useQueryClient();
-  const [creating, setCreating] = useState(false);
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
   const [resetting, setResetting] = useState<UserDto | null>(null);
   const [deactivating, setDeactivating] = useState<UserDto | null>(null);
+  const lastDeactivating = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (deactivating) lastDeactivating.current = deactivating.id;
+  }, [deactivating]);
 
   const users = useQuery({
     queryKey: USERS_KEY,
     queryFn: ({ signal }) => api<UserDto[]>('/users', { signal }),
     enabled: me.isAdmin,
   });
+
+  // 기본 정렬: 아이디순
+  const paged = paginate(
+    (users.data ?? [])
+      .filter((u) => matchesQuery(q, [u.username]))
+      .sort((a, b) => a.username.localeCompare(b.username)),
+    page,
+  );
 
   const setActive = useMutation({
     mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) =>
@@ -357,80 +303,113 @@ export function UsersView() {
         title="사용자"
         description="로그인한 사용자는 모두 조회와 제어를 할 수 있습니다. 사용자 관리만 관리자 전용입니다."
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <UserPlusIcon data-icon="inline-start" aria-hidden />
-            사용자 추가
+          <Button asChild>
+            <Link href="/users/new">
+              <UserPlusIcon data-icon="inline-start" aria-hidden />
+              사용자 추가
+            </Link>
           </Button>
         }
       />
 
       {users.isError ? (
-        <FormAlert message={users.error.message} />
+        <FormAlert error={users.error} />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>아이디</TableHead>
-              <TableHead>권한</TableHead>
-              <TableHead>상태</TableHead>
-              <TableHead>마지막 로그인</TableHead>
-              <TableHead>만든 날</TableHead>
-              <TableHead>
-                <span className="sr-only">관리</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.isPending
-              ? Array.from({ length: 3 }, (_, i) => (
-                  <TableRow key={i}>
+        <>
+          <ListSearch
+            label="검색(아이디)"
+            value={q}
+            onChange={(v) => {
+              setQ(v);
+              setPage(1);
+            }}
+            className="max-w-md"
+          />
+          <TableFrame>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>아이디</TableHead>
+                  <TableHead>권한</TableHead>
+                  <TableHead>상태</TableHead>
+                  <TableHead>마지막 로그인</TableHead>
+                  <TableHead>만든 날</TableHead>
+                  <TableHead>
+                    <span className="sr-only">관리</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users.isPending ? (
+                  Array.from({ length: 3 }, (_, i) => (
+                    <TableRow key={i}>
+                      <TableCell colSpan={6}>
+                        <Skeleton className="h-5 w-full" />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : paged.items.length === 0 ? (
+                  <TableRow>
                     <TableCell colSpan={6}>
-                      <Skeleton className="h-5 w-full" />
-                    </TableCell>
-                  </TableRow>
-                ))
-              : users.data.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>
-                      <span className="font-mono">{user.username}</span>
-                      {user.id === me.id ? (
-                        <span className="ml-2 text-xs text-muted-foreground">(나)</span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={user.isAdmin ? 'info' : 'neutral'}>
-                        {user.isAdmin ? '관리자' : '사용자'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <UserStatusBadge user={user} />
-                    </TableCell>
-                    <TableCell>{formatDateTime(user.lastLoginAt)}</TableCell>
-                    <TableCell>{formatDateTime(user.createdAt)}</TableCell>
-                    <TableCell>
-                      <div className="flex justify-end">
-                        <UserActions
-                          user={user}
-                          isSelf={user.id === me.id}
-                          onResetPassword={() => setResetting(user)}
-                          onDeactivate={() => setDeactivating(user)}
-                          onActivate={() => setActive.mutate({ id: user.id, isActive: true })}
-                        />
+                      <div className="flex flex-wrap items-center gap-2 py-6 text-muted-foreground">
+                        검색어에 맞는 사용자가 없습니다.
+                        <Button variant="link" onClick={() => setQ('')}>
+                          검색어 지우기
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
-          </TableBody>
-        </Table>
+                ) : (
+                  paged.items.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell>
+                        <span className="font-mono">{user.username}</span>
+                        {user.id === me.id ? (
+                          <span className="ml-2 text-xs text-muted-foreground">(나)</span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={user.isAdmin ? 'info' : 'neutral'}>
+                          {user.isAdmin ? '관리자' : '사용자'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <UserStatusBadge user={user} />
+                      </TableCell>
+                      <TableCell>{formatDateTime(user.lastLoginAt)}</TableCell>
+                      <TableCell>{formatDateTime(user.createdAt)}</TableCell>
+                      <TableCell>
+                        <div className="flex justify-end">
+                          <UserActions
+                            user={user}
+                            isSelf={user.id === me.id}
+                            onResetPassword={() => setResetting(user)}
+                            onDeactivate={() => setDeactivating(user)}
+                            onActivate={() => setActive.mutate({ id: user.id, isActive: true })}
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableFrame>
+          <PaginationBar
+            page={paged.page}
+            size={CLIENT_PAGE_SIZE}
+            total={paged.total}
+            onPageChange={setPage}
+          />
+        </>
       )}
 
-      <CreateUserDialog open={creating} onOpenChange={setCreating} />
-      <ResetPasswordDialog user={resetting} onClose={() => setResetting(null)} />
+      <ResetPasswordSheet user={resetting} onClose={() => setResetting(null)} />
       <AlertDialog
         open={deactivating !== null}
         onOpenChange={(open) => !open && setDeactivating(null)}
       >
-        <AlertDialogContent>
+        <AlertDialogContent onCloseAutoFocus={(e) => focusUserMenu(lastDeactivating.current)(e)}>
           <AlertDialogHeader>
             <AlertDialogTitle>{deactivating?.username} 사용자를 비활성화할까요?</AlertDialogTitle>
             <AlertDialogDescription>

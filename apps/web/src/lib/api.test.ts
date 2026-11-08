@@ -116,3 +116,23 @@ describe('createApiClient', () => {
     expect(login.onUnauthenticated).not.toHaveBeenCalled();
   });
 });
+
+describe('ApiRequestError.supportText', () => {
+  it('지원 문의용 정보를 줄마다 담고, 서버·네트워크 오류만 기술 오류로 본다', () => {
+    const err = new ApiRequestError(500, 'INTERNAL_ERROR', '서버 오류', undefined, {
+      method: 'GET',
+      path: '/schedulers',
+      requestId: 'req-12345678',
+    });
+    expect(err.isTechnical).toBe(true);
+    expect(err.supportText(new Date('2026-11-08T00:00:00Z')).split('\n')).toEqual([
+      '시각: 2026-11-08T00:00:00.000Z',
+      '요청: GET /schedulers',
+      '상태: 500 INTERNAL_ERROR',
+      '요청 ID: req-12345678',
+      '메시지: 서버 오류',
+    ]);
+    expect(new ApiRequestError(400, 'VALIDATION_FAILED', '입력 오류').isTechnical).toBe(false);
+    expect(new ApiRequestError(0, 'NETWORK_ERROR', '연결 실패').isTechnical).toBe(true);
+  });
+});

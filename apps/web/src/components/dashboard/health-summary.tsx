@@ -40,18 +40,18 @@ function Tile({
       type="button"
       aria-pressed={pressed}
       onClick={onClick}
-      className="flex min-h-11 items-center gap-3 rounded-xl border border-border bg-card p-3 text-left shadow-xs transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 aria-pressed:border-primary aria-pressed:ring-1 aria-pressed:ring-primary sm:p-4"
+      className="flex min-h-11 items-center gap-3 rounded-xl border border-border bg-card p-3 text-left shadow-xs transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 aria-pressed:border-primary aria-pressed:ring-1 aria-pressed:ring-primary md:p-4"
     >
       {/* 넓은 화면: 톤 바탕 아이콘. 좁은 화면에서는 공간을 아끼려고 라벨 옆 작은 아이콘으로 바꾼다 */}
       <span
-        className={`hidden size-9 shrink-0 items-center justify-center rounded-lg sm:flex ${classes.soft}`}
+        className={`hidden size-9 shrink-0 items-center justify-center rounded-lg md:flex ${classes.soft}`}
       >
         <Icon className="size-4" aria-hidden />
       </span>
       <span className="flex flex-col">
         <span className="text-2xl leading-none font-semibold tabular-nums">{count}</span>
         <span className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
-          <Icon className={`size-3.5 shrink-0 sm:hidden ${classes.text}`} aria-hidden />
+          <Icon className={`size-3.5 shrink-0 md:hidden ${classes.text}`} aria-hidden />
           {label}
         </span>
       </span>
@@ -78,7 +78,7 @@ export function HealthSummary({
     <div
       role="group"
       aria-label="상태별 스케줄러 수"
-      className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-5"
+      className="grid grid-cols-3 gap-2 md:gap-3 xl:grid-cols-5"
     >
       <Tile
         label="전체"
