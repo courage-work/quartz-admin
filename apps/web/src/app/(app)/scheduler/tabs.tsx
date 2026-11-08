@@ -186,16 +186,24 @@ export function PausedGroupsTab({ schedulerId, refreshMs }: TabProps) {
       {res.data.groups.length === 0 ? (
         <p className="text-sm text-muted-foreground">일시정지된 트리거 그룹이 없습니다.</p>
       ) : (
-        <ul className="flex flex-wrap gap-2">
-          {res.data.groups.map((g) => (
-            <li key={g}>
-              <Badge variant="neutral">
-                <PauseIcon data-icon="inline-start" aria-hidden />
-                <span className="font-mono">{g}</span>
-              </Badge>
-            </li>
-          ))}
-        </ul>
+        <TableFrame>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>일시정지된 트리거 그룹 ({res.data.groups.length})</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {res.data.groups.map((g) => (
+                <TableRow key={g}>
+                  <TableCell>
+                    <span className="font-mono">{g}</span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableFrame>
       )}
     </div>
   );

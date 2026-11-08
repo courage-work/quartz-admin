@@ -96,7 +96,7 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
           <div className="flex items-start justify-between gap-2">
             <Link
               href={`/scheduler?id=${item.id}`}
-              className="text-lg font-semibold underline decoration-muted-foreground/50 underline-offset-4 hover:decoration-foreground"
+              className="text-lg leading-tight font-semibold underline decoration-muted-foreground/50 underline-offset-4 hover:decoration-foreground"
             >
               {item.displayName}
             </Link>

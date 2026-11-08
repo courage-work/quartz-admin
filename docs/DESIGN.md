@@ -56,6 +56,7 @@ shadcn 표준 토큰(background, foreground, card, popover, primary, secondary, 
 | `sidebar` | 라이트 | `oklch(0.937 0.0142 74.4)` | `oklch(0.928 0.0175 75)` | 바탕보다 한 단 어둡게 |
 | `sidebar` | 다크 | 바탕과 같음 | `oklch(0.232 0.024 151)` | 바탕보다 한 단 어둡게 |
 | `shadow-2xs`, `shadow-xs` | 라이트 | 검정 5% | 따뜻한 갈색 4~5% 두 겹 | 베이지 바탕에서 회색 그림자가 탁해 보임 |
+| `shadow-sm`~`shadow-2xl` | 라이트 | 검정 10~25% | 따뜻한 갈색 7% 이하, 넓게 퍼짐 | 라이트 그림자 알파는 0.08 미만(VectorLab colour-palette) |
 
 면은 세 단으로 씁니다. 사이드바(가장 어둡게) → 바탕 → 카드·표 틀·필터 묶음(가장 밝게, `shadow-xs`). 바꾼 뒤 대비는 `muted-foreground`가 바탕·카드·사이드바 위에서 라이트 6.1:1 이상, 다크 7.7:1 이상입니다.
 
@@ -165,6 +166,9 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - `hooks/use-mobile.ts`는 effect 안에서 setState를 부르지 않도록 `useSyncExternalStore`로 바꿨습니다(react-hooks 린트).
 - `alert`에 상태 톤 variant `success`, `warning`을 더했습니다(B-13, 연결 테스트 결과 안내). 오류는 기존 `destructive`를 씁니다.
 - `dropdown-menu`의 메뉴 너비를 트리거 너비(`w-(--radix-dropdown-menu-trigger-width)`)에서 내용 너비(`w-max`, 화면 안 최대 너비까지)로 바꿨습니다. 아이콘 버튼(36px)으로 여는 메뉴가 최소 128px에 묶여 "시스템 설정" 같은 항목이 줄바꿈되던 문제입니다(B-39).
+- 대화상자·시트 배경(overlay)의 흐림(`backdrop-blur-xs`)을 빼고 `bg-black/40`으로 가렸습니다. 흐림은 경계가 흐려 보여 쓰지 않습니다(VectorLab anti-slop, B-39 점검).
+- 드롭다운·팝오버·선택 상자·툴팁의 등장 효과에서 95% 확대(`zoom-in-95`)를 빼고 투명도만 바꿉니다(VectorLab transitions: 팝오버는 투명도, 크기 변화 1.02 이하).
+- 사이드바 접기·펼치기에서 너비·위치 전환(`transition-[width]` 등)을 빼 즉시 바뀌게 했습니다. 너비는 애니메이션하지 않습니다(VectorLab motion).
 
 ### 8.1.1 셸과 화면 공통 부품 (B-06)
 
@@ -206,6 +210,9 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - 목록 위 필터는 한 면(`FilterPanel`: 테두리 + `bg-card`)에 모아 표와 구분합니다. 필터 지우기는 그 안의 ghost 버튼입니다.
 - 상세 화면 탭은 `TabsList variant="line"`과 아래 테두리로 표 위 구역을 나눕니다.
 - 표 틀(`TableFrame`)의 머리 줄은 `bg-muted/60`입니다.
+- 정적인 메타데이터(접속 태그 등)는 알약 배지로 감싸지 않고 `·`로 이은 글자로 씁니다. 배지는 상태·환경처럼 뜻이 있는 값에만 씁니다.
+- 일시정지 그룹처럼 이름만 있는 목록도 표 틀 안의 목록으로 보여 줍니다.
+- 모든 폼은 `mode: 'onTouched'`입니다(처음 벗어날 때 검사, 그 뒤 고칠 때마다 다시 검사). 폼에 쓰는 zod 스키마는 한국어 오류 문구를 둡니다.
 
 ### 8.2 추가하는 방법
 

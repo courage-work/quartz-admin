@@ -93,19 +93,7 @@ function InfoCard({ connection }: { connection: ConnectionDto }) {
           <Row label="권한">
             <WriteStatusBadge connection={connection} />
           </Row>
-          <Row label="태그">
-            {connection.tags.length === 0 ? (
-              '-'
-            ) : (
-              <span className="flex flex-wrap gap-1">
-                {connection.tags.map((tag) => (
-                  <Badge key={tag} variant="outline">
-                    {tag}
-                  </Badge>
-                ))}
-              </span>
-            )}
-          </Row>
+          <Row label="태그">{connection.tags.length === 0 ? '-' : connection.tags.join(' · ')}</Row>
           <Row label="수정한 시각">{formatDateTime(connection.updatedAt)}</Row>
         </dl>
       </CardContent>

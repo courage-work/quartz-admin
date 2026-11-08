@@ -1,9 +1,10 @@
 'use client';
 
 import { RefreshCwIcon } from 'lucide-react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -74,25 +75,30 @@ export function RefreshControls({
   refreshing: boolean;
 }) {
   const busy = useDelayedFlag(refreshing);
+  const intervalId = useId();
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-sm text-muted-foreground">
         {dataTimeLabel} {formatDateTime(dataTime)}
       </span>
-      <Select value={String(refreshMs)} onValueChange={(v) => onRefreshMsChange(Number(v))}>
-        <SelectTrigger aria-label="자동 새로고침 주기" className="w-40">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            {REFRESH_INTERVALS.map((o) => (
-              <SelectItem key={o.value} value={String(o.value)}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
+      {/* 라벨과 선택 상자는 좁은 화면에서도 같이 줄바꿈한다 */}
+      <div className="flex items-center gap-2">
+        <Label htmlFor={intervalId}>자동 새로고침</Label>
+        <Select value={String(refreshMs)} onValueChange={(v) => onRefreshMsChange(Number(v))}>
+          <SelectTrigger id={intervalId} className="w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {REFRESH_INTERVALS.map((o) => (
+                <SelectItem key={o.value} value={String(o.value)}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
       <Button variant="outline" onClick={onRefresh} aria-busy={busy}>
         {busy ? (
           <Spinner data-icon="inline-start" />

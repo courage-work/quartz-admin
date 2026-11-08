@@ -361,7 +361,7 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
   return (
     <form
       noValidate
-      className="flex max-w-3xl flex-col gap-6"
+      className="flex max-w-2xl flex-col gap-6"
       onSubmit={(e) => void form.handleSubmit((values) => save.mutate(values))(e)}
     >
       <FormAlert message={form.formState.errors.root?.message} />

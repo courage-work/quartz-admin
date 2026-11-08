@@ -9,7 +9,6 @@ import { FormAlert } from '@/components/form/form-alert';
 import { TableFrame } from '@/components/table-frame';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge } from '@/components/status/environment';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Empty,
@@ -101,13 +100,10 @@ export function ConnectionsView() {
                         {conn.name}
                       </Link>
                       {conn.tags.length > 0 ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {conn.tags.map((tag) => (
-                            <Badge key={tag} variant="outline">
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          <span className="sr-only">태그: </span>
+                          {conn.tags.join(' · ')}
+                        </p>
                       ) : null}
                     </TableCell>
                     <TableCell>

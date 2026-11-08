@@ -187,7 +187,7 @@ function Section({
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <h2 id={`${id}-title`} className="text-lg font-semibold">
+        <h2 id={`${id}-title`} className="text-lg leading-tight font-semibold">
           {title}
         </h2>
         <p className="text-sm text-muted-foreground">{description}</p>

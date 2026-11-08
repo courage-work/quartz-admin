@@ -69,6 +69,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { api } from '@/lib/api';
 import { useCurrentUser } from '@/lib/auth';
 import { formatDateTime } from '@/lib/format';
@@ -113,6 +114,7 @@ function CreateUserDialog({
 }) {
   const queryClient = useQueryClient();
   const form = useForm<CreateFormValues>({
+    mode: 'onTouched',
     resolver: zodResolver(createFormSchema),
     defaultValues: { username: '', password: '', isAdmin: false },
   });
@@ -195,6 +197,7 @@ function CreateUserDialog({
 
 function ResetPasswordDialog({ user, onClose }: { user: UserDto | null; onClose: () => void }) {
   const form = useForm<ResetPasswordRequest>({
+    mode: 'onTouched',
     resolver: zodResolver(resetPasswordRequestSchema),
     defaultValues: { password: '' },
   });
@@ -272,11 +275,16 @@ function UserActions({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={`${user.username} 관리 메뉴`}>
-          <MoreHorizontalIcon aria-hidden />
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label={`${user.username} 관리하기`}>
+              <MoreHorizontalIcon aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{user.username} 관리하기</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onSelect={onResetPassword}>
           <KeyRoundIcon aria-hidden />
