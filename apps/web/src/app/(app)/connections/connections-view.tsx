@@ -2,13 +2,14 @@
 
 import type { ConnectionDto } from '@qa/shared';
 import { useQuery } from '@tanstack/react-query';
-import { DatabaseIcon, PlusIcon } from 'lucide-react';
+import { DatabaseIcon, PlusIcon, SearchXIcon } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
 
 import { FormAlert } from '@/components/form/form-alert';
+import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
 import { ListSearch } from '@/components/list/list-search';
 import { PaginationBar } from '@/components/schedulers/pagination-bar';
+import { TableEmpty } from '@/components/table-empty';
 import { TableFrame } from '@/components/table-frame';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge } from '@/components/status/environment';
@@ -33,6 +34,7 @@ import {
 import { api } from '@/lib/api';
 import { CONNECTIONS_KEY, DB_KIND_LABELS, describeAddress } from '@/lib/connections';
 import { CLIENT_PAGE_SIZE, matchesQuery, paginate } from '@/lib/paging';
+import { parsePage, setParam, type UrlCodec, useUrlState } from '@/lib/use-url-state';
 
 import { WriteStatusBadge } from '@/components/connections/write-status-badge';
 
@@ -60,14 +62,25 @@ function NoConnections() {
   );
 }
 
+/** 검색어·쪽 ↔ 주소(`q`, `page`). 접속 상세에 갔다 돌아와도 그대로다(B-40) */
+const CONNECTIONS_CODEC: UrlCodec<{ q: string; page: number }> = {
+  parse: (p) => ({ q: p.get('q') ?? '', page: parsePage(p.get('page')) }),
+  write: (v, p) => {
+    setParam(p, 'q', v.q);
+    setParam(p, 'page', String(v.page), '1');
+  },
+};
+
 /** 접속 목록 (FR-CON-01). 접속은 많지 않아 한 번에 받아 화면에서 거르고 나눈다 (기본 정렬: 이름순) */
 export function ConnectionsView() {
   const connections = useQuery({
     queryKey: CONNECTIONS_KEY,
     queryFn: ({ signal }) => api<ConnectionDto[]>('/connections', { signal }),
   });
-  const [q, setQ] = useState('');
-  const [page, setPage] = useState(1);
+  const [view, setView] = useUrlState(CONNECTIONS_CODEC);
+  const { q, page } = view;
+  const setQ = (v: string) => setView((s) => ({ ...s, q: v }));
+  const setPage = (v: number) => setView((s) => ({ ...s, page: v }));
 
   const filtered = (connections.data ?? [])
     .filter((c) =>
@@ -97,52 +110,57 @@ export function ConnectionsView() {
               <TableRow>
                 <TableHead>이름</TableHead>
                 <TableHead>환경</TableHead>
+                <TableHead>태그</TableHead>
                 <TableHead>DB</TableHead>
                 <TableHead>주소</TableHead>
                 <TableHead>계정</TableHead>
                 <TableHead className="text-right">스케줄러</TableHead>
                 <TableHead>권한</TableHead>
+                <RowChevronHead />
               </TableRow>
             </TableHeader>
             <TableBody>
               {connections.isPending ? (
                 Array.from({ length: 3 }, (_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={9}>
                       <Skeleton className="h-5 w-full" />
                     </TableCell>
                   </TableRow>
                 ))
               ) : paged.items.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7}>
-                    <div className="flex flex-wrap items-center gap-2 py-6 text-muted-foreground">
-                      검색어에 맞는 접속이 없습니다.
-                      <Button variant="link" onClick={() => setQ('')}>
-                        검색어 지우기
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+                // 접속이 하나도 없으면 표 대신 NoConnections를 보이므로 여기는 검색 결과가 빈 경우다
+                <TableEmpty
+                  colSpan={9}
+                  icon={SearchXIcon}
+                  title="검색어에 맞는 접속이 없습니다"
+                  action={
+                    <Button variant="outline" onClick={() => setQ('')}>
+                      검색어 지우기
+                    </Button>
+                  }
+                />
               ) : (
                 paged.items.map((conn) => (
-                  <TableRow key={conn.id}>
+                  <LinkRow key={conn.id}>
                     <TableCell>
-                      <Link
-                        href={`/connection?id=${conn.id}`}
-                        className="font-medium underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
-                      >
-                        {conn.name}
-                      </Link>
-                      {conn.tags.length > 0 ? (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          <span className="sr-only">태그: </span>
-                          {conn.tags.join(' · ')}
-                        </p>
-                      ) : null}
+                      <RowLink href={`/connection?id=${conn.id}`}>{conn.name}</RowLink>
                     </TableCell>
                     <TableCell>
                       <EnvBadge environment={conn.envLabel} />
+                    </TableCell>
+                    <TableCell>
+                      {/* 태그 유무로 줄 높이가 달라지지 않게 따로 한 줄 칸에 두고, 길면 자른다 */}
+                      {conn.tags.length > 0 ? (
+                        <span
+                          className="block max-w-48 truncate text-muted-foreground"
+                          title={conn.tags.join(' · ')}
+                        >
+                          {conn.tags.join(' · ')}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </TableCell>
                     <TableCell>{DB_KIND_LABELS[conn.dbType]}</TableCell>
                     <TableCell>
@@ -157,7 +175,8 @@ export function ConnectionsView() {
                     <TableCell>
                       <WriteStatusBadge connection={conn} />
                     </TableCell>
-                  </TableRow>
+                    <RowChevronCell />
+                  </LinkRow>
                 ))
               )}
             </TableBody>

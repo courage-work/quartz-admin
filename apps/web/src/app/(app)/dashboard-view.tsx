@@ -4,11 +4,13 @@ import {
   CLOCK_SKEW_WARN_MS,
   type DashboardQuery,
   type DashboardResponse,
+  SCHEDULER_HEALTH,
   type SchedulerHealth,
   type SchedulerSummaryDto,
 } from '@qa/shared';
 import { useQuery } from '@tanstack/react-query';
 import {
+  ChevronRightIcon,
   ClockAlertIcon,
   DatabaseIcon,
   LayoutDashboardIcon,
@@ -58,6 +60,7 @@ import { useSlashFocus } from '@/hooks/use-slash-focus';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { DASHBOARD_KEY, formatAgo } from '@/lib/schedulers';
+import { setParam, type UrlCodec, useUrlState } from '@/lib/use-url-state';
 
 const ALL = 'all';
 
@@ -89,7 +92,8 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
   const tone = snap ? SCHEDULER_HEALTH_META[snap.status].tone : 'neutral';
 
   return (
-    <Card className="relative">
+    // 카드 전체가 스케줄러 상세로 가는 링크다(B-40). 올리면 테두리·그림자·제목 색이 바뀐다
+    <Card interactive>
       {/* 상태 띠: 카드 묶음에서 손볼 카드를 먼저 눈에 띄게 한다. 의미는 배지가 글자로 전한다 */}
       <div aria-hidden className={`absolute inset-x-0 top-0 h-1 ${TONE_CLASSES[tone].rail}`} />
       <CardHeader>
@@ -97,9 +101,14 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
           <div className="flex items-start justify-between gap-2">
             <Link
               href={`/scheduler?id=${item.id}`}
-              className="text-lg leading-tight font-semibold underline decoration-muted-foreground/50 underline-offset-4 hover:decoration-foreground"
+              data-card-link
+              className="inline-flex min-w-0 items-center gap-1 text-lg leading-tight font-semibold transition-colors outline-none group-hover/card:text-link after:absolute after:inset-0"
             >
-              {item.displayName}
+              <span className="min-w-0 wrap-break-word">{item.displayName}</span>
+              <ChevronRightIcon
+                aria-hidden
+                className="size-4 shrink-0 text-muted-foreground transition duration-150 ease-out group-hover/card:translate-x-0.5 group-hover/card:text-link"
+              />
             </Link>
             {snap ? (
               <SchedulerHealthBadge health={snap.status} />
@@ -292,13 +301,36 @@ function NoSchedulers() {
   );
 }
 
+type DashboardView = DashboardQuery & { health?: SchedulerHealth };
+
+/** 필터·요약 띠 선택 ↔ 주소(`env`, `tag`, `q`, `health`). 스케줄러 상세에 갔다 돌아와도 그대로다(B-40) */
+const DASHBOARD_CODEC: UrlCodec<DashboardView> = {
+  parse: (p) => {
+    const health = p.get('health');
+    return {
+      env: p.get('env') || undefined,
+      tag: p.get('tag') || undefined,
+      q: p.get('q') || undefined,
+      health: SCHEDULER_HEALTH.find((h) => h === health),
+    };
+  },
+  write: (v, p) => {
+    setParam(p, 'env', v.env);
+    setParam(p, 'tag', v.tag);
+    setParam(p, 'q', v.q);
+    setParam(p, 'health', v.health);
+  },
+};
+
 /**
  * 대시보드 (FR-VIEW-01). 감시 루프가 남긴 스냅샷만 읽으므로 연결할 수 없는 대상이 있어도
  * 바로 뜬다(NFR-PERF-01, FR-VIEW-07). 카드의 값은 각 스케줄러의 마지막 감시 기준이다.
  */
 export function DashboardView() {
-  const [filter, setFilter] = useState<DashboardQuery>({});
-  const [health, setHealth] = useState<SchedulerHealth | undefined>(undefined);
+  const [view, setView] = useUrlState(DASHBOARD_CODEC);
+  const { health, ...filter } = view;
+  const setFilter = (f: DashboardQuery) => setView((v) => ({ ...f, health: v.health }));
+  const setHealth = (h: SchedulerHealth | undefined) => setView((v) => ({ ...v, health: h }));
   const [refreshMs, setRefreshMs] = useRefreshInterval();
   const dashboard = useQuery({
     queryKey: [...DASHBOARD_KEY, filter],

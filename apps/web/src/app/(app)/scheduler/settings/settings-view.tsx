@@ -17,19 +17,12 @@ import type { z } from 'zod';
 
 import { FormActions } from '@/components/form/form-actions';
 import { FormAlert } from '@/components/form/form-alert';
+import { FormRows } from '@/components/form/form-row';
 import { TextField } from '@/components/form/text-field';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge, ProdStripe } from '@/components/status/environment';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Empty,
   EmptyContent,
@@ -38,7 +31,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
-import { FieldGroup } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { api, isApiError } from '@/lib/api';
@@ -63,7 +55,7 @@ function SettingsForm({ scheduler }: { scheduler: SchedulerDetailDto }) {
   const queryClient = useQueryClient();
   const back = `/connection?id=${scheduler.connectionId}`;
   const form = useForm<FormInput, unknown, SchedulerSettings>({
-    mode: 'onTouched',
+    mode: 'onSubmit',
     resolver: zodResolver(schedulerSettingsSchema),
     defaultValues: {
       displayName: scheduler.displayName,
@@ -89,52 +81,81 @@ function SettingsForm({ scheduler }: { scheduler: SchedulerDetailDto }) {
   return (
     <form
       noValidate
-      className="flex max-w-2xl flex-col gap-6"
+      className="flex flex-col gap-6"
       onSubmit={(e) => void form.handleSubmit((v) => save.mutate(v))(e)}
     >
+      <FormAlert message={form.formState.errors.root?.message} />
+      {/* 접속 수정 화면과 같은 카드·라벨 칸(1/4) 구성 (B-40) */}
       <Card>
+        <CardHeader>
+          <CardTitle>표시</CardTitle>
+        </CardHeader>
         <CardContent>
-          <FieldGroup>
-            <FormAlert message={form.formState.errors.root?.message} />
-            <TextField form={form} name="displayName" label="표시 이름" autoComplete="off" />
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextField
-                form={form}
-                name="misfireThresholdMs"
-                label="misfire 임계값(ms)"
-                autoComplete="off"
-                description="Quartz org.quartz.jobStore.misfireThreshold와 같게 둡니다. 기본 60000"
-              />
-              <TextField
-                form={form}
-                name="overdueGraceMs"
-                label="연체 유예 시간(ms)"
-                autoComplete="off"
-                description="misfire 임계값 이상이어야 합니다. 기본 60000"
-              />
-              <TextField
-                form={form}
-                name="checkinMultiplier"
-                label="체크인 판정 배수"
-                autoComplete="off"
-                description="체크인 간격 × 배수가 지나면 노드를 이탈로 봅니다. 기본 3"
-              />
-              <TextField
-                form={form}
-                name="expectedNodeCount"
-                label="기대 노드 수"
-                autoComplete="off"
-                description="활성 노드가 이보다 적으면 알립니다"
-              />
-              <TextField
-                form={form}
-                name="pollIntervalSec"
-                label="감시 주기(초)"
-                autoComplete="off"
-                description="15~3600초. 기본 60"
-              />
-            </div>
-          </FieldGroup>
+          <FormRows>
+            <TextField
+              form={form}
+              name="displayName"
+              label="표시 이름"
+              autoComplete="off"
+              description="대시보드와 알림에 보이는 이름입니다."
+              layout="row"
+            />
+          </FormRows>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>감시 기준</CardTitle>
+          <CardDescription>대상 DB에는 아무것도 바꾸지 않습니다.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FormRows>
+            <TextField
+              form={form}
+              name="misfireThresholdMs"
+              label="misfire 임계값(ms)"
+              autoComplete="off"
+              description="Quartz org.quartz.jobStore.misfireThreshold와 같게 둡니다. 기본 60000"
+              layout="row"
+              size="short"
+            />
+            <TextField
+              form={form}
+              name="overdueGraceMs"
+              label="연체 유예 시간(ms)"
+              autoComplete="off"
+              description="misfire 임계값 이상이어야 합니다. 기본 60000"
+              layout="row"
+              size="short"
+            />
+            <TextField
+              form={form}
+              name="checkinMultiplier"
+              label="체크인 판정 배수"
+              autoComplete="off"
+              description="체크인 간격 × 배수가 지나면 노드를 이탈로 봅니다. 기본 3"
+              layout="row"
+              size="short"
+            />
+            <TextField
+              form={form}
+              name="expectedNodeCount"
+              label="기대 노드 수"
+              autoComplete="off"
+              description="활성 노드가 이보다 적으면 알립니다"
+              layout="row"
+              size="short"
+            />
+            <TextField
+              form={form}
+              name="pollIntervalSec"
+              label="감시 주기(초)"
+              autoComplete="off"
+              description="15~3600초. 기본 60"
+              layout="row"
+              size="short"
+            />
+          </FormRows>
         </CardContent>
       </Card>
       <FormActions>
@@ -188,32 +209,16 @@ export function SchedulerSettingsView() {
   return (
     <>
       <ProdStripe environment={s.connection.envLabel} name={s.displayName} />
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/connections">접속</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href={`/connection?id=${s.connectionId}`}>{s.connection.name}</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{s.displayName} 설정</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
       <PageHeader
-        title="스케줄러 설정"
+        trail={[
+          { label: '접속', href: '/connections' },
+          { label: s.connection.name, href: `/connection?id=${s.connectionId}` },
+        ]}
+        title={`${s.displayName} 설정`}
         description={
           <span className="flex flex-wrap items-center gap-2">
             <EnvBadge environment={s.connection.envLabel} />
             <span className="font-mono">{s.schedName}</span>
-            감시 파라미터입니다. 대상 DB에는 아무것도 바꾸지 않습니다.
           </span>
         }
       />

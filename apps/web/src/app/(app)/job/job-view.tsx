@@ -2,7 +2,7 @@
 
 import type { JobDataDto, JobDetailResponse, SchedulerDetailDto } from '@qa/shared';
 import { useQuery } from '@tanstack/react-query';
-import { EyeIcon, EyeOffIcon, FileLockIcon, SearchXIcon } from 'lucide-react';
+import { EyeIcon, EyeOffIcon, FileLockIcon, SearchXIcon, TimerIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { type ReactNode, useState } from 'react';
@@ -14,14 +14,6 @@ import { TriggerTable } from '@/components/schedulers/trigger-table';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge, ProdStripe } from '@/components/status/environment';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -218,6 +210,7 @@ export function JobView() {
               triggers={triggers}
               loading={false}
               showJob={false}
+              empty={{ icon: TimerIcon, title: '이 잡을 실행하는 트리거가 없습니다' }}
             />
           </CardContent>
         </Card>
@@ -230,30 +223,19 @@ export function JobView() {
   return (
     <>
       {s ? <ProdStripe environment={s.connection.envLabel} name={s.displayName} /> : null}
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/">대시보드</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          {s ? (
-            <>
-              <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <Link href={`/scheduler?id=${s.id}&tab=jobs`}>{s.displayName}</Link>
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-            </>
-          ) : null}
-          <BreadcrumbItem>
-            <BreadcrumbPage>{name ?? '잡'}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
       <PageHeader
+        trail={[
+          { label: '대시보드', href: '/' },
+          ...(schedulerId !== null
+            ? [
+                {
+                  label: s?.displayName ?? '스케줄러',
+                  // 잡 목록에서 오지 않았어도(트리거 탭 등) 마지막으로 본 탭으로 돌아간다
+                  href: `/scheduler?id=${schedulerId}&tab=jobs`,
+                },
+              ]
+            : []),
+        ]}
         title={name ?? '잡'}
         description={s ? <EnvBadge environment={s.connection.envLabel} /> : undefined}
         actions={

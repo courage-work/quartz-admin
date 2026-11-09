@@ -4,14 +4,24 @@ import { cn } from 'cn';
 function Card({
   className,
   size = 'default',
+  interactive = false,
   ...props
-}: React.ComponentProps<'div'> & { size?: 'default' | 'sm' }) {
+}: React.ComponentProps<'div'> & {
+  size?: 'default' | 'sm';
+  /**
+   * 카드 전체가 링크일 때(B-40). 안의 `data-card-link` 링크가 `after:absolute after:inset-0`으로 카드를 덮고,
+   * 카드는 올리면 테두리·그림자가, 링크에 키보드 포커스가 오면 포커스 링이 생긴다
+   */
+  interactive?: boolean;
+}) {
   return (
     <div
       data-slot="card"
       data-size={size}
       className={cn(
         'group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card py-(--card-spacing) text-sm text-card-foreground shadow-xs ring-1 ring-foreground/10 [--card-spacing:--spacing(6)] has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(4)] *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl',
+        interactive &&
+          'relative transition-shadow duration-150 ease-out hover:shadow-md hover:ring-primary/40 has-[[data-card-link]:focus-visible]:ring-3 has-[[data-card-link]:focus-visible]:ring-ring/50',
         className,
       )}
       {...props}

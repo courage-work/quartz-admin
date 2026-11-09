@@ -13,18 +13,11 @@ import { z } from 'zod';
 
 import { FormActions } from '@/components/form/form-actions';
 import { FormAlert } from '@/components/form/form-alert';
+import { FormRow, FormRows } from '@/components/form/form-row';
 import { TextField } from '@/components/form/text-field';
 import { PageHeader } from '@/components/shell/page-header';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Empty,
@@ -33,7 +26,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldLabel } from '@/components/ui/field';
 import { Spinner } from '@/components/ui/spinner';
 import { api } from '@/lib/api';
 import { useCurrentUser } from '@/lib/auth';
@@ -54,7 +47,7 @@ export function NewUserView() {
   const queryClient = useQueryClient();
   const adminId = useId();
   const form = useForm<FormValues>({
-    mode: 'onTouched',
+    mode: 'onSubmit',
     resolver: zodResolver(formSchema),
     defaultValues: { username: '', password: '', isAdmin: false },
   });
@@ -85,32 +78,24 @@ export function NewUserView() {
 
   return (
     <>
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/users">사용자</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>사용자 추가</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
       <PageHeader
+        trail={[{ label: '사용자', href: '/users' }]}
         title="사용자 추가"
         description="처음 쓸 비밀번호를 정해 전달하세요. 사용자는 로그인한 뒤 직접 바꿀 수 있습니다."
       />
       <form
         noValidate
-        className="flex max-w-2xl flex-col gap-6"
+        className="flex flex-col gap-6"
         onSubmit={(e) => void form.handleSubmit((values) => create.mutate(values))(e)}
       >
+        <FormAlert message={form.formState.errors.root?.message} />
+        {/* 다른 추가·수정 화면과 같은 라벨 칸(1/4) 구성 (B-40) */}
         <Card>
+          <CardHeader>
+            <CardTitle>계정</CardTitle>
+          </CardHeader>
           <CardContent>
-            <FieldGroup>
-              <FormAlert message={form.formState.errors.root?.message} />
+            <FormRows>
               <TextField
                 form={form}
                 name="username"
@@ -118,6 +103,7 @@ export function NewUserView() {
                 autoComplete="off"
                 autoFocus
                 description="영문 소문자, 숫자, ., _, @, -로 3~64자"
+                layout="row"
               />
               <TextField
                 form={form}
@@ -126,22 +112,25 @@ export function NewUserView() {
                 type="password"
                 autoComplete="new-password"
                 description="8자 이상"
+                layout="row"
               />
-              <Controller
-                control={form.control}
-                name="isAdmin"
-                render={({ field }) => (
-                  <Field orientation="horizontal">
-                    <Checkbox
-                      id={adminId}
-                      checked={field.value}
-                      onCheckedChange={(v) => field.onChange(v === true)}
-                    />
-                    <FieldLabel htmlFor={adminId}>관리자 권한 주기 (선택)</FieldLabel>
-                  </Field>
-                )}
-              />
-            </FieldGroup>
+              <FormRow label="권한">
+                <Controller
+                  control={form.control}
+                  name="isAdmin"
+                  render={({ field }) => (
+                    <Field orientation="horizontal" className="md:mt-2">
+                      <Checkbox
+                        id={adminId}
+                        checked={field.value}
+                        onCheckedChange={(v) => field.onChange(v === true)}
+                      />
+                      <FieldLabel htmlFor={adminId}>관리자 권한 주기 (선택)</FieldLabel>
+                    </Field>
+                  )}
+                />
+              </FormRow>
+            </FormRows>
           </CardContent>
         </Card>
         <FormActions>

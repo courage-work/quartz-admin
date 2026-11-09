@@ -19,17 +19,10 @@ import { DeleteImpactDialog } from '@/components/connections/delete-impact-dialo
 import { DetectionPanel } from '@/components/connections/detection-panel';
 import { WriteStatusBadge } from '@/components/connections/write-status-badge';
 import { FormAlert } from '@/components/form/form-alert';
+import { InlineLink } from '@/components/links';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge, ProdStripe } from '@/components/status/environment';
 import { Badge } from '@/components/ui/badge';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -70,33 +63,54 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function InfoCard({ connection }: { connection: ConnectionDto }) {
+/** 수정 화면(`ConnectionForm`)과 같은 카드 나눔·순서·라벨 칸(1/4)을 쓴다 (B-40) */
+function InfoCards({ connection }: { connection: ConnectionDto }) {
   return (
-    <Card>
-      <CardContent>
-        <dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-4">
-          <Row label="DB">{DB_KIND_LABELS[connection.dbType]}</Row>
-          <Row label="주소">
-            <span className="font-mono">{describeAddress(connection)}</span>
-          </Row>
-          <Row label="스키마">
-            {connection.schemaName ? (
-              <span className="font-mono">{connection.schemaName}</span>
-            ) : (
-              <span className="text-muted-foreground">계정 기본 스키마</span>
-            )}
-          </Row>
-          <Row label="계정">
-            <span className="font-mono">{connection.username}</span>
-          </Row>
-          <Row label="권한">
-            <WriteStatusBadge connection={connection} />
-          </Row>
-          <Row label="태그">{connection.tags.length === 0 ? '-' : connection.tags.join(' · ')}</Row>
-          <Row label="수정한 시각">{formatDateTime(connection.updatedAt)}</Row>
-        </dl>
-      </CardContent>
-    </Card>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>접속 정보</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-4">
+            <Row label="DB 종류">{DB_KIND_LABELS[connection.dbType]}</Row>
+            <Row label="주소">
+              <span className="font-mono">{describeAddress(connection)}</span>
+            </Row>
+            <Row label="스키마">
+              {connection.schemaName ? (
+                <span className="font-mono">{connection.schemaName}</span>
+              ) : (
+                <span className="text-muted-foreground">계정 기본 스키마</span>
+              )}
+            </Row>
+            <Row label="계정">
+              <span className="font-mono">{connection.username}</span>
+            </Row>
+          </dl>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>표시와 권한</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-4">
+            <Row label="접속 이름">{connection.name}</Row>
+            <Row label="환경 라벨">
+              <EnvBadge environment={connection.envLabel} />
+            </Row>
+            <Row label="태그">
+              {connection.tags.length === 0 ? '-' : connection.tags.join(' · ')}
+            </Row>
+            <Row label="권한">
+              <WriteStatusBadge connection={connection} />
+            </Row>
+            <Row label="수정한 시각">{formatDateTime(connection.updatedAt)}</Row>
+          </dl>
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
@@ -143,7 +157,7 @@ function SchedulersCard({
                 <TableRow key={s.id}>
                   <TableCell>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{s.displayName}</span>
+                      <InlineLink href={`/scheduler?id=${s.id}`}>{s.displayName}</InlineLink>
                       {missingIds.includes(s.id) ? (
                         <Badge variant="warning">
                           <TriangleAlertIcon data-icon="inline-start" aria-hidden />
@@ -278,20 +292,8 @@ export function ConnectionView() {
   return (
     <>
       <ProdStripe environment={conn.envLabel} name={conn.name} />
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/connections">접속</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{conn.name}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
       <PageHeader
+        trail={[{ label: '접속', href: '/connections' }]}
         title={conn.name}
         description={<EnvBadge environment={conn.envLabel} />}
         actions={
@@ -309,7 +311,7 @@ export function ConnectionView() {
           </>
         }
       />
-      <InfoCard connection={conn} />
+      <InfoCards connection={conn} />
       <SchedulersCard
         schedulers={schedulers.data}
         missingIds={detect.data?.missingSchedulerIds ?? []}
