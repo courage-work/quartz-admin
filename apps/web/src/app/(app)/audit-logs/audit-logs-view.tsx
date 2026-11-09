@@ -2,25 +2,18 @@
 
 import { AUDIT_ACTIONS, AUDIT_RESULTS, type AuditLogPage } from '@qa/shared';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { ListFilterIcon, ScrollTextIcon, XIcon } from 'lucide-react';
-import Link from 'next/link';
+import { ListFilterIcon, ScrollTextIcon, SearchXIcon, XIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 
 import { FormAlert } from '@/components/form/form-alert';
+import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
 import { ListSearch } from '@/components/list/list-search';
 import { PageHeader } from '@/components/shell/page-header';
+import { TableEmpty } from '@/components/table-empty';
 import { TableFrame } from '@/components/table-frame';
 import { AuditResultBadge } from '@/components/status/status-badge';
 import { AUDIT_RESULT_META } from '@/components/status/tones';
 import { Button } from '@/components/ui/button';
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from '@/components/ui/empty';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -52,6 +45,7 @@ import {
 } from '@/lib/audit';
 import { formatDateTime } from '@/lib/format';
 import { AUDIT_ACTION_LABELS, auditActionLabel } from '@/lib/labels';
+import { setParam, type UrlCodec, useUrlState } from '@/lib/use-url-state';
 
 /** 필터 하나에 기간·작업 종류·결과를 모은다 (VectorLab list 패턴: Filters 컨트롤은 하나) */
 function FilterPopover({
@@ -215,10 +209,41 @@ function ActiveFilters({
   );
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 필터 ↔ 주소(`from`, `to`, `action`, `result`, `user`). 기록 상세에 갔다 돌아와도 그대로다(B-40) */
+const AUDIT_CODEC: UrlCodec<AuditFilter> = {
+  parse: (p) => {
+    const date = (key: string) => {
+      const v = p.get(key) ?? '';
+      return DATE_RE.test(v) ? v : '';
+    };
+    // 주소를 손으로 고쳐도 서버가 거절하는 값은 보내지 않는다
+    const oneOf = (key: string, allowed: readonly string[], empty: string) => {
+      const v = p.get(key) ?? '';
+      return allowed.includes(v) ? v : empty;
+    };
+    return {
+      fromDate: date('from'),
+      toDate: date('to'),
+      action: oneOf('action', AUDIT_ACTIONS, EMPTY_AUDIT_FILTER.action),
+      result: oneOf('result', AUDIT_RESULTS, EMPTY_AUDIT_FILTER.result),
+      username: p.get('user') ?? '',
+    };
+  },
+  write: (v, p) => {
+    setParam(p, 'from', v.fromDate);
+    setParam(p, 'to', v.toDate);
+    setParam(p, 'action', v.action, EMPTY_AUDIT_FILTER.action);
+    setParam(p, 'result', v.result, EMPTY_AUDIT_FILTER.result);
+    setParam(p, 'user', v.username);
+  },
+};
+
 /** 감사 로그 목록 (PRD FR-AUD-03). 최신 기록부터 50건씩 불러온다(기본 정렬: 최신순) */
 export function AuditLogsView() {
-  const [filter, setFilter] = useState<AuditFilter>(EMPTY_AUDIT_FILTER);
-  const [q, setQ] = useState('');
+  const [filter, setFilter] = useUrlState(AUDIT_CODEC);
+  const [q, setQ] = useState(filter.username);
   const logs = useInfiniteQuery({
     queryKey: ['audit-logs', filter],
     queryFn: ({ pageParam, signal }) =>
@@ -271,54 +296,46 @@ export function AuditLogsView() {
               <TableHead>대상</TableHead>
               <TableHead>결과</TableHead>
               <TableHead>IP</TableHead>
+              <RowChevronHead />
             </TableRow>
           </TableHeader>
           <TableBody>
             {logs.isPending ? (
               Array.from({ length: 5 }, (_, i) => (
                 <TableRow key={i}>
-                  <TableCell colSpan={6}>
+                  <TableCell colSpan={7}>
                     <Skeleton className="h-5 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : items.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6}>
-                  <Empty>
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">
-                        <ScrollTextIcon aria-hidden />
-                      </EmptyMedia>
-                      <EmptyTitle>
-                        {filtered ? '조건에 맞는 기록이 없습니다' : '아직 기록이 없습니다'}
-                      </EmptyTitle>
-                      <EmptyDescription>
-                        {filtered
-                          ? '기간을 넓히거나 필터를 지워 보세요.'
-                          : '로그인이나 설정 변경이 일어나면 여기에 남습니다.'}
-                      </EmptyDescription>
-                    </EmptyHeader>
-                    {filtered ? (
-                      <EmptyContent>
-                        <Button variant="outline" onClick={() => apply(EMPTY_AUDIT_FILTER)}>
-                          필터 모두 지우기
-                        </Button>
-                      </EmptyContent>
-                    ) : null}
-                  </Empty>
-                </TableCell>
-              </TableRow>
+              filtered ? (
+                <TableEmpty
+                  colSpan={7}
+                  icon={SearchXIcon}
+                  title="조건에 맞는 기록이 없습니다"
+                  description="기간을 넓히거나 필터를 지워 보세요."
+                  action={
+                    <Button variant="outline" onClick={() => apply(EMPTY_AUDIT_FILTER)}>
+                      필터 모두 지우기
+                    </Button>
+                  }
+                />
+              ) : (
+                <TableEmpty
+                  colSpan={7}
+                  icon={ScrollTextIcon}
+                  title="아직 기록이 없습니다"
+                  description="로그인이나 설정 변경이 일어나면 여기에 남습니다."
+                />
+              )
             ) : (
               items.map((log) => (
-                <TableRow key={log.id}>
+                <LinkRow key={log.id}>
                   <TableCell>
-                    <Link
-                      href={`/audit-log?id=${log.id}`}
-                      className="text-primary underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
-                    >
+                    <RowLink href={`/audit-log?id=${log.id}`} className="tabular-nums">
                       {formatDateTime(log.at)}
-                    </Link>
+                    </RowLink>
                   </TableCell>
                   <TableCell>
                     <span className="font-mono">{describeActor(log)}</span>
@@ -333,7 +350,8 @@ export function AuditLogsView() {
                   <TableCell>
                     <span className="font-mono">{log.ip ?? '-'}</span>
                   </TableCell>
-                </TableRow>
+                  <RowChevronCell />
+                </LinkRow>
               ))
             )}
           </TableBody>

@@ -14,15 +14,27 @@ import {
   type TriggerSort,
 } from '@qa/shared';
 import { useQuery } from '@tanstack/react-query';
-import { CircleCheckIcon, HistoryIcon, PauseIcon, SearchIcon, UnplugIcon } from 'lucide-react';
-import Link from 'next/link';
+import {
+  ActivityIcon,
+  BriefcaseIcon,
+  CircleCheckIcon,
+  HistoryIcon,
+  PauseIcon,
+  SearchIcon,
+  SearchXIcon,
+  ServerIcon,
+  TimerIcon,
+  UnplugIcon,
+} from 'lucide-react';
 import { type FormEvent, type ReactNode, useId, useRef, useState } from 'react';
 
 import { FormAlert } from '@/components/form/form-alert';
+import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
+import { TableEmpty } from '@/components/table-empty';
 import { TableFrame } from '@/components/table-frame';
 import { PaginationBar } from '@/components/schedulers/pagination-bar';
 import { TimeCell } from '@/components/schedulers/time-cell';
-import { jobHref, TriggerTable } from '@/components/schedulers/trigger-table';
+import { JobLink, jobHref, TriggerTable } from '@/components/schedulers/trigger-table';
 import { TriggerStateBadge } from '@/components/status/status-badge';
 import { TRIGGER_STATE_META } from '@/components/status/tones';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -52,6 +64,7 @@ import { useSlashFocus } from '@/hooks/use-slash-focus';
 import { api, type Query } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { formatAgo, formatInterval, schedulerViewKey, TRIGGER_TYPE_LABELS } from '@/lib/schedulers';
+import { parsePage, setParam, type UrlCodec, useUrlState } from '@/lib/use-url-state';
 
 interface TabProps {
   schedulerId: number;
@@ -88,16 +101,6 @@ function LoadingRows({ columns }: { columns: number }) {
   ));
 }
 
-function EmptyRow({ columns, children }: { columns: number; children: ReactNode }) {
-  return (
-    <TableRow>
-      <TableCell colSpan={columns}>
-        <span className="text-muted-foreground">{children}</span>
-      </TableCell>
-    </TableRow>
-  );
-}
-
 // ── 노드 ───────────────────────────────────────────────
 
 /** 클러스터 노드 (FR-VIEW-02) */
@@ -121,9 +124,12 @@ export function NodesTab({ schedulerId, refreshMs }: TabProps) {
             {!res.data ? (
               <LoadingRows columns={4} />
             ) : res.data.nodes.length === 0 ? (
-              <EmptyRow columns={4}>
-                체크인한 노드가 없습니다. 클러스터가 내려가 있을 수 있습니다.
-              </EmptyRow>
+              <TableEmpty
+                colSpan={4}
+                icon={ServerIcon}
+                title="체크인한 노드가 없습니다"
+                description="클러스터가 내려가 있을 수 있습니다."
+              />
             ) : (
               res.data.nodes.map((n) => (
                 <TableRow key={n.instanceName}>
@@ -269,10 +275,34 @@ function SearchForm({
 
 const PAGE_SIZE = 50;
 
+interface JobsView {
+  group?: string;
+  q?: string;
+  page: number;
+}
+
+/** 잡 탭 상태 ↔ 주소(`group`, `q`, `page`). 잡 상세에 갔다 돌아와도 그대로다(B-40) */
+const JOBS_CODEC: UrlCodec<JobsView> = {
+  parse: (p) => ({
+    group: p.get('group') || undefined,
+    q: p.get('q') || undefined,
+    page: parsePage(p.get('page')),
+  }),
+  write: (v, p) => {
+    setParam(p, 'group', v.group);
+    setParam(p, 'q', v.q);
+    setParam(p, 'page', String(v.page), '1');
+  },
+};
+
 /** 잡 목록 (FR-VIEW-03) */
 export function JobsTab({ schedulerId, refreshMs }: TabProps) {
-  const [filter, setFilter] = useState<Partial<JobListQuery>>({});
-  const [page, setPage] = useState(1);
+  const [view, setView] = useUrlState(JOBS_CODEC);
+  const filter: Partial<JobListQuery> = { group: view.group, q: view.q };
+  const page = view.page;
+  const setFilter = (f: Partial<JobListQuery>) =>
+    setView((v) => ({ ...v, group: f.group, q: f.q }));
+  const setPage = (p: number) => setView((v) => ({ ...v, page: p }));
   const query: Query = { ...filter, page, size: PAGE_SIZE };
   const res = useView<Page<JobDto>>(schedulerId, 'jobs', 'jobs', refreshMs, query);
   const yesNo = (v: boolean | null) => (v === null ? '-' : v ? '예' : '아니요');
@@ -304,31 +334,37 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
               <TableHead>동시 실행 금지</TableHead>
               <TableHead>복구 요청</TableHead>
               <TableHead className="text-right">트리거</TableHead>
+              <RowChevronHead />
             </TableRow>
           </TableHeader>
           <TableBody>
             {!res.data ? (
-              <LoadingRows columns={7} />
+              <LoadingRows columns={8} />
             ) : res.data.items.length === 0 ? (
-              <EmptyRow columns={7}>
-                조건에 맞는 잡이 없습니다.
-                {filter.group || filter.q ? (
-                  <Button variant="link" onClick={() => setFilter({})}>
-                    필터 모두 지우기
-                  </Button>
-                ) : null}
-              </EmptyRow>
+              filter.group || filter.q ? (
+                <TableEmpty
+                  colSpan={8}
+                  icon={SearchXIcon}
+                  title="조건에 맞는 잡이 없습니다"
+                  action={
+                    <Button variant="outline" onClick={() => setFilter({})}>
+                      필터 모두 지우기
+                    </Button>
+                  }
+                />
+              ) : (
+                <TableEmpty colSpan={8} icon={BriefcaseIcon} title="등록된 잡이 없습니다" />
+              )
             ) : (
               res.data.items.map((j) => (
-                <TableRow key={`${j.group}\u0000${j.name}`}>
+                <LinkRow key={`${j.group}\u0000${j.name}`}>
                   <TableCell>
-                    <Link
-                      href={jobHref(schedulerId, j.group, j.name)}
-                      className="flex flex-col underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
-                    >
+                    <span className="flex flex-col">
                       <span className="text-xs text-muted-foreground">{j.group}</span>
-                      <span className="font-mono">{j.name}</span>
-                    </Link>
+                      <RowLink href={jobHref(schedulerId, j.group, j.name)} className="font-mono">
+                        {j.name}
+                      </RowLink>
+                    </span>
                   </TableCell>
                   <TableCell>
                     <span className="font-mono text-xs">{j.jobClass}</span>
@@ -340,7 +376,8 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
                   <TableCell className="text-right">
                     <span className="tabular-nums">{j.triggerCount}</span>
                   </TableCell>
-                </TableRow>
+                  <RowChevronCell />
+                </LinkRow>
               ))
             )}
           </TableBody>
@@ -355,13 +392,51 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
 
 // ── 트리거 ──────────────────────────────────────────────
 
+interface TriggersView {
+  states: string[];
+  types: string[];
+  group?: string;
+  q?: string;
+  sort: TriggerSort;
+  page: number;
+}
+
+/** 쉼표로 이은 값 중 허용 목록에 있는 것만 */
+function parseList(raw: string | null, allowed: readonly string[]): string[] {
+  return raw ? raw.split(',').filter((v) => allowed.includes(v)) : [];
+}
+
+/** 트리거 탭 상태 ↔ 주소(`state`, `type`, `group`, `q`, `sort`, `page`) (B-40) */
+const TRIGGERS_CODEC: UrlCodec<TriggersView> = {
+  parse: (p) => ({
+    states: parseList(p.get('state'), TRIGGER_STATES),
+    types: parseList(p.get('type'), TRIGGER_TYPES),
+    group: p.get('group') || undefined,
+    q: p.get('q') || undefined,
+    sort: p.get('sort') === 'nextFireTime' ? 'nextFireTime' : 'key',
+    page: parsePage(p.get('page')),
+  }),
+  write: (v, p) => {
+    setParam(p, 'state', v.states.join(','));
+    setParam(p, 'type', v.types.join(','));
+    setParam(p, 'group', v.group);
+    setParam(p, 'q', v.q);
+    setParam(p, 'sort', v.sort, 'key');
+    setParam(p, 'page', String(v.page), '1');
+  },
+};
+
 /** 트리거 목록 (FR-VIEW-04). 상태·타입은 여러 개, 그룹은 정확히 일치, 검색어는 부분 일치 */
 export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
-  const [states, setStates] = useState<string[]>([]);
-  const [types, setTypes] = useState<string[]>([]);
-  const [text, setText] = useState<{ group?: string; q?: string }>({});
-  const [sort, setSort] = useState<TriggerSort>('key');
-  const [page, setPage] = useState(1);
+  const [view, setView] = useUrlState(TRIGGERS_CODEC);
+  const { states, types, sort, page } = view;
+  const text = { group: view.group, q: view.q };
+  const update = (patch: Partial<TriggersView>) => setView((v) => ({ ...v, ...patch }));
+  const setStates = (v: string[]) => update({ states: v });
+  const setTypes = (v: string[]) => update({ types: v });
+  const setText = (v: { group?: string; q?: string }) => update({ group: v.group, q: v.q });
+  const setSort = (v: TriggerSort) => update({ sort: v });
+  const setPage = (v: number) => update({ page: v });
   const query: Query & Partial<Record<keyof TriggerListQuery, unknown>> = {
     ...text,
     state: states.length ? states.join(',') : undefined,
@@ -372,6 +447,8 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
   };
   const res = useView<Page<TriggerDto>>(schedulerId, 'triggers', 'triggers', refreshMs, query);
   const filtered = states.length > 0 || types.length > 0 || !!text.group || !!text.q;
+  const clearFilters = () =>
+    update({ states: [], types: [], group: undefined, q: undefined, page: 1 });
 
   return (
     <div className="flex flex-col gap-3">
@@ -448,15 +525,7 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
             </Select>
           </Field>
           {filtered ? (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setStates([]);
-                setTypes([]);
-                setText({});
-                setPage(1);
-              }}
-            >
+            <Button variant="ghost" onClick={clearFilters}>
               필터 모두 지우기
             </Button>
           ) : null}
@@ -469,6 +538,19 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
           schedulerId={schedulerId}
           triggers={res.data?.items}
           loading={res.isFetching}
+          empty={
+            filtered
+              ? {
+                  icon: SearchXIcon,
+                  title: '조건에 맞는 트리거가 없습니다',
+                  action: (
+                    <Button variant="outline" onClick={clearFilters}>
+                      필터 모두 지우기
+                    </Button>
+                  ),
+                }
+              : { icon: TimerIcon, title: '등록된 트리거가 없습니다' }
+          }
         />
       </TableFrame>
       {res.data ? (
@@ -514,7 +596,11 @@ export function ExecutingTab({ schedulerId, refreshMs }: TabProps) {
             {!res.data ? (
               <LoadingRows columns={6} />
             ) : res.data.items.length === 0 ? (
-              <EmptyRow columns={6}>지금 실행 중이거나 획득된 트리거가 없습니다.</EmptyRow>
+              <TableEmpty
+                colSpan={6}
+                icon={ActivityIcon}
+                title="지금 실행 중이거나 획득된 트리거가 없습니다"
+              />
             ) : (
               res.data.items.map((e) => (
                 <TableRow key={e.entryId}>
@@ -526,13 +612,7 @@ export function ExecutingTab({ schedulerId, refreshMs }: TabProps) {
                   </TableCell>
                   <TableCell>
                     {e.jobGroup && e.jobName ? (
-                      <Link
-                        href={jobHref(schedulerId, e.jobGroup, e.jobName)}
-                        className="flex flex-col underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
-                      >
-                        <span className="text-xs text-muted-foreground">{e.jobGroup}</span>
-                        <span className="font-mono">{e.jobName}</span>
-                      </Link>
+                      <JobLink schedulerId={schedulerId} group={e.jobGroup} name={e.jobName} />
                     ) : (
                       '-'
                     )}

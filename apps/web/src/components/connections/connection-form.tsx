@@ -25,19 +25,12 @@ import type { z } from 'zod';
 
 import { FormActions } from '@/components/form/form-actions';
 import { FormAlert } from '@/components/form/form-alert';
+import { FormRow, FormRows } from '@/components/form/form-row';
 import { TextField } from '@/components/form/text-field';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  FieldSet,
-  FieldLegend,
-} from '@/components/ui/field';
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Select,
@@ -149,62 +142,63 @@ function TargetFields({
   const dbTypeError = form.getFieldState('dbType', form.formState).error;
 
   return (
-    <FieldGroup>
+    <FormRows>
       <Controller
         control={form.control}
         name="dbType"
         render={({ field }) => (
-          <Field data-invalid={dbTypeError ? true : undefined}>
-            <FieldLabel htmlFor={dbTypeId}>DB 종류</FieldLabel>
-            <Select
-              value={field.value}
-              onValueChange={(value) => {
-                const kind = value as ConnectionFormValues['dbType'];
-                // 기본 포트를 그대로 쓰고 있었다면 새 종류의 기본 포트로 바꾼다
-                if (form.getValues('port') === String(DEFAULT_PORTS[field.value])) {
-                  form.setValue('port', String(DEFAULT_PORTS[kind]));
-                }
-                field.onChange(kind);
-              }}
-            >
-              <SelectTrigger
-                id={dbTypeId}
-                aria-invalid={dbTypeError ? true : undefined}
-                className="w-full md:w-64"
+          <FormRow label="DB 종류" htmlFor={dbTypeId} invalid={!!dbTypeError}>
+            <Field data-invalid={dbTypeError ? true : undefined}>
+              <Select
+                value={field.value}
+                onValueChange={(value) => {
+                  const kind = value as ConnectionFormValues['dbType'];
+                  // 기본 포트를 그대로 쓰고 있었다면 새 종류의 기본 포트로 바꾼다
+                  if (form.getValues('port') === String(DEFAULT_PORTS[field.value])) {
+                    form.setValue('port', String(DEFAULT_PORTS[kind]));
+                  }
+                  field.onChange(kind);
+                }}
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {DB_KINDS.map((kind) => (
-                    <SelectItem
-                      key={kind}
-                      value={kind}
-                      disabled={!SUPPORTED_DB_KINDS.includes(kind)}
-                    >
-                      {DB_KIND_LABELS[kind]}
-                      {SUPPORTED_DB_KINDS.includes(kind) ? '' : ' (지원 예정)'}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            <FieldError errors={[dbTypeError]} />
-          </Field>
+                <SelectTrigger
+                  id={dbTypeId}
+                  aria-invalid={dbTypeError ? true : undefined}
+                  className="w-full md:w-64"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {DB_KINDS.map((kind) => (
+                      <SelectItem
+                        key={kind}
+                        value={kind}
+                        disabled={!SUPPORTED_DB_KINDS.includes(kind)}
+                      >
+                        {DB_KIND_LABELS[kind]}
+                        {SUPPORTED_DB_KINDS.includes(kind) ? '' : ' (지원 예정)'}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldError errors={[dbTypeError]} />
+            </Field>
+          </FormRow>
         )}
       />
-      <div className="grid gap-4 md:grid-cols-4">
-        <div className="md:col-span-3">
-          <TextField form={form} name="host" label="호스트" autoComplete="off" />
-        </div>
-        <TextField form={form} name="port" label="포트" autoComplete="off" />
-      </div>
+      <TextField form={form} name="host" label="호스트" autoComplete="off" layout="row" />
+      <TextField
+        form={form}
+        name="port"
+        label="포트"
+        autoComplete="off"
+        layout="row"
+        size="short"
+      />
       {dbType === 'oracle' ? (
         <>
-          <FieldSet>
-            <FieldLegend id={oracleModeId} variant="label">
-              접속 방식
-            </FieldLegend>
+          <FormRow label="접속 방식" labelId={oracleModeId}>
             <Controller
               control={form.control}
               name="oracleMode"
@@ -213,6 +207,7 @@ function TargetFields({
                   aria-labelledby={oracleModeId}
                   value={field.value}
                   onValueChange={field.onChange}
+                  className="md:mt-2"
                 >
                   <Field orientation="horizontal">
                     <RadioGroupItem id={`${oracleModeId}-service`} value="service" />
@@ -225,17 +220,18 @@ function TargetFields({
                 </RadioGroup>
               )}
             />
-          </FieldSet>
+          </FormRow>
           <TextField
             form={form}
             name="oracleName"
             label={oracleMode === 'sid' ? 'SID' : '서비스 이름'}
             autoComplete="off"
             description={oracleMode === 'sid' ? '예: ORCL' : '예: ORCLPDB1'}
+            layout="row"
           />
         </>
       ) : (
-        <TextField form={form} name="database" label="DB 이름" autoComplete="off" />
+        <TextField form={form} name="database" label="DB 이름" autoComplete="off" layout="row" />
       )}
       <TextField
         form={form}
@@ -243,19 +239,19 @@ function TargetFields({
         label="스키마(선택)"
         autoComplete="off"
         description="Quartz 테이블이 있는 스키마입니다. 비워 두면 접속 계정의 기본 스키마를 봅니다."
+        layout="row"
       />
-      <div className="grid gap-4 md:grid-cols-2">
-        <TextField form={form} name="username" label="계정" autoComplete="off" />
-        <TextField
-          form={form}
-          name="password"
-          label="비밀번호"
-          type="password"
-          autoComplete="new-password"
-          description={editing ? '비워 두면 저장된 비밀번호를 그대로 씁니다.' : undefined}
-        />
-      </div>
-    </FieldGroup>
+      <TextField form={form} name="username" label="계정" autoComplete="off" layout="row" />
+      <TextField
+        form={form}
+        name="password"
+        label="비밀번호"
+        type="password"
+        autoComplete="new-password"
+        description={editing ? '비워 두면 저장된 비밀번호를 그대로 씁니다.' : undefined}
+        layout="row"
+      />
+    </FormRows>
   );
 }
 
@@ -268,8 +264,8 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
 
   const form = useForm<ConnectionFormValues>({
-    // 처음 벗어날 때 검사하고, 그 뒤로는 고칠 때마다 다시 검사해 오류를 바로 지운다
-    mode: 'onTouched',
+    // 저장할 때 검사한다. 값을 바꾼 칸은 벗어날 때, 오류가 뜬 칸은 고칠 때 검사한다(TextField)
+    mode: 'onSubmit',
     resolver: schemaResolver(
       editing ? updateConnectionRequestSchema : createConnectionRequestSchema,
     ),
@@ -388,7 +384,7 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
   return (
     <form
       noValidate
-      className="flex max-w-2xl flex-col gap-6"
+      className="flex flex-col gap-6"
       onSubmit={(e) => void form.handleSubmit((values) => save.mutate(values))(e)}
     >
       <FormAlert message={form.formState.errors.root?.message} />
@@ -417,19 +413,20 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
           </AlertDescription>
         </Alert>
       ) : null}
+      {/* 상세 화면과 같은 카드 나눔·순서·라벨 칸(1/4)이라 상세 ↔ 수정을 오가도 자리가 같다 (B-40) */}
       <Card>
         <CardHeader>
-          <CardTitle>대상 DB</CardTitle>
+          <CardTitle>접속 정보</CardTitle>
           <CardDescription>
             Quartz 테이블이 있는 DB에 붙을 정보입니다. 비밀번호는 암호화해 저장하고 화면에 다시 보여
             주지 않습니다.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col gap-6">
+          <FormRows>
             <TargetFields form={form} editing={editing} />
-            <div className="flex flex-col gap-3">
-              <div>
+            <FormRow>
+              <div className="flex flex-col items-start gap-3">
                 <Button
                   type="button"
                   variant="outline"
@@ -443,64 +440,64 @@ export function ConnectionForm({ connection }: { connection?: ConnectionDto }) {
                   )}
                   연결 테스트하기
                 </Button>
+                {testResult ? <TestResult result={testResult} /> : null}
               </div>
-              {testResult ? <TestResult result={testResult} /> : null}
-            </div>
-          </div>
+            </FormRow>
+          </FormRows>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>표시와 분류</CardTitle>
+          <CardTitle>표시와 권한</CardTitle>
         </CardHeader>
         <CardContent>
-          <FieldGroup>
+          <FormRows>
             <TextField
               form={form}
               name="name"
               label="접속 이름"
               autoComplete="off"
               description="목록과 감사 로그에 보이는 이름입니다."
+              layout="row"
             />
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextField
-                form={form}
-                name="envLabel"
-                label="환경 라벨"
-                autoComplete="off"
-                description="prod, stage, dev처럼 씁니다. prod는 화면에 빨갛게 표시됩니다."
-              />
-              <TextField
-                form={form}
-                name="tags"
-                label="태그(선택)"
-                autoComplete="off"
-                description="쉼표로 구분합니다. 예: 정산, 배치"
-              />
-            </div>
-            <FieldSet>
-              <FieldLegend variant="label">권한</FieldLegend>
+            <TextField
+              form={form}
+              name="envLabel"
+              label="환경 라벨"
+              autoComplete="off"
+              description="prod, stage, dev처럼 씁니다. prod는 화면에 빨갛게 표시됩니다."
+              layout="row"
+              size="short"
+            />
+            <TextField
+              form={form}
+              name="tags"
+              label="태그(선택)"
+              autoComplete="off"
+              description="쉼표로 구분합니다. 예: 정산, 배치"
+              layout="row"
+            />
+            <FormRow label="읽기 전용" htmlFor={readOnlyId}>
               <Controller
                 control={form.control}
                 name="readOnly"
                 render={({ field }) => (
-                  <Field orientation="horizontal">
+                  <Field className="md:mt-2">
                     <Switch
                       id={readOnlyId}
                       checked={field.value}
                       onCheckedChange={field.onChange}
                     />
-                    <FieldLabel htmlFor={readOnlyId}>읽기 전용으로 쓰기</FieldLabel>
+                    <FieldDescription>
+                      켜 두면 쓰기 권한이 있어도 이 접속의 스케줄러에서는 조회만 합니다. 쓰기 권한이
+                      없는 계정은 감지할 때 자동으로 읽기 전용이 됩니다.
+                    </FieldDescription>
                   </Field>
                 )}
               />
-              <FieldDescription>
-                켜 두면 쓰기 권한이 있어도 이 접속의 스케줄러에서는 조회만 합니다. 쓰기 권한이 없는
-                계정은 감지할 때 자동으로 읽기 전용이 됩니다.
-              </FieldDescription>
-            </FieldSet>
-          </FieldGroup>
+            </FormRow>
+          </FormRows>
         </CardContent>
       </Card>
 

@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { type ReactNode, Suspense } from 'react';
 
 import { AppSidebar } from '@/components/shell/app-sidebar';
 import { AuthGate } from '@/components/shell/auth-gate';
@@ -8,11 +8,16 @@ import { UserMenu } from '@/components/shell/user-menu';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ReturnNavTracker } from '@/lib/return-nav';
 
 /** 로그인 후 화면의 공통 레이아웃: 사이드바, 헤더(테마, 본인 메뉴), 본문 */
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <AuthGate>
+      {/* 화면마다 마지막 주소를 기억해 돌아가기 링크가 쓴다(B-40) */}
+      <Suspense fallback={null}>
+        <ReturnNavTracker />
+      </Suspense>
       <SidebarProvider>
         <AppSidebar />
         {/* min-w-0: 넓은 표가 본문을 늘리지 않고 표 안에서 가로로 스크롤하게 한다 */}

@@ -9,8 +9,10 @@ import {
   KeyRoundIcon,
   LockIcon,
   MoreHorizontalIcon,
+  SearchXIcon,
   ShieldIcon,
   UserPlusIcon,
+  UsersIcon,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
@@ -21,6 +23,7 @@ import { FormAlert } from '@/components/form/form-alert';
 import { TextField } from '@/components/form/text-field';
 import { ListSearch } from '@/components/list/list-search';
 import { PaginationBar } from '@/components/schedulers/pagination-bar';
+import { TableEmpty } from '@/components/table-empty';
 import { TableFrame } from '@/components/table-frame';
 import { PageHeader } from '@/components/shell/page-header';
 import {
@@ -122,7 +125,7 @@ function ResetPasswordSheet({ user, onClose }: { user: UserDto | null; onClose: 
     if (user) lastId.current = user.id;
   }, [user]);
   const form = useForm<ResetPasswordRequest>({
-    mode: 'onTouched',
+    mode: 'onSubmit',
     resolver: zodResolver(resetPasswordRequestSchema),
     defaultValues: { password: '' },
   });
@@ -349,16 +352,21 @@ export function UsersView() {
                     </TableRow>
                   ))
                 ) : paged.items.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6}>
-                      <div className="flex flex-wrap items-center gap-2 py-6 text-muted-foreground">
-                        검색어에 맞는 사용자가 없습니다.
-                        <Button variant="link" onClick={() => setQ('')}>
+                  // 검색하지 않았는데 검색 문구를 보이지 않는다
+                  q.trim() ? (
+                    <TableEmpty
+                      colSpan={6}
+                      icon={SearchXIcon}
+                      title="검색어에 맞는 사용자가 없습니다"
+                      action={
+                        <Button variant="outline" onClick={() => setQ('')}>
                           검색어 지우기
                         </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                      }
+                    />
+                  ) : (
+                    <TableEmpty colSpan={6} icon={UsersIcon} title="아직 사용자가 없습니다" />
+                  )
                 ) : (
                   paged.items.map((user) => (
                     <TableRow key={user.id}>

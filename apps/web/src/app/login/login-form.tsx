@@ -29,7 +29,7 @@ export function LoginForm() {
   const queryClient = useQueryClient();
   const me = useMeQuery();
   const form = useForm<LoginRequest>({
-    mode: 'onTouched',
+    mode: 'onSubmit',
     resolver: zodResolver(loginRequestSchema),
     defaultValues: { username: '', password: '' },
   });

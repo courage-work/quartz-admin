@@ -7,20 +7,13 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { FormAlert } from '@/components/form/form-alert';
+import { InlineLink } from '@/components/links';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
 import { SchedulerStats } from '@/components/schedulers/scheduler-stats';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge, ProdStripe } from '@/components/status/environment';
 import { SchedulerHealthBadge } from '@/components/status/status-badge';
 import { Badge } from '@/components/ui/badge';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import {
   Empty,
@@ -71,13 +64,7 @@ function Summary({ s }: { s: SchedulerDetailDto }) {
   return (
     <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
       <span>
-        접속{' '}
-        <Link
-          href={`/connection?id=${s.connection.id}`}
-          className="underline decoration-muted-foreground underline-offset-4 hover:decoration-foreground"
-        >
-          {s.connection.name}
-        </Link>
+        접속 <InlineLink href={`/connection?id=${s.connection.id}`}>{s.connection.name}</InlineLink>
       </span>
       <span className="font-mono">
         {s.tablePrefix}
@@ -123,28 +110,16 @@ export function SchedulerView() {
   const s = detail.data;
 
   const setTab = (value: string) => {
-    const next = new URLSearchParams(params.toString());
-    next.set('tab', value);
+    // 탭마다 필터·쪽을 주소에 남기므로(B-40) 탭을 바꾸면 이전 탭의 값은 버린다
+    const next = new URLSearchParams({ id: String(id), tab: value });
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   };
 
   return (
     <>
       <ProdStripe environment={s.connection.envLabel} name={s.displayName} />
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/">대시보드</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{s.displayName}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
       <PageHeader
+        trail={[{ label: '대시보드', href: '/' }]}
         title={s.displayName}
         description={
           <span className="flex flex-col gap-2">

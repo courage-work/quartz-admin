@@ -11,14 +11,6 @@ import { Code } from '@/components/code';
 import { FormAlert } from '@/components/form/form-alert';
 import { PageHeader } from '@/components/shell/page-header';
 import { AuditResultBadge } from '@/components/status/status-badge';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -144,20 +136,10 @@ export function AuditLogDetail() {
 
   return (
     <>
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/audit-logs">감사 로그</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{id === null ? '기록' : `#${id}`}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
-      <PageHeader title="감사 기록" />
+      <PageHeader
+        trail={[{ label: '감사 로그', href: '/audit-logs' }]}
+        title={id === null ? '감사 기록' : `감사 기록 #${id}`}
+      />
       {body}
     </>
   );

@@ -2,21 +2,12 @@
 
 import type { ConnectionDto } from '@qa/shared';
 import { useQuery } from '@tanstack/react-query';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
 import { ConnectionForm } from '@/components/connections/connection-form';
 import { ConnectionNotFound } from '@/components/connections/connection-not-found';
 import { FormAlert } from '@/components/form/form-alert';
 import { PageHeader } from '@/components/shell/page-header';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api, isApiError } from '@/lib/api';
 import { connectionKey } from '@/lib/connections';
@@ -40,30 +31,13 @@ export function EditConnectionView() {
 
   return (
     <>
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/connections">접속</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          {connection.data ? (
-            <>
-              <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <Link href={`/connection?id=${connection.data.id}`}>{connection.data.name}</Link>
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-            </>
-          ) : null}
-          <BreadcrumbItem>
-            <BreadcrumbPage>수정</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
       <PageHeader
+        trail={[
+          { label: '접속', href: '/connections' },
+          ...(id !== null
+            ? [{ label: connection.data?.name ?? '접속', href: `/connection?id=${id}` }]
+            : []),
+        ]}
         title="접속 수정"
         description="비밀번호를 비워 두면 저장된 비밀번호를 그대로 씁니다."
       />

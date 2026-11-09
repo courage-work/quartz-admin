@@ -2,9 +2,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.4 |
+| 문서 버전 | v0.5 |
 | 작성일 | 2026-11-06 |
-| 관련 작업 | B-37, B-38, B-39(`docs/BACKLOG.md`), `.ux-profile.md` |
+| 관련 작업 | B-37, B-38, B-39, B-40(`docs/BACKLOG.md`), `.ux-profile.md` |
 | 확인 화면 | `/design` (`apps/web/src/app/design/`) |
 
 화면을 만들 때 이 문서와 `/design` 화면을 기준으로 삼습니다. 규칙 대부분은 `@shadcn/lint`가 `pnpm lint`에서 검사합니다.
@@ -57,6 +57,8 @@ shadcn 표준 토큰(background, foreground, card, popover, primary, secondary, 
 | `sidebar` | 다크 | 바탕과 같음 | `oklch(0.232 0.024 151)` | 바탕보다 한 단 어둡게 |
 | `shadow-2xs`, `shadow-xs` | 라이트 | 검정 5% | 따뜻한 갈색 4~5% 두 겹 | 베이지 바탕에서 회색 그림자가 탁해 보임 |
 | `shadow-sm`~`shadow-2xl` | 라이트 | 검정 10~25% | 따뜻한 갈색 7% 이하, 넓게 퍼짐 | 라이트 그림자 알파는 0.08 미만(VectorLab colour-palette) |
+| `link` (추가) | 라이트 | 없음 | `oklch(0.49 0.13 144.2)` | 글자 링크 색(B-40). primary는 올린 바탕(`link/10`) 위에서 4.4:1이라 한 단 어둡게. 카드 위 5.8:1 |
+| `link` (추가) | 다크 | 없음 | `oklch(0.76 0.155 144.2)` | primary는 카드 위 4.3:1이라 한 단 밝게. 카드 위 5.9:1, 올린 바탕 위 4.9:1 |
 
 면은 세 단으로 씁니다. 사이드바(가장 어둡게) → 바탕 → 카드·표 틀·필터 묶음(가장 밝게, `shadow-xs`). 바꾼 뒤 대비는 `muted-foreground`가 바탕·카드·사이드바 위에서 라이트 6.1:1 이상, 다크 7.7:1 이상입니다.
 
@@ -171,6 +173,9 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - 대화상자·시트 배경(overlay)의 흐림(`backdrop-blur-xs`)을 빼고 `bg-black/40`으로 가렸습니다. 흐림은 경계가 흐려 보여 쓰지 않습니다(VectorLab anti-slop, B-39 점검).
 - 드롭다운·팝오버·선택 상자·툴팁의 등장 효과에서 95% 확대(`zoom-in-95`)를 빼고 투명도만 바꿉니다(VectorLab transitions: 팝오버는 투명도, 크기 변화 1.02 이하).
 - 사이드바 접기·펼치기에서 너비·위치 전환(`transition-[width]` 등)을 빼 즉시 바뀌게 했습니다. 너비는 애니메이션하지 않습니다(VectorLab motion).
+- `table`의 칸 여백을 넓혔습니다. 머리 칸 `h-10 px-2` → `h-11 px-3`, 본문 칸 `p-2` → `px-3 py-3`, 첫·끝 칸은 `pl-4`/`pr-4`로 표 틀 테두리와 띄웁니다. 한 줄 행이 38px에서 46px이 됐습니다. 원본 여백은 열 사이와 행 위아래가 빡빡해 보였습니다(B-40).
+- `table`의 스크롤 틀(`table-container`)을 container(`@container/table`)로 두었습니다. 빈 표 표시를 보이는 폭에 맞추기 위해서입니다(B-40).
+- `card`에 `interactive`를 더했습니다. 카드 전체가 링크일 때 올림·포커스 표시를 카드가 맡습니다(B-40).
 
 ### 8.1.1 셸과 화면 공통 부품 (B-06)
 
@@ -185,11 +190,12 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - 상세 화면은 정적 export 제약 때문에 ID를 쿼리로 받습니다(`/audit-log?id=3`). `useSearchParams`를 쓰는 컴포넌트는 `Suspense`로 감쌉니다.
 - 조회 화면 공통 부품(B-16, `components/schedulers/`): 새로고침 주기·수동 새로고침·데이터 기준 시각(`RefreshControls`, 주기는 `useSyncExternalStore`로 브라우저 저장값을 읽음), 트리거 표(`TriggerTable`), 사용자·트리거 타임존 시각(`TimeCell`), 이전·다음 페이지(`PaginationBar`). 필터 토글 줄(`ToggleGroup`)과 탭 목록은 좁은 화면에서 넘치지 않게 줄바꿈하거나 가로 스크롤 영역에 둡니다.
 - 화면에 바로 놓이는 목록 표는 `components/table-frame.tsx`(테두리 + `bg-card`)로 감쌉니다. 카드 안의 표는 감싸지 않습니다(이중 테두리). 표가 넓으면 틀 안에서 가로로 스크롤하며, 이를 위해 본문(`SidebarInset`)에 `min-w-0`을 둡니다(B-16 UX 점검).
-- 표·카드 안의 이동 링크는 평소에도 밑줄(`underline decoration-muted-foreground`)을 그어 눌러지는 곳임을 보이고, 올리면 밑줄을 진하게 합니다.
-- 폼은 `mode: 'onTouched'`로 처음 벗어날 때 검사하고 그 뒤로는 고칠 때마다 다시 검사합니다. 입력 중인 칸에는 오류를 띄우지 않습니다. 제출 버튼은 입력이 덜 됐다고 막지 않고, 누르면 무엇이 필요한지 알려 줍니다.
+- 이동 링크는 밑줄 대신 줄·카드 전체를 누르게 하거나 링크 색으로 보입니다(B-40, §8.1.4).
+- 폼은 `mode: 'onSubmit'`이고 칸별 검사는 `TextField`가 맡습니다. 값을 바꾼 칸만 벗어날 때 검사하고, 오류가 뜬 칸은 고치는 즉시 다시 검사해 지웁니다. 아무것도 입력하지 않은 칸은 포커스가 빠져도(자동 포커스 뒤 다른 곳 클릭 등) 오류를 띄우지 않고 저장할 때 검사합니다. 입력 중인 칸에는 오류를 띄우지 않습니다(B-40). 제출 버튼은 입력이 덜 됐다고 막지 않고, 누르면 무엇이 필요한지 알려 줍니다.
 - 새 접속 폼은 입력을 1초 뒤 브라우저에 임시 저장하고(비밀번호 제외) 다시 열면 불러옵니다. 배너에서 버릴 수 있고, 저장에 성공하면 지웁니다.
 - 대화상자를 Radix Trigger가 아닌 버튼·메뉴 항목으로 열면 닫힌 뒤 포커스를 연 자리로 직접 돌려줍니다(`DeleteImpactDialog`의 `returnFocus`).
-- 필터 결과가 비면 "필터 모두 지우기"를 함께 보여 줍니다. placeholder는 형식 예시에만 쓰고, 검색 범위는 라벨에 씁니다(예: `검색어(이름·그룹·잡)`).
+- **표가 비면 모든 표가 `TableEmpty`를 씁니다.** 표 폭 가운데에 아이콘과 제목(필요하면 설명), 지울 수 있으면 지우기 버튼(outline)을 둡니다. 아이콘은 아무것도 없을 때 그 표의 대상(사용자, 잡, 트리거, 노드 등), 검색·필터 결과가 없을 때 `SearchXIcon`입니다. 넓은 표가 가로로 스크롤돼도 보이는 폭 가운데에 있도록 표 스크롤 틀을 container로 두고(`ui/table.tsx`의 `@container/table`) `empty-fit-frame` 유틸리티로 고정합니다(B-40).
+- 필터 결과가 비면 "필터 모두 지우기"를 함께 보여 줍니다. 검색·필터를 걸지 않은 빈 목록에는 "조건에 맞는", "검색어에 맞는" 문구와 지우기 버튼을 쓰지 않고 "등록된 잡이 없습니다"처럼 씁니다(B-40). placeholder는 형식 예시에만 쓰고, 검색 범위는 라벨에 씁니다(예: `검색어(이름·그룹·잡)`).
 - `prefers-reduced-motion: reduce`이면 애니메이션·전환을 즉시 끝냅니다(`globals.css`). 새로고침 스피너는 100ms 넘게 걸릴 때만 보입니다.
 - 폼은 `@qa/shared`의 zod 스키마를 `zodResolver`로 그대로 씁니다. 서버와 같은 규칙으로 검증하기 위해서입니다. 폼 값과 요청 형태가 다르면(접속 폼: 포트 문자열, 쉼표 태그, Oracle 접속 방식) 값을 요청 형태로 바꾼 뒤 같은 스키마로 검사하는 resolver를 씁니다(`components/connections/connection-form.tsx`).
 
@@ -212,9 +218,10 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - 목록 위 필터는 한 면(`FilterPanel`: 테두리 + `bg-card`)에 모아 표와 구분합니다. 필터 지우기는 그 안의 ghost 버튼입니다.
 - 상세 화면 탭은 `TabsList variant="line"`과 아래 테두리로 표 위 구역을 나눕니다.
 - 표 틀(`TableFrame`)의 머리 줄은 `bg-muted/60`입니다.
+- **한 표 안의 줄 높이는 모두 같습니다.** 값이 있을 때만 생기는 줄(태그, 캘린더 등)을 칸 안에 덧붙이지 않습니다. 따로 한 줄 칸을 두고 길면 자르거나(`truncate`, 전체는 `title`), 늘 있는 줄 뒤에 `·`로 잇습니다. 두 줄 칸(그룹 / 이름)을 쓰는 표는 모든 줄이 두 줄입니다. `Code` 칩은 flex 항목으로 두지 말고 고정폭 글꼴 글줄(`<span className="font-mono">`) 안에 둡니다. 세로 여백과 글꼴 섞임으로 줄이 1~4px 높아집니다(B-40).
 - 정적인 메타데이터(접속 태그 등)는 알약 배지로 감싸지 않고 `·`로 이은 글자로 씁니다. 배지는 상태·환경처럼 뜻이 있는 값에만 씁니다.
 - 일시정지 그룹처럼 이름만 있는 목록도 표 틀 안의 목록으로 보여 줍니다.
-- 모든 폼은 `mode: 'onTouched'`입니다(처음 벗어날 때 검사, 그 뒤 고칠 때마다 다시 검사). 폼에 쓰는 zod 스키마는 한국어 오류 문구를 둡니다.
+- 모든 폼은 `mode: 'onSubmit'`입니다(값을 바꾼 칸만 벗어날 때 검사, 오류가 뜬 칸은 고칠 때 다시 검사, 빈 칸은 저장할 때 검사). 폼에 쓰는 zod 스키마는 한국어 오류 문구를 둡니다.
 
 ### 8.1.3 목록·폼·오버레이 기준 (B-38)
 
@@ -223,6 +230,8 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 | `components/list/list-search.tsx` | 목록 검색칸. 보이는 라벨(`검색(범위)`), 돋보기, `/` 단축키 표시. Esc로 지운다 |
 | `hooks/use-slash-focus.ts` | 화면 어디서든 `/`로 검색칸에 포커스. 입력 중이거나 대화상자가 열려 있으면 건너뛴다 |
 | `lib/paging.ts` | 화면에서 나누는 목록의 페이지(50건)와 검색어 일치 |
+| `components/table-empty.tsx` | 표 안 "데이터 없음" 줄(`TableEmpty`). 아이콘·제목·설명·지우기 버튼을 표의 보이는 폭 가운데에 둔다(B-40) |
+| `components/form/form-row.tsx` | 화면 폼의 한 줄(`FormRow`): 왼쪽 1/4 라벨, 오른쪽 3/4 입력. `TextField layout="row"`가 이걸 쓴다(B-40) |
 | `components/form/form-actions.tsx` | 폼 아래 취소·저장 줄. 화면 아래에 붙어 있다(`sticky bottom-0`) |
 | `components/form/form-alert.tsx` | 서버·네트워크 오류면 "오류 정보 복사"(시각, 요청, 상태, 요청 ID, 메시지)를 함께 둔다 |
 
@@ -230,7 +239,25 @@ alert, alert-dialog, badge, breadcrumb, button, card, checkbox, dialog, dropdown
 - **감사 로그 필터**는 "필터" 버튼 하나(팝오버)에 기간·작업 종류·결과를 모으고, 적용한 값은 툴바 아래 칩으로 보여 하나씩 지울 수 있게 합니다. 사용자 아이디는 검색칸에서 Enter로 찾습니다(정확히 일치).
 - `/` 단축키는 대시보드, 스케줄러의 트리거·잡 탭 검색칸에도 있습니다.
 - **오버레이 선택**: 10초 안쪽 작업은 오른쪽 시트(비밀번호 초기화), 그보다 긴 입력은 별도 화면(`/users/new` 사용자 추가, `/scheduler/settings?id=N` 스케줄러 설정)입니다. 삭제·해제·비활성화는 대상 이름을 쓴 확인 대화상자입니다.
+- **화면 폼 배치**(접속 추가·수정, 스케줄러 설정, 사용자 추가): 본문 폭을 다 쓰는 카드에 라벨 칸(1/4)과 입력 칸(3/4)을 둡니다(`FormRow`, `TextField layout="row"`). 상세 화면 정보 카드(`dl`, `md:grid-cols-4`)와 같은 비율·카드 나눔·카드 제목·순서로 맞춰 상세 ↔ 수정을 오가도 값의 자리가 같습니다(접속: "접속 정보" → "표시와 권한"). 입력 폭은 값 길이에 맞춥니다(기본 `max-w-xl`, 포트·숫자·환경은 `size="short"`). 좁은 화면에서는 라벨이 입력 위로 옵니다. 로그인·시트처럼 좁은 곳은 라벨을 위에 두는 기본 배치(`layout="stack"`)를 씁니다(B-40).
 - **폼 안전장치**: 접속 추가·수정 폼은 입력을 1초 뒤 임시 저장합니다(비밀번호 제외, 수정은 접속마다 따로, 그 사이 접속이 바뀌었으면 버림). 저장하지 않은 변경이 있으면 새로고침·탭 닫기 전에 브라우저가 묻습니다.
+
+### 8.1.4 이동과 돌아가기 (B-40)
+
+| 경로 | 내용 |
+| --- | --- |
+| `components/shell/page-header.tsx`의 `trail` | 상위 화면을 위에서부터 넘긴다. 제목 위에 경로가, 제목 왼쪽에 마지막 상위 화면으로 가는 돌아가기 버튼이 붙는다 |
+| `components/shell/back-nav.tsx` | 돌아가기 버튼(`BackButton`, 아이콘 버튼 + 툴팁 "돌아가기: 화면")과 경로(`PageTrail`) |
+| `lib/return-nav.ts` | 화면마다 마지막 주소를 기억한다(키: 경로 + `id`, sessionStorage). 레이아웃의 `ReturnNavTracker`가 기록한다 |
+| `lib/use-url-state.ts` | 목록 상태(필터·검색어·쪽) ↔ 주소 쿼리. `history.replaceState`라 기록이 쌓이지 않는다 |
+| `components/links.tsx` | 줄 링크(`LinkRow`, `RowLink`, `RowChevronHead`/`RowChevronCell`)와 글자 링크(`InlineLink`) |
+| `components/ui/card.tsx`의 `interactive` | 카드 전체가 링크인 카드. 안의 `data-card-link` 링크가 카드를 덮는다 |
+
+- **목록 상태는 주소에 둡니다.** 대시보드(`env`, `tag`, `q`, `health`), 접속(`q`, `page`), 감사 로그(`from`, `to`, `action`, `result`, `user`), 스케줄러의 잡 탭(`group`, `q`, `page`)·트리거 탭(`state`, `type`, `group`, `q`, `sort`, `page`). 상세에 갔다 뒤로 가기나 돌아가기로 오면 그대로이고, 주소를 공유해도 같은 목록이 보입니다. 탭을 바꾸면 이전 탭의 값은 버립니다.
+- **상세·하위 화면은 `PageHeader`에 `trail`을 넘깁니다.** 경로에는 상위 화면만 두고 지금 화면은 제목이 보입니다. 경로와 돌아가기 버튼은 그 화면을 마지막으로 본 주소(필터·탭 포함)로 갑니다. 그 주소가 바로 이전 화면이면 브라우저 뒤로 가기로 가서 스크롤 위치까지 되살립니다. 새 탭으로 열기(가운데·Ctrl 클릭)는 그대로 링크입니다.
+- **줄 하나가 상세 하나인 목록 표**(접속, 감사 로그, 잡 탭)는 줄 전체가 링크입니다. 대표 칸의 이름은 굵은 본문 색, 줄 끝에 `›`를 두고, 올리면 줄 바탕·이름 색(`link`)이 바뀌며 `›`가 2px 움직입니다. 포커스 링은 줄 전체에 그립니다. 한 줄에 줄 링크는 하나이고, 줄 안에 다른 버튼이 있는 표에는 쓰지 않습니다.
+- **다른 화면을 가리키는 칸 안의 링크**(트리거 줄의 잡, 스케줄러 상세의 접속, 접속 상세의 스케줄러)는 `InlineLink`입니다. `link` 색 글자이고, 올리면 `link/10` 바탕이 깔립니다. 밑줄은 쓰지 않습니다.
+- **대시보드 카드**는 카드 전체가 스케줄러 상세 링크입니다(`Card interactive`). 제목 옆에 `›`, 올리면 테두리·그림자·제목 색이 바뀝니다.
 
 ### 8.2 추가하는 방법
 
