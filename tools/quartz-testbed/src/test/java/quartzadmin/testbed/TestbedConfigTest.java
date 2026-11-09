@@ -35,6 +35,16 @@ class TestbedConfigTest {
   }
 
   @Test
+  void TESTBED_START로_기준_인스턴스를_만든다() {
+    assertEquals(true, TestbedConfig.fromEnv(BASE).autoStart);
+    Map<String, String> env = new java.util.HashMap<>(BASE);
+    env.put("TESTBED_START", "false");
+    assertEquals(false, TestbedConfig.fromEnv(env).autoStart);
+    env.put("TESTBED_START", "maybe");
+    assertThrows(IllegalArgumentException.class, () -> TestbedConfig.fromEnv(env));
+  }
+
+  @Test
   void 접속_정보가_없으면_실패한다() {
     assertThrows(IllegalArgumentException.class, () -> TestbedConfig.fromEnv(Map.of()));
   }

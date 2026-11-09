@@ -51,6 +51,10 @@ export const API_ERROR_CODES = [
   'SCHEDULER_NOT_DETECTED',
   /** 본인 계정 비활성화처럼 허용하지 않는 변경 (409) */
   'OPERATION_NOT_ALLOWED',
+  /** 읽기 전용 접속이거나 쓰기 권한을 확인하지 못한 접속이라 제어할 수 없음 (409, FR-CTL-00a) */
+  'READ_ONLY',
+  /** 실행 직전 대상 상태가 화면에서 본 상태와 다름. 본문 `current`에 최신 상태가 온다 (409, FR-CTL-00e) */
+  'STATE_CONFLICT',
   /** 요청이 너무 많음 (429) */
   'RATE_LIMITED',
   /** 처리하지 못한 서버 오류 (500) */
@@ -64,6 +68,8 @@ export interface ApiErrorBody {
   message: string;
   /** 검증 실패 시 필드별 원인 */
   details?: { path: string; message: string }[];
+  /** `STATE_CONFLICT`일 때 대상의 최신 상태. 제어 명령은 `TriggerStateRef[]`다 */
+  current?: unknown;
 }
 
 /** CSRF 방어용 헤더 (TRD §4.3). 상태를 바꾸는 요청에 `1`로 붙인다 */

@@ -66,6 +66,11 @@ export interface StartTestbedNodeOptions {
   dbProperties?: Record<string, string>;
   /** 노드 로그를 stderr로 보낸다. 기본은 `QA_IT_LOGS=1`일 때만 */
   logs?: boolean;
+  /**
+   * false면 `scheduler.start()`를 하지 않는 기준 인스턴스로 띄운다(차등 테스트, TRD §12.1). 발화·misfire 처리·
+   * 체크인이 돌지 않아 Quartz API 결과가 결정적이다. 다른 노드와 SCHED_NAME을 함께 쓰지 않는다. 기본 true
+   */
+  start?: boolean;
 }
 
 export interface TestbedNode {
@@ -83,7 +88,7 @@ function propertiesText(props: Record<string, string>): string {
     .join('\n');
 }
 
-/** 테스트베드 노드 하나를 띄우고 `/healthz`가 200이 될 때까지(스케줄러 기동 완료) 기다린다. */
+/** 테스트베드 노드 하나를 띄우고 `/healthz`가 200이 될 때까지(스케줄러 기동 완료, 기준 인스턴스는 생성 완료) 기다린다. */
 export async function startTestbedNode(options: StartTestbedNodeOptions): Promise<TestbedNode> {
   const image = options.image ?? (await testbedImage());
   const schedulerName = options.schedulerName ?? 'TestbedScheduler';
@@ -98,6 +103,7 @@ export async function startTestbedNode(options: StartTestbedNodeOptions): Promis
     TESTBED_CLUSTER_CHECKIN_INTERVAL_MS: String(options.clusterCheckinIntervalMs ?? 2000),
     TESTBED_HTTP_PORT: String(HTTP_PORT),
   };
+  if (options.start === false) env.TESTBED_START = 'false';
   if (options.threadCount !== undefined) env.TESTBED_THREAD_COUNT = String(options.threadCount);
   if (options.misfireThresholdMs !== undefined) {
     env.TESTBED_MISFIRE_THRESHOLD_MS = String(options.misfireThresholdMs);

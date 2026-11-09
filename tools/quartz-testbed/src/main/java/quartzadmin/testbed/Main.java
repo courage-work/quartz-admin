@@ -61,7 +61,12 @@ public final class Main {
     ExecutionRecorder recorder = ExecutionRecorder.create(cfg, instanceId);
     scheduler.getContext().put(ExecutionRecorder.CONTEXT_KEY, recorder);
 
-    ControlServer http = new ControlServer(scheduler, cfg.httpPort);
+    ControlServer http =
+        new ControlServer(
+            scheduler,
+            cfg.httpPort,
+            new Fixtures(cfg.schedulerName, cfg.tablePrefix),
+            cfg.autoStart);
     CountDownLatch stopped = new CountDownLatch(1);
     Runtime.getRuntime()
         .addShutdownHook(
@@ -80,11 +85,14 @@ public final class Main {
                 },
                 "testbed-shutdown"));
 
-    scheduler.start();
+    if (cfg.autoStart) {
+      scheduler.start();
+    }
     http.start();
     log.info(
-        "Quartz {} 노드 기동: scheduler={}, instanceId={}, tablePrefix={}",
+        "Quartz {} {} 기동: scheduler={}, instanceId={}, tablePrefix={}",
         quartzVersion(),
+        cfg.autoStart ? "노드" : "기준 인스턴스(start 안 함)",
         cfg.schedulerName,
         instanceId,
         cfg.tablePrefix);

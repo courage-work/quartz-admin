@@ -27,6 +27,11 @@ public final class TestbedConfig {
   final String executionsTable;
   final String extraQuartzProperties;
   final Properties driverProperties;
+  /**
+   * 기동할 때 {@code scheduler.start()}를 부를지. false면 차등 테스트의 기준 인스턴스가 된다(TRD §12.1). 트리거 획득,
+   * MisfireHandler, ClusterManager가 돌지 않아 Quartz API 결과 행이 결정적이다.
+   */
+  final boolean autoStart;
 
   private TestbedConfig(Map<String, String> env) {
     this.jdbcUrl = required(env, "TESTBED_DB_URL");
@@ -46,6 +51,19 @@ public final class TestbedConfig {
     this.executionsTable = identifier(env.getOrDefault("TESTBED_EXECUTIONS_TABLE", "TESTBED_EXECUTIONS"));
     this.extraQuartzProperties = env.getOrDefault("TESTBED_QUARTZ_PROPERTIES", "");
     this.driverProperties = driverProperties(this.jdbcUrl, env.getOrDefault("TESTBED_DB_PROPERTIES", ""));
+    this.autoStart = booleanValue(env, "TESTBED_START", true);
+  }
+
+  private static boolean booleanValue(Map<String, String> env, String key, boolean fallback) {
+    String v = env.get(key);
+    if (v == null || v.isBlank()) {
+      return fallback;
+    }
+    return switch (v.trim().toLowerCase()) {
+      case "true", "1" -> true;
+      case "false", "0" -> false;
+      default -> throw new IllegalArgumentException(key + "는 true 또는 false여야 합니다");
+    };
   }
 
   /**

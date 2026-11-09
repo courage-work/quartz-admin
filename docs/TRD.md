@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.15 (B-16 대시보드·조회 화면 반영) |
+| 문서 버전 | v0.16 (B-17 제어 명령 프레임워크 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -29,6 +29,7 @@
 | v0.13 | 2026-11-06 | B-14: §8.1~8.3 조회 API 응답 형식·검색·정렬·오래된 실행 기록·JobDataMap 판정 확정, LIKE 이스케이프 문자를 `!`로 변경, §3.2 `schedulers.table_schema` 추가 |
 | v0.14 | 2026-11-06 | B-15: §8.4 스냅샷 상태 판정·실패 시 보존 규칙·스냅샷 API, §9.1 감시 루프 구현(고정 주기, 겹침 건너뛰기, 첫 회차 지터, 동시 실행, 회차 제한, 변경 이벤트, 확장 지점, 수집 쿼리) 확정 |
 | v0.15 | 2026-11-07 | B-16: §8.1 대시보드 목록·스케줄러 상세 응답 형식과 화면 구성, §8.4 대시보드 응답 시간 확인 결과 추가 |
+| v0.16 | 2026-11-09 | B-17: §7.1에 명령 API(미리보기·실행), 기대 상태 비교 기준(Quartz `getTriggerState` 분류), 사전 검사·감사 기록·오류 코드(`READ_ONLY`, `STATE_CONFLICT`), 구현 위치 추가. §12.1 차등 테스트 도구(기준 인스턴스, 픽스처 SQL, 잠금 점유, 행 스냅샷) 구현 반영 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -469,6 +470,23 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 - 잠금 대기가 5초를 넘으면 `LOCK_TIMEOUT`, 그 밖의 DB 오류(교착 감지로 인한 롤백 포함)는 `TARGET_ERROR`로 응답합니다. Quartz와 같은 결과를 보장할 수 없는 요청은 `RESUME_IN_PAUSED_GROUP`(§7.4) 같은 명령별 오류 코드(409)로 거부합니다. 어떤 실패든 ROLLBACK하므로 대상 DB에는 아무것도 바뀌지 않습니다.
 - 도구 프로세스가 트랜잭션 도중 죽으면 커넥션이 끊기면서 DB가 ROLLBACK합니다(NFR-REL-02). 기동할 때 `pending` 상태로 남은 감사 로그를 `failure(INTERRUPTED)`로 정리하고, 화면에 "결과 확인 필요"를 표시합니다.
 
+**API** (B-17). 요청 스키마와 응답 타입은 `@qa/shared`의 `commands.ts`입니다.
+
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| POST | `/schedulers/:id/commands/preview` | `{ command }`. 잠금 없이 대상을 읽어 대상(스케줄러·접속·환경, 트리거와 잡), 바뀔 상태(`changes`), 경고, 차단 사유(`blocked`), 실행에 붙일 `expected`를 돌려준다. 대상 DB를 바꾸지 않고 감사 로그도 남기지 않는다 |
+| POST | `/schedulers/:id/commands` | `{ command, expected }`. 위 절차로 실행하고 `{ dbNow, changed, changes, before, after, auditId }`를 돌려준다 |
+
+- **명령 형식**: `command`는 `type`으로 나누는 zod 판별 유니온(`commandSchema`)입니다. B-17에는 `pauseTrigger { trigger: { group, name } }`만 있고, B-18~B-21이 이어 붙입니다. 서버는 명령 종류마다 핸들러(`@qa/store` `CommandHandler`: 대상 읽기, 계획, 적용)를 하나씩 둡니다.
+- **사전 검사(1단계)**: 접속이 읽기 전용이거나 `write_capable`이 true가 아니면(false 또는 아직 감지 전 null) 409 `READ_ONLY`로 거부하고 대상 DB에 연결하지 않습니다. 미리보기는 같은 이유를 `blocked`로 알리고 화면은 실행 버튼과 줄 메뉴의 제어 항목을 끕니다(FR-CTL-00a).
+- **기대 상태 비교(4-d)**: `expected`는 미리보기에서 본 대상 트리거의 `{ group, name, state }` 목록입니다. 잠근 뒤 다시 읽은 대상과 집합이 같고, 트리거마다 상태를 Quartz `JSS.getTriggerState`의 분류(`NORMAL`=WAITING·ACQUIRED 등, `PAUSED`=PAUSED·PAUSED_BLOCKED, `BLOCKED`, `ERROR`, `COMPLETE`)로 바꿨을 때 같아야 합니다. WAITING과 ACQUIRED는 노드가 발화 30초 전부터 수시로 오가는 상태라 같은 것으로 봅니다. 다르면 ROLLBACK하고 409 `STATE_CONFLICT`와 함께 본문 `current`에 최신 상태를 돌려줍니다. 화면은 미리보기를 다시 읽어 보여 주고, 사용자가 다시 실행합니다.
+- **조건부 변경(4-e)**: `UPDATE … SET TRIGGER_STATE = 새 상태 WHERE 키 AND TRIGGER_STATE = 바꾸기 전 상태`입니다. 바뀐 행 수가 계획과 다르면(잠금을 거치지 않은 쓰기) ROLLBACK하고 `STATE_CONFLICT`로 응답합니다. 바뀌는 것이 없는 명령(예: 이미 PAUSED인 트리거 일시정지)은 UPDATE 없이 커밋하고 `changed: false`와 `NO_CHANGE` 경고로 알립니다(부록 A.2 P-04).
+- **잠금 행 INSERT**: Oracle은 다른 세션이 커밋하지 않은 같은 키를 INSERT하면 그 세션이 끝날 때까지 기다립니다. Quartz의 잠금 행 INSERT는 짧은 트랜잭션이고, 기다림은 커넥션의 조회 제한(10초)에 묶입니다.
+- **직렬화(2단계)**: 프로세스 안 키별 뮤텍스(`KeyedMutex`)입니다. 같은 스케줄러의 명령은 들어온 순서대로 하나씩 실행하고, 앞 명령이 실패해도 다음 명령은 실행합니다.
+- **감사 기록**: 작업 종류는 명령마다 하나(`trigger.pause`), 대상 종류는 `trigger`, 대상은 SCHED_NAME과 트리거 키, `before`는 요청(`command`, `expected`), `after`는 변경 후 상태와 바뀐 목록입니다. `STATE_CONFLICT`면 `after`에 최신 상태를 남깁니다. 사전 검사에서 거부한 요청도 실패로 남깁니다. 요청 형식 검증(400)에서 막힌 요청은 남기지 않습니다(§10).
+- **화면 갱신**: 실행이 성공하면 화면은 결과를 알림(toast)으로 알리고 그 스케줄러의 조회를 모두 다시 읽습니다. 서버는 상태가 바뀌었으면 감시 루프에 즉시 감시를 요청해 대시보드 카드도 갱신합니다(NFR-UX-03).
+- **구현**: 실행 절차 4단계는 `@qa/store`의 `commands/`(`executeCommand`, `previewCommand`, `acquireTriggerAccess`, 핸들러), 1·2·3·5단계는 `apps/api/src/commands/`(`QuartzCommandService`)입니다. 화면은 공통 확인 대화상자(`components/commands/command-dialog.tsx`)와 트리거 줄 메뉴(`components/schedulers/trigger-actions.tsx`)입니다.
+
 ### 7.2 잠금 규약과 동시성 근거
 
 S1(B-08)에서 Quartz 2.3.2와 2.5.2 소스로 확인한 내용입니다. 두 버전의 동작은 같습니다.
@@ -846,11 +864,12 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
   - `NonConcurrentSleepJob`: `@DisallowConcurrentExecution`을 붙이고 `sleepSeconds`초 동안 실행
   - `LongJob`: `durationSeconds`초(기본 600) 실행. `/control/interrupt`로 멈춤
 - `GET/POST /control/*` HTTP API: Quartz `Scheduler` 메서드(pause/resume trigger·job·group, `pauseAll`/`resumeAll`, `triggerJob`, `rescheduleJob`, `unscheduleJob`, `deleteJob`, `scheduleJob`, `addJob`, 상태 조회)를 그대로 호출합니다. 차등 테스트의 기준값을 만드는 데 씁니다.
-- S1 결과로 정한 차등 테스트용 기능(부록 A.1). B-09에는 없고 B-17에서 추가합니다(지금 노드는 기동하면 항상 `start()`합니다):
-  - **기준 인스턴스**: `start()`하지 않은 Quartz 인스턴스로 명령을 실행합니다. 획득, MisfireHandler, ClusterManager가 돌지 않으므로 결과 행이 결정적입니다. misfire 케이스(부록 A.3의 R-2x)만 `start()`한 인스턴스로 실행하고 수렴한 뒤 비교합니다.
-  - **픽스처 SQL**: ACQUIRED, ERROR, COMPLETE 상태와 `FIRED_TRIGGERS` 행(ACQUIRED, EXECUTING)처럼 API로 만들 수 없는 초기 상태를 직접 SQL로 만듭니다.
-  - **잠금 점유**: `TRIGGER_ACCESS` 행을 N초 동안 잡고 있는 엔드포인트(`LOCK_TIMEOUT` 검증용)
-  - **행 스냅샷**: SCHED_NAME 하나의 `TRIGGERS`, 하위 4개 테이블, `PAUSED_TRIGGER_GRPS`, `JOB_DETAILS`(키, IS_DURABLE), `FIRED_TRIGGERS`를 정렬된 JSON으로 내보냅니다.
+- S1 결과로 정한 차등 테스트용 기능(부록 A.1). B-17에서 추가했습니다(`Fixtures.java`, JDBC 표준 문법만 써서 DB 4종에서 같은 코드가 돕니다):
+  - **기준 인스턴스**(`TESTBED_START=false`): `start()`하지 않은 Quartz 인스턴스로 명령을 실행합니다. 획득, MisfireHandler, ClusterManager가 돌지 않고 `SCHEDULER_STATE`에 체크인하지 않으므로 결과 행이 결정적입니다. 클러스터와 겹치지 않게 다른 SCHED_NAME을 씁니다. 차등 테스트는 같은 초기 상태를 SCHED_NAME 두 개(Quartz용, 도구용)에 만들고 한쪽은 Quartz API, 다른 쪽은 도구로 명령한 뒤 스냅샷을 비교합니다. misfire 케이스(부록 A.3의 R-2x)만 `start()`한 인스턴스로 실행하고 수렴한 뒤 비교합니다.
+  - **픽스처 SQL**(`POST /fixture/sql`): ACQUIRED, ERROR, COMPLETE 상태와 `FIRED_TRIGGERS` 행(ACQUIRED, EXECUTING)처럼 API로 만들 수 없는 초기 상태를 직접 SQL로 만듭니다. 문장들을 한 트랜잭션으로 실행합니다.
+  - **잠금 점유**(`POST /fixture/holdLock`): `TRIGGER_ACCESS` 행을 N초 동안 잡습니다(`LOCK_TIMEOUT` 검증용). 잡은 뒤 응답하고, 시간이 지나면 ROLLBACK합니다.
+  - **행 스냅샷**(`GET /fixture/snapshot`): SCHED_NAME 하나의 `TRIGGERS`, 하위 4개 테이블, `PAUSED_TRIGGER_GRPS`, `JOB_DETAILS`(키, IS_DURABLE), `FIRED_TRIGGERS`, `LOCKS`를 JSON으로 내보냅니다. SCHED_NAME 컬럼은 빼고, 행은 JSON 문자열 순으로 정렬합니다.
+  - 도구 커넥션이 트랜잭션 도중 끊기는 경우(부록 A.8 X-03)는 프로세스를 죽이는 대신 TCP 프록시(`startTcpProxy`)로 소켓을 끊어 재현합니다. DB가 보는 결과(커밋 없이 세션 종료)는 같습니다.
 - 스키마 초기화는 Quartz 배포본의 `tables_*.sql`을 씁니다(`tools/quartz-testbed/schema/`에 2.5.2 jar의 파일을 그대로 둠). 헬퍼가 CREATE 문만 골라 prefix와 대소문자를 바꿉니다. 테이블뿐 아니라 제약 조건과 인덱스 이름의 prefix도 바꾸므로 한 스키마에 prefix 여러 개를 둘 수 있습니다. 변형 시나리오로 사용자 지정 prefix, 대문자와 소문자 테이블명, Oracle 23 `BOOLEAN` 스키마(`tables_oracle23.sql`), MySQL `lower_case_table_names=1`(B-28), 한 DB 안의 여러 SCHED_NAME을 둡니다.
   - Quartz는 테이블명을 따옴표 없이 쓰므로 Oracle의 소문자(따옴표) 테이블에는 Quartz 노드를 붙일 수 없습니다. 이 변형은 자동 감지 테스트에만 씁니다.
 - `core-vectors` 서브커맨드가 §6.2의 벡터(cron, 트리거, 타임존, properties)를 만듭니다. `cron-vectors` 서브커맨드는 cron만 만듭니다. 입력은 (cron, 타임존, 기준 시각 목록), 출력은 조합마다 다음 실행 시각 20개(epoch ms와 해당 타임존 ISO-8601)입니다. 잘못된 표현식은 Quartz 오류 메시지를, 모르는 타임존은 Java가 실제로 쓴 ID(`GMT`)를 함께 남깁니다.

@@ -23,11 +23,12 @@ export const AUDIT_ACTIONS = [
   'scheduler.register',
   'scheduler.update',
   'scheduler.delete',
+  'trigger.pause',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
-/** 대상 종류. 잡, 트리거는 각 기능 작업에서 추가한다 */
-export const AUDIT_TARGET_TYPES = ['user', 'connection', 'scheduler'] as const;
+/** 대상 종류. 잡, 그룹은 각 기능 작업에서 추가한다 */
+export const AUDIT_TARGET_TYPES = ['user', 'connection', 'scheduler', 'trigger'] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 
 /**

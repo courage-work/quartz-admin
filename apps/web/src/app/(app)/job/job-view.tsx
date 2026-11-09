@@ -8,8 +8,10 @@ import { useSearchParams } from 'next/navigation';
 import { type ReactNode, useState } from 'react';
 
 import { Code } from '@/components/code';
+import { useCommandDialog } from '@/components/commands/use-command-dialog';
 import { FormAlert } from '@/components/form/form-alert';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
+import { TriggerActions } from '@/components/schedulers/trigger-actions';
 import { TriggerTable } from '@/components/schedulers/trigger-table';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge, ProdStripe } from '@/components/status/environment';
@@ -34,6 +36,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { api, isApiError } from '@/lib/api';
+import { controlBlockedReason } from '@/lib/commands';
 import { formatDateTime } from '@/lib/format';
 import { parseId } from '@/lib/navigation';
 import { schedulerKey, schedulerViewKey } from '@/lib/schedulers';
@@ -171,6 +174,7 @@ export function JobView() {
     enabled: valid,
     refetchInterval: refreshMs || false,
   });
+  const { openCommand, dialog } = useCommandDialog(schedulerId ?? 0);
 
   let body: ReactNode;
   if (!valid || isApiError(detail.error, 'NOT_FOUND'))
@@ -211,6 +215,17 @@ export function JobView() {
               loading={false}
               showJob={false}
               empty={{ icon: TimerIcon, title: '이 잡을 실행하는 트리거가 없습니다' }}
+              actions={(t) => (
+                <TriggerActions
+                  trigger={t}
+                  blockedReason={
+                    scheduler.data
+                      ? controlBlockedReason(scheduler.data.connection)
+                      : '스케줄러 정보를 읽는 중입니다'
+                  }
+                  onCommand={openCommand}
+                />
+              )}
             />
           </CardContent>
         </Card>
@@ -250,6 +265,7 @@ export function JobView() {
         }
       />
       {body}
+      {dialog}
     </>
   );
 }

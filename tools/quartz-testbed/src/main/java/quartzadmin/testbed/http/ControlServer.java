@@ -35,6 +35,7 @@ import org.quartz.TriggerKey;
 import org.quartz.utils.ClassUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import quartzadmin.testbed.Fixtures;
 import quartzadmin.testbed.Specs;
 import quartzadmin.testbed.Specs.BadRequest;
 
@@ -56,12 +57,18 @@ public final class ControlServer implements AutoCloseable {
   }
 
   private final Scheduler scheduler;
+  private final Fixtures fixtures;
+  /** false면 start()하지 않는 기준 인스턴스다. 이때는 스케줄러가 만들어지기만 하면 준비된 것으로 본다 */
+  private final boolean autoStart;
   private final HttpServer server;
   private final Map<String, Handler> posts = new LinkedHashMap<>();
   private final Map<String, Handler> gets = new LinkedHashMap<>();
 
-  public ControlServer(Scheduler scheduler, int port) throws IOException {
+  public ControlServer(Scheduler scheduler, int port, Fixtures fixtures, boolean autoStart)
+      throws IOException {
     this.scheduler = scheduler;
+    this.fixtures = fixtures;
+    this.autoStart = autoStart;
     this.server = HttpServer.create(new InetSocketAddress(port), 0);
     this.server.setExecutor(Executors.newFixedThreadPool(4));
     registerRoutes();
@@ -116,13 +123,42 @@ public final class ControlServer implements AutoCloseable {
     posts.put("/control/unscheduleJob", (b, q) -> scheduler.unscheduleJob(Specs.triggerKey(b)));
     posts.put("/control/deleteJob", (b, q) -> scheduler.deleteJob(Specs.jobKey(b)));
     posts.put("/control/interrupt", (b, q) -> scheduler.interrupt(Specs.jobKey(b)));
+
+    // 차등 테스트 도구 (TRD §12.1). Quartz API가 아니라 DB를 직접 다룬다
+    gets.put("/fixture/snapshot", (b, q) -> fixtures.snapshot(q.get("schedName")));
+    posts.put("/fixture/sql", (b, q) -> fixtures.sql(statements(b)));
+    posts.put(
+        "/fixture/holdLock",
+        (b, q) -> {
+          long seconds = b.path("seconds").asLong(0);
+          if (seconds <= 0 || seconds > 600) {
+            throw new BadRequest("seconds는 1~600이어야 합니다");
+          }
+          ObjectNode n = F.objectNode();
+          n.put(
+              "waitedMs",
+              fixtures.holdLock(
+                  b.path("schedName").asText(null), b.path("lockName").asText(null), seconds));
+          return n;
+        });
+  }
+
+  private static java.util.List<String> statements(JsonNode b) {
+    JsonNode arr = b.get("statements");
+    if (arr == null || !arr.isArray() || arr.isEmpty()) {
+      throw new BadRequest("statements 배열이 필요합니다");
+    }
+    java.util.List<String> out = new java.util.ArrayList<>();
+    arr.forEach(s -> out.add(s.asText()));
+    return out;
   }
 
   // ---- 핸들러 ----
 
   private Object health() throws SchedulerException {
     ObjectNode n = F.objectNode();
-    n.put("status", scheduler.isStarted() && !scheduler.isShutdown() ? "ok" : "starting");
+    boolean ready = (scheduler.isStarted() || !autoStart) && !scheduler.isShutdown();
+    n.put("status", ready ? "ok" : "starting");
     return n;
   }
 

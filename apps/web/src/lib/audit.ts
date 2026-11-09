@@ -44,6 +44,13 @@ export function describeTarget(log: Pick<AuditLogDto, 'targetType' | 'target'>):
     connection: ['name'],
     scheduler: ['displayName', 'schedName'],
   };
+  // 제어 명령은 SCHED_NAME과 트리거 키를 남긴다
+  if (log.targetType === 'trigger') {
+    const trigger = field(log.target, 'trigger');
+    const group = field(trigger, 'group');
+    const name = field(trigger, 'name');
+    if (typeof group === 'string' && typeof name === 'string') return `${group} / ${name}`;
+  }
   const keys = log.targetType ? nameKey[log.targetType] : undefined;
   if (!keys) return '-';
   for (const key of keys) {

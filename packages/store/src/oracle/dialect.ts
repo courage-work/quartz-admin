@@ -1,5 +1,6 @@
 import type { TargetConn } from '../adapter.js';
 import type { CatalogQueries, QuartzDialect } from '../dialect.js';
+import { TargetError } from '../errors.js';
 import { readBlob, readBool, readLong } from '../normalize.js';
 
 const CATALOG: CatalogQueries = {
@@ -59,4 +60,6 @@ export const oracleDialect: QuartzDialect = {
   readBool,
   readBlob,
   readLong,
+  // ORA-00001: 고유 제약 위반
+  isDuplicateKey: (err) => err instanceof TargetError && err.driverCode === 'ORA-00001',
 };

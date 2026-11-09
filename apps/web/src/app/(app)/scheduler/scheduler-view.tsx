@@ -26,6 +26,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { api, isApiError } from '@/lib/api';
+import { controlBlockedReason } from '@/lib/commands';
 import { parseId } from '@/lib/navigation';
 import { schedulerKey } from '@/lib/schedulers';
 
@@ -157,7 +158,11 @@ export function SchedulerView() {
           </TabsList>
         </div>
         <TabsContent value="triggers">
-          <TriggersTab schedulerId={id} refreshMs={refreshMs} />
+          <TriggersTab
+            schedulerId={id}
+            refreshMs={refreshMs}
+            blockedReason={controlBlockedReason(s.connection)}
+          />
         </TabsContent>
         <TabsContent value="jobs">
           <JobsTab schedulerId={id} refreshMs={refreshMs} />

@@ -34,6 +34,11 @@ export interface OracleQuartzCluster {
   readonly schema: QuartzSchemaOptions;
   /** 노드를 하나 더 띄운다(instanceId는 `node-N`) */
   addNode(instanceId?: string): Promise<TestbedNode>;
+  /**
+   * 같은 DB·스키마에 `start()`하지 않는 기준 인스턴스를 띄운다(차등 테스트). 클러스터와 겹치지 않도록
+   * 다른 SCHED_NAME을 준다. 클러스터를 멈출 때 함께 멈춘다.
+   */
+  addReference(schedulerName: string): Promise<TestbedNode>;
   stop(): Promise<void>;
 }
 
@@ -65,18 +70,20 @@ export async function startOracleQuartzCluster(
   const oracle = oracleResult.value;
   const image = imageResult.value;
   const nodes: TestbedNode[] = [];
+  const references: TestbedNode[] = [];
   try {
     await oracle.withConnection((conn) => initQuartzSchema(conn, schema));
 
-    const startNode = (instanceId: string) =>
+    const startNode = (instanceId: string, reference?: { schedulerName: string }) =>
       startTestbedNode({
         ...options.node,
         network: oracle.network,
         db: { jdbcUrl: oracle.jdbcUrl, user: oracle.user, password: oracle.password },
         image,
-        schedulerName,
+        schedulerName: reference?.schedulerName ?? schedulerName,
         instanceId,
         tablePrefix,
+        ...(reference ? { start: false } : {}),
         // tables_oracle23.sql은 불리언 컬럼이 BOOLEAN이라 드라이버가 네이티브 불리언을 보내야 한다
         dbProperties: {
           ...(schema.variant === 'oracle23'
@@ -103,8 +110,13 @@ export async function startOracleQuartzCluster(
         nodes.push(node);
         return node;
       },
+      async addReference(refName) {
+        const node = await startNode('reference', { schedulerName: refName });
+        references.push(node);
+        return node;
+      },
       async stop() {
-        await Promise.allSettled(nodes.map((n) => n.stop()));
+        await Promise.allSettled([...nodes, ...references].map((n) => n.stop()));
         await oracle.stop();
       },
     };

@@ -345,7 +345,7 @@ export function AuditLogsView() {
                     <span className="font-mono">{describeTarget(log)}</span>
                   </TableCell>
                   <TableCell>
-                    <AuditResultBadge result={log.result} />
+                    <AuditResultBadge result={log.result} errorCode={log.errorCode} />
                   </TableCell>
                   <TableCell>
                     <span className="font-mono">{log.ip ?? '-'}</span>

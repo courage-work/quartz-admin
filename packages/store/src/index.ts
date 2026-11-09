@@ -70,3 +70,4 @@ export {
 } from './views/views.js';
 export { LIKE_ESCAPE, containsPattern } from './views/sql.js';
 export { collectMonitorData, type CollectOptions } from './views/monitor.js';
+export * from './commands/index.js';

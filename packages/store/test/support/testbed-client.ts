@@ -261,4 +261,46 @@ export class TestbedClient {
   interrupt(key: KeySpec): Promise<boolean> {
     return this.post('interrupt', key);
   }
+
+  // ---- 차등 테스트 도구 (TRD §12.1) ----
+
+  /** 문장들을 한 트랜잭션으로 실행한다(API로 만들 수 없는 초기 상태). 결과는 문장별 바뀐 행 수 */
+  fixtureSql(statements: string[]): Promise<number[]> {
+    return this.request('POST', '/fixture/sql', { statements });
+  }
+
+  /**
+   * Quartz 잠금 행을 `seconds`초 동안 잡는다. 잡은 뒤에 돌아오며, 시간이 지나면 테스트베드가 ROLLBACK한다.
+   * `schedName`을 빼면 이 노드의 SCHED_NAME이다.
+   */
+  holdLock(options: {
+    seconds: number;
+    schedName?: string;
+    lockName?: string;
+  }): Promise<{ waitedMs: number }> {
+    return this.request('POST', '/fixture/holdLock', options);
+  }
+
+  /**
+   * SCHED_NAME 하나의 Quartz 행. SCHED_NAME 컬럼은 빠져 있어 이름이 다른 두 스케줄러를 바로 비교할 수 있다.
+   * `schedName`을 빼면 이 노드의 SCHED_NAME이다.
+   */
+  snapshot(schedName?: string): Promise<RowSnapshot> {
+    const qs = schedName ? `?${new URLSearchParams({ schedName }).toString()}` : '';
+    return this.request('GET', `/fixture/snapshot${qs}`);
+  }
 }
+
+/** `/fixture/snapshot` 결과. 테이블별 행(컬럼 이름 대문자, JSON 문자열 순으로 정렬) */
+export type RowSnapshot = Record<
+  | 'TRIGGERS'
+  | 'SIMPLE_TRIGGERS'
+  | 'CRON_TRIGGERS'
+  | 'SIMPROP_TRIGGERS'
+  | 'BLOB_TRIGGERS'
+  | 'PAUSED_TRIGGER_GRPS'
+  | 'FIRED_TRIGGERS'
+  | 'JOB_DETAILS'
+  | 'LOCKS',
+  Record<string, string | number | boolean | null>[]
+>;

@@ -37,6 +37,15 @@ describe('describeTarget, describeActor', () => {
     expect(describeTarget({ targetType: null, target: null })).toBe('-');
   });
 
+  it('트리거 대상은 그룹 / 이름으로 보여 준다', () => {
+    expect(
+      describeTarget({
+        targetType: 'trigger',
+        target: { schedName: 'S', trigger: { group: 'g', name: 'nightly' } },
+      }),
+    ).toBe('g / nightly');
+  });
+
   it('작업자가 없으면 시스템 작업이다', () => {
     expect(describeActor({ username: 'admin', userId: 1 })).toBe('admin');
     expect(describeActor({ username: null, userId: null })).toBe('시스템');
@@ -50,6 +59,6 @@ describe('작업 종류 라벨', () => {
   });
 
   it('모르는 작업 종류는 원래 값을 보여 준다', () => {
-    expect(auditActionLabel('trigger.pause')).toBe('trigger.pause');
+    expect(auditActionLabel('alert.ack')).toBe('alert.ack');
   });
 });
