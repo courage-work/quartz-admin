@@ -99,7 +99,7 @@ function Detail({ log }: { log: AuditLogDto }) {
               ) : null}
             </Row>
             <Row label="결과">
-              <AuditResultBadge result={log.result} />
+              <AuditResultBadge result={log.result} errorCode={log.errorCode} />
             </Row>
             {log.errorCode ? (
               <Row label="오류">

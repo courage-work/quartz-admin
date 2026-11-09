@@ -56,6 +56,7 @@ export function TriggerTable({
   loading,
   showJob = true,
   empty = { icon: TimerIcon, title: '트리거가 없습니다' },
+  actions,
 }: {
   schedulerId: number;
   triggers: TriggerDto[] | undefined;
@@ -63,8 +64,10 @@ export function TriggerTable({
   showJob?: boolean;
   /** 빈 표 표시. 필터를 건 화면만 "조건에 맞는"이라고 쓰고 지우기 버튼을 둔다 */
   empty?: { icon: LucideIcon; title: string; action?: ReactNode };
+  /** 줄 끝 제어 메뉴(`TriggerActions`). 없으면 열을 두지 않는다 */
+  actions?: (trigger: TriggerDto) => ReactNode;
 }) {
-  const columns = showJob ? 9 : 8;
+  const columns = (showJob ? 9 : 8) + (actions ? 1 : 0);
   return (
     <Table>
       <TableHeader>
@@ -78,6 +81,11 @@ export function TriggerTable({
           <TableHead>이전 실행</TableHead>
           <TableHead className="text-right">우선순위</TableHead>
           <TableHead>misfire 처리</TableHead>
+          {actions ? (
+            <TableHead className="w-0">
+              <span className="sr-only">제어</span>
+            </TableHead>
+          ) : null}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -144,6 +152,7 @@ export function TriggerTable({
                 <span className="tabular-nums">{t.priority ?? '-'}</span>
               </TableCell>
               <TableCell>{misfireLabel(t.type, t.misfireInstruction)}</TableCell>
+              {actions ? <TableCell className="text-right">{actions(t)}</TableCell> : null}
             </TableRow>
           ))
         )}

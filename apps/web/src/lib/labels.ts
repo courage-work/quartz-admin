@@ -16,6 +16,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   'scheduler.register': '스케줄러 등록',
   'scheduler.update': '스케줄러 설정 변경',
   'scheduler.delete': '스케줄러 등록 해제',
+  'trigger.pause': '트리거 일시정지',
 };
 
 export function auditActionLabel(action: string): string {

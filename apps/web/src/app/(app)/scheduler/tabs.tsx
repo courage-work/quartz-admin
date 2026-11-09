@@ -28,12 +28,14 @@ import {
 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useId, useRef, useState } from 'react';
 
+import { useCommandDialog } from '@/components/commands/use-command-dialog';
 import { FormAlert } from '@/components/form/form-alert';
 import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
 import { TableEmpty } from '@/components/table-empty';
 import { TableFrame } from '@/components/table-frame';
 import { PaginationBar } from '@/components/schedulers/pagination-bar';
 import { TimeCell } from '@/components/schedulers/time-cell';
+import { TriggerActions } from '@/components/schedulers/trigger-actions';
 import { JobLink, jobHref, TriggerTable } from '@/components/schedulers/trigger-table';
 import { TriggerStateBadge } from '@/components/status/status-badge';
 import { TRIGGER_STATE_META } from '@/components/status/tones';
@@ -427,7 +429,15 @@ const TRIGGERS_CODEC: UrlCodec<TriggersView> = {
 };
 
 /** 트리거 목록 (FR-VIEW-04). 상태·타입은 여러 개, 그룹은 정확히 일치, 검색어는 부분 일치 */
-export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
+export function TriggersTab({
+  schedulerId,
+  refreshMs,
+  blockedReason,
+}: TabProps & {
+  /** 제어할 수 없는 이유(읽기 전용 접속 등). 있으면 줄 메뉴의 제어 항목을 끈다 */
+  blockedReason: string | null;
+}) {
+  const { openCommand, dialog } = useCommandDialog(schedulerId);
   const [view, setView] = useUrlState(TRIGGERS_CODEC);
   const { states, types, sort, page } = view;
   const text = { group: view.group, q: view.q };
@@ -551,11 +561,15 @@ export function TriggersTab({ schedulerId, refreshMs }: TabProps) {
                 }
               : { icon: TimerIcon, title: '등록된 트리거가 없습니다' }
           }
+          actions={(t) => (
+            <TriggerActions trigger={t} blockedReason={blockedReason} onCommand={openCommand} />
+          )}
         />
       </TableFrame>
       {res.data ? (
         <PaginationBar page={page} size={PAGE_SIZE} total={res.data.total} onPageChange={setPage} />
       ) : null}
+      {dialog}
     </div>
   );
 }

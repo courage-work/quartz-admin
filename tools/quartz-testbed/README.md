@@ -44,6 +44,7 @@ docker build --build-arg QUARTZ_VERSION=2.5.2 -t quartz-testbed:2.5.2 tools/quar
 | `TESTBED_EXECUTIONS_TABLE`               | `TESTBED_EXECUTIONS` | 실행 기록 테이블                                         |
 | `TESTBED_DB_PROPERTIES`                  |                      | JDBC 드라이버 속성(properties 형식, 줄 단위)             |
 | `TESTBED_QUARTZ_PROPERTIES`              |                      | 덮어쓸 Quartz 설정(properties 형식, 줄 단위)             |
+| `TESTBED_START`                          | `true`               | `false`면 `start()`하지 않는 기준 인스턴스(차등 테스트)  |
 
 Oracle이면 `oracle.jdbc.sendBooleanAsNativeBoolean=false`를 기본으로 넣습니다. ojdbc 23은 Oracle 23에 접속하면 불리언을 네이티브 BOOLEAN으로 보내는데, Quartz 기본 스키마(`tables_oracle.sql`)의 불리언 컬럼은 `VARCHAR2(1)`이라 `ORA-12899`로 실패합니다. false로 두면 이전 드라이버처럼 1/0을 보내 운영(19c 이하)과 같은 `'1'`/`'0'`이 저장됩니다. 2.5.x의 `tables_oracle23.sql`(BOOLEAN 컬럼)을 쓸 때는 `TESTBED_DB_PROPERTIES=oracle.jdbc.sendBooleanAsNativeBoolean=true`로 바꿉니다.
 
@@ -90,6 +91,18 @@ Oracle이면 `oracle.jdbc.sendBooleanAsNativeBoolean=false`를 기본으로 넣�
 | POST   | `/control/unscheduleJob`                                              | 트리거 키                                                                                                  |
 | POST   | `/control/deleteJob`                                                  | 잡 키                                                                                                      |
 | POST   | `/control/interrupt`                                                  | 잡 키                                                                                                      |
+
+### 차등 테스트 도구
+
+Quartz API가 아니라 DB를 직접 다룹니다(TRD §12.1, 부록 A.1). Quartz와 같은 커넥션 풀을 쓰고 JDBC 표준 문법만 씁니다. `schedName`을 빼면 이 노드의 `SCHED_NAME`입니다.
+
+| 메서드 | 경로                | 본문 / 쿼리                                                                                                                                  |
+| ------ | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/fixture/sql`      | `{"statements": ["UPDATE …", "INSERT …"]}`. 한 트랜잭션으로 실행하고 문장별 바뀐 행 수를 돌려줌. API로 만들 수 없는 초기 상태(ACQUIRED 등)용 |
+| POST   | `/fixture/holdLock` | `{"seconds": 10, "lockName": "TRIGGER_ACCESS", "schedName"}`. 잠금 행을 잡은 뒤 응답하고, 시간이 지나면 ROLLBACK                             |
+| GET    | `/fixture/snapshot` | `?schedName=`. Quartz 테이블별 행(SCHED_NAME 컬럼 제외, 행은 JSON 문자열 순). 이름이 다른 두 스케줄러의 결과를 바로 비교                     |
+
+`TESTBED_START=false`로 띄운 기준 인스턴스는 `start()`하지 않으므로 트리거 획득, misfire 처리, 클러스터 체크인이 돌지 않습니다. Quartz API 결과 행이 결정적이라 차등 테스트의 기준값을 만듭니다. 클러스터 노드와 같은 `SCHED_NAME`을 쓰지 않습니다(클러스터가 그 트리거를 발화시킴). `/healthz`는 스케줄러가 만들어지면 200입니다.
 
 잡 명세:
 

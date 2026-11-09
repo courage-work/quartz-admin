@@ -1,8 +1,14 @@
-import type { AuditResult, SchedulerHealth, Severity } from '@qa/shared';
+import {
+  AUDIT_INTERRUPTED,
+  type AuditResult,
+  type SchedulerHealth,
+  type Severity,
+} from '@qa/shared';
 
 import { Badge } from '@/components/ui/badge';
 
 import {
+  AUDIT_INTERRUPTED_META,
   AUDIT_RESULT_META,
   SCHEDULER_HEALTH_META,
   SEVERITY_META,
@@ -36,6 +42,15 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
   return <StatusBadge meta={SEVERITY_META[severity]} />;
 }
 
-export function AuditResultBadge({ result }: { result: AuditResult }) {
+export function AuditResultBadge({
+  result,
+  errorCode,
+}: {
+  result: AuditResult;
+  errorCode?: string | null;
+}) {
+  if (result === 'failure' && errorCode === AUDIT_INTERRUPTED) {
+    return <StatusBadge meta={AUDIT_INTERRUPTED_META} code={errorCode} />;
+  }
   return <StatusBadge meta={AUDIT_RESULT_META[result]} code={result} />;
 }

@@ -35,6 +35,8 @@ export interface QuartzDialect {
   readBool(value: unknown): boolean | null;
   readBlob(value: unknown): Buffer | null;
   readLong(value: unknown): number | null;
+  /** 고유 키 중복으로 INSERT가 실패한 오류인지. 잠금 행을 동시에 넣은 경우를 가려낸다 (TRD §7.1 c) */
+  isDuplicateKey(err: unknown): boolean;
 }
 
 /** DB 현재 시각(epoch ms). 시계 차이 계산과 misfire 판정에 쓴다 (TRD §8) */

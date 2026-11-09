@@ -11,8 +11,15 @@ export class ApiError extends HttpException {
     message: string,
     details?: ApiErrorBody['details'],
     readonly headers: Record<string, string> = {},
+    /** 본문에 더할 값. `STATE_CONFLICT`의 최신 상태(`current`) */
+    extra: Pick<ApiErrorBody, 'current'> = {},
   ) {
-    const body: ApiErrorBody = { code, message, ...(details ? { details } : {}) };
+    const body: ApiErrorBody = {
+      code,
+      message,
+      ...(details ? { details } : {}),
+      ...(extra.current !== undefined ? { current: extra.current } : {}),
+    };
     super(body, status);
     this.code = code;
   }

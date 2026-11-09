@@ -66,6 +66,16 @@ export const AUDIT_RESULT_META = {
 } as const satisfies Record<AuditResult, StatusMeta>;
 
 /**
+ * 작업 도중 서버가 종료돼 결과를 모르는 기록(`failure` + `INTERRUPTED`). 대상 DB 쪽은 되돌려졌을 가능성이 높지만
+ * 커밋 직후에 종료됐을 수도 있어 "실패"가 아니라 "결과 확인 필요"로 보여 준다 (TRD §7.1)
+ */
+export const AUDIT_INTERRUPTED_META = {
+  tone: 'warning',
+  label: '결과 확인 필요',
+  icon: TriangleAlertIcon,
+} as const satisfies StatusMeta;
+
+/**
  * 톤별 정적 클래스. 화면에서 `bg-${tone}`처럼 만들지 않도록 여기에 모아 둔다(require-static-classes).
  * - rail: 카드 위 상태 띠, 점
  * - fill: SVG 막대 조각
