@@ -13,6 +13,7 @@ export function testConfig(overrides: Partial<AppConfig> & Pick<AppConfig, 'data
     alertRetentionDays: 90,
     monitorConcurrency: 8,
     logLevel: 'info',
+    webDev: false,
     encryption: { keys: new Map([['k1', randomBytes(32)]]), activeKeyId: 'k1' },
     ...overrides,
   };

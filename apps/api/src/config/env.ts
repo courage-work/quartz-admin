@@ -23,6 +23,11 @@ export interface AppConfig {
   alertRetentionDays: number;
   monitorConcurrency: number;
   logLevel: LogLevel;
+  /**
+   * 개발 전용. 화면을 빌드 결과물 대신 Next 개발 서버(HMR)로 같은 포트에서 서빙한다(`pnpm dev:hmr`, TRD §2.2).
+   * 운영 이미지에는 웹 소스가 없어 켤 수 없다
+   */
+  webDev: boolean;
   encryption: { keys: ReadonlyMap<string, Buffer>; activeKeyId: string };
   /** 최초 기동 시 관리자 생성용. 둘 다 있거나 둘 다 없어야 한다 */
   admin?: { username: string; password: string };
@@ -133,6 +138,7 @@ const envSchema = z
     QA_AUDIT_RETENTION_DAYS: int(1, 36_500).default(365),
     QA_ALERT_RETENTION_DAYS: int(1, 36_500).default(90),
     QA_MONITOR_CONCURRENCY: int(1, 64).default(8),
+    QA_WEB_DEV: bool.default(false),
     QA_LOG_LEVEL: z
       .enum(LOG_LEVELS, { error: `${LOG_LEVELS.join(', ')} 중 하나여야 합니다` })
       .default('info'),
@@ -203,6 +209,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     alertRetentionDays: e.QA_ALERT_RETENTION_DAYS,
     monitorConcurrency: e.QA_MONITOR_CONCURRENCY,
     logLevel: e.QA_LOG_LEVEL,
+    webDev: e.QA_WEB_DEV,
     encryption: { keys: e.QA_ENCRYPTION_KEYS, activeKeyId: e.QA_ENCRYPTION_ACTIVE_KEY },
     ...(e.QA_ADMIN_USERNAME && e.QA_ADMIN_PASSWORD
       ? { admin: { username: e.QA_ADMIN_USERNAME, password: e.QA_ADMIN_PASSWORD } }

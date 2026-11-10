@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.16 (B-17 제어 명령 프레임워크 반영) |
+| 문서 버전 | v0.17 (한 프로세스 개발 모드 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -30,6 +30,7 @@
 | v0.14 | 2026-11-06 | B-15: §8.4 스냅샷 상태 판정·실패 시 보존 규칙·스냅샷 API, §9.1 감시 루프 구현(고정 주기, 겹침 건너뛰기, 첫 회차 지터, 동시 실행, 회차 제한, 변경 이벤트, 확장 지점, 수집 쿼리) 확정 |
 | v0.15 | 2026-11-07 | B-16: §8.1 대시보드 목록·스케줄러 상세 응답 형식과 화면 구성, §8.4 대시보드 응답 시간 확인 결과 추가 |
 | v0.16 | 2026-11-09 | B-17: §7.1에 명령 API(미리보기·실행), 기대 상태 비교 기준(Quartz `getTriggerState` 분류), 사전 검사·감사 기록·오류 코드(`READ_ONLY`, `STATE_CONFLICT`), 구현 위치 추가. §12.1 차등 테스트 도구(기준 인스턴스, 픽스처 SQL, 잠금 점유, 행 스냅샷) 구현 반영 |
+| v0.17 | 2026-11-09 | §2.2에 한 프로세스 개발 모드(`pnpm dev:hmr`, Next 개발 서버를 API에 붙여 같은 포트에서 HMR) 추가, §11.2에 `QA_WEB_DEV` 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -108,6 +109,7 @@ quartz-admin/
   - 파일 목록은 기동 시 한 번 읽습니다. 목록에 없는 경로(`..` 포함)는 열지 않습니다.
   - HTML은 `Cache-Control: no-cache`, 해시가 붙은 `_next/static/*`은 1년 `immutable`로 응답합니다.
 - 개발 중에는 웹 개발 서버(`next dev`, 포트 3001)가 `/api`를 API(`QA_API_URL`, 기본 3000)로 프록시합니다(개발 모드에서만 rewrites 사용). 브라우저 기준으로 같은 오리진이 되도록 API의 `QA_PUBLIC_URL`을 `http://localhost:3001`로 둡니다.
+- 한 프로세스로 개발하는 방법도 있습니다(`pnpm dev:hmr`, `QA_WEB_DEV=1`). API가 `apps/web`의 `next`를 불러 Next 개발 서버를 같은 프로세스에 띄우고, `/api`와 헬스체크 밖의 요청을 넘깁니다(`apps/api/src/web/web-dev.ts`). HMR WebSocket(`/_next/hmr`)은 Next가 첫 요청 때 HTTP 서버의 `upgrade`에 직접 붙습니다. 이 응답에는 helmet CSP를 붙이지 않습니다(HMR이 eval과 인라인 스크립트를 씀). `next`는 API 의존성에 넣지 않아 운영 이미지에 들어가지 않고, 웹 소스가 없으면 기동을 거부합니다.
 
 ### 2.3 API 공통 규칙
 
@@ -826,6 +828,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 | `QA_MONITOR_CONCURRENCY` | | 기본 8 |
 | `QA_SMTP_HOST`, `QA_SMTP_PORT`, `QA_SMTP_USER`, `QA_SMTP_PASSWORD`, `QA_SMTP_FROM`, `QA_SMTP_SECURE` | 이메일 사용 시 | |
 | `QA_LOG_LEVEL` | | 기본 info |
+| `QA_WEB_DEV` | | 개발 전용. 1이면 화면을 Next 개발 서버(HMR)로 같은 포트에서 서빙(§2.2). `pnpm dev:hmr`이 켠다 |
 
 - 검증은 `apps/api/src/config/env.ts`(zod)가 기동 시 한 번 합니다. 결과 `AppConfig`는 DI(`APP_CONFIG`)로만 전달하고, 모듈은 `process.env`를 직접 읽지 않습니다.
 - 잘못된 값은 변수별 원인을 모아 한 번에 출력하고 종료합니다(exit 1, 스택 트레이스 없음). 메시지에 키 값은 넣지 않습니다.

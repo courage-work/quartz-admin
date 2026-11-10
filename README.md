@@ -37,6 +37,18 @@ pnpm --filter @qa/web dev   # Next.js 개발 서버 http://localhost:3001. /desi
 - 개발 중에는 브라우저로 `http://localhost:3001`에 접속합니다. 웹 개발 서버가 `/api` 요청을 API(`QA_API_URL`, 기본 `http://localhost:3000`)로 넘겨 화면과 API가 같은 오리진처럼 동작합니다. 이때 API의 `QA_PUBLIC_URL`은 `http://localhost:3001`로 둡니다(CSRF Origin 검사).
 - `pnpm build`는 웹 정적 결과물(`apps/web/out`)을 `apps/api/public`으로 복사합니다. 빌드한 API(`pnpm --filter @qa/api start`)는 화면과 API를 한 포트에서 함께 서빙합니다. 웹을 빌드하지 않았으면 API만 제공합니다.
 
+한 프로세스·한 포트로 개발하기(HMR):
+
+```bash
+pnpm dev:hmr   # http://localhost:3000 에서 화면과 API를 함께. 화면은 고치면 바로 반영(HMR), API는 고치면 다시 시작
+```
+
+- API 안에 Next 개발 서버를 붙여 `/api`와 헬스체크 밖의 요청을 넘깁니다(`QA_WEB_DEV=1`). 운영 서빙과 같은 오리진 구성을 개발 중에도 그대로 씁니다.
+- `QA_PUBLIC_URL`은 `.env` 값과 상관없이 `http://localhost:<PORT>`(기본 3000)로 둡니다. 다른 주소를 쓰려면 셸에서 지정합니다.
+- Next는 한 디렉터리에 개발 서버를 하나만 띄웁니다. `pnpm --filter @qa/web dev`와 동시에 쓸 수 없습니다.
+- 화면 응답에는 helmet CSP를 붙이지 않습니다(HMR이 eval과 인라인 스크립트를 씀). 개발 전용이며 운영 이미지에는 웹 소스가 없어 켤 수 없습니다.
+- API 코드를 고치면 프로세스가 다시 시작되면서 Next 개발 서버도 다시 뜹니다(몇 초 걸림).
+
 API는 처음 실행하기 전에 `apps/api/.env`가 필요합니다. 암호화 키는 필수입니다.
 
 ```bash
