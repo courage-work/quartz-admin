@@ -35,8 +35,9 @@ export class CommandsController {
   preview(
     @Param('id', ParseIntPipe) id: number,
     @Body(new ZodPipe(commandPreviewRequestSchema)) body: CommandPreviewRequest,
+    @Req() req: AuthedRequest,
   ): Promise<CommandPreviewResponse> {
-    return this.commands.preview(id, body.command);
+    return this.commands.preview(id, body.command, actorOf(req));
   }
 
   @Post()

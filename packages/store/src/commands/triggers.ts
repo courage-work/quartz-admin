@@ -1,8 +1,10 @@
+import { randomBytes } from 'node:crypto';
 import {
   COMMAND_TARGETS_LISTED,
   PAUSE_TRIGGER_TRANSITIONS,
   RESUMABLE_TRIGGER_STATES,
   type CommandChangeDto,
+  type CommandInsertDto,
   type CommandNoticeDto,
   type TriggerKey,
 } from '@qa/shared';
@@ -187,11 +189,13 @@ export function resumePlanOf(
   resume: ResumePlan,
   rest: Pick<CommandPlan, 'groupChanges'> & { warnings?: CommandNoticeDto[] },
 ): CommandPlan {
+  const inserts: CommandInsertDto[] = [];
   const warnings: CommandNoticeDto[] = [...(rest.warnings ?? [])];
   if (resume.inPausedGroup.length > 0) {
     return {
       changes: [],
       groupChanges: [],
+      inserts,
       warnings,
       rejection: {
         code: 'RESUME_IN_PAUSED_GROUP',
@@ -218,13 +222,26 @@ export function resumePlanOf(
       triggers: listedKeys(resume.noNextFire),
     });
   }
-  return { changes: resume.changes, groupChanges: rest.groupChanges, warnings, rejection: null };
+  return {
+    changes: resume.changes,
+    groupChanges: rest.groupChanges,
+    inserts,
+    warnings,
+    rejection: null,
+  };
 }
 
 /** 바뀌는 것이 없을 때 붙이는 경고 */
 export function noChangeWarning(plan: CommandPlan, message: string): CommandPlan {
-  if (plan.rejection || plan.changes.length > 0 || plan.groupChanges.length > 0) return plan;
+  if (plan.rejection || plannedRows(plan) > 0) return plan;
   return { ...plan, warnings: [{ code: 'NO_CHANGE', message }, ...plan.warnings] };
+}
+
+/** 계획이 바꿀 행 수(트리거 상태, 그룹 행, 새 트리거). 적용한 행 수와 비교한다 */
+export function plannedRows(
+  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts'>,
+): number {
+  return plan.changes.length + plan.groupChanges.length + plan.inserts.length;
 }
 
 /** 한 UPDATE에 넣는 트리거 이름 수. Oracle의 IN 목록 상한(1,000)보다 작게 둔다 */
@@ -266,14 +283,106 @@ export async function applyStateChanges(
 }
 
 /**
- * 계획을 적용한다. 트리거 상태와 `PAUSED_TRIGGER_GRPS` 행을 바꾸고 바뀐 행 수를 돌려준다.
+ * Quartz `QuartzScheduler.newTriggerId`와 같은 형식의 트리거 이름: `MT_` + 음이 아닌 난수 long을 30~36진법으로
+ */
+export function newTriggerName(now: number = Date.now()): string {
+  const r = BigInt.asUintN(63, randomBytes(8).readBigUInt64BE());
+  return `MT_${r.toString(30 + (now % 7))}`;
+}
+
+async function triggerExists(
+  conn: TargetConn,
+  ctx: SchedulerCommandContext,
+  group: string,
+  name: string,
+): Promise<boolean> {
+  const { dialect: d, tables } = ctx;
+  const b = new Binds(d);
+  const rows = await conn.query(
+    `SELECT COUNT(*) AS ${d.quote('C')} FROM ${tables.table('TRIGGERS')} ` +
+      `WHERE SCHED_NAME = ${b.add(ctx.schedName)} AND TRIGGER_GROUP = ${b.add(group)} ` +
+      `AND TRIGGER_NAME = ${b.add(name)}`,
+    b.values,
+  );
+  return (d.readLong(rows[0]?.C) ?? 0) > 0;
+}
+
+/** 겹치지 않는 이름을 찾을 때까지 다시 만드는 횟수. Quartz도 겹치면 이름을 다시 만든다(`QS.triggerJob`) */
+const NAME_ATTEMPTS = 5;
+
+/**
+ * 즉시 실행 트리거를 넣는다 (TRD §7.5, `Delegate.insertTrigger`, `insertSimpleTrigger`).
+ * 이름은 잠금 안에서 겹치지 않는지 확인한 뒤 정한다. Quartz도 트리거를 같은 잠금 안에서 넣으므로 이것으로 충분하고,
+ * INSERT가 키 중복으로 실패해 트랜잭션이 깨지는 DB(PostgreSQL)도 피할 수 있다.
+ * JOB_DATA와 CALENDAR_NAME은 넣지 않아 NULL이 된다(Quartz도 빈 맵이면 NULL).
+ */
+async function insertTrigger(
+  conn: TargetConn,
+  ctx: SchedulerCommandContext,
+  ins: CommandInsertDto,
+): Promise<CommandInsertDto> {
+  const { dialect: d, tables, features } = ctx;
+  let name: string | null = null;
+  for (let i = 0; i < NAME_ATTEMPTS && name === null; i++) {
+    const candidate = newTriggerName();
+    if (!(await triggerExists(conn, ctx, ins.group, candidate))) name = candidate;
+  }
+  if (name === null) {
+    throw new TargetError('TARGET_ERROR', {
+      detail: '겹치지 않는 트리거 이름을 만들지 못했습니다',
+    });
+  }
+  const b = new Binds(d);
+  const cols: [string, string][] = [
+    ['SCHED_NAME', b.add(ctx.schedName)],
+    ['TRIGGER_NAME', b.add(name)],
+    ['TRIGGER_GROUP', b.add(ins.group)],
+    ['JOB_NAME', b.add(ins.jobName)],
+    ['JOB_GROUP', b.add(ins.jobGroup)],
+    ['DESCRIPTION', b.add(ins.description)],
+    ['NEXT_FIRE_TIME', b.add(ins.startTime)],
+    ['PREV_FIRE_TIME', b.add(-1)],
+    ...(features.triggerPriority ? ([['PRIORITY', b.add(5)]] as [string, string][]) : []),
+    ['TRIGGER_STATE', b.add(ins.state)],
+    ['TRIGGER_TYPE', b.add('SIMPLE')],
+    ['START_TIME', b.add(ins.startTime)],
+    ['END_TIME', b.add(0)],
+    ['MISFIRE_INSTR', b.add(0)],
+  ];
+  const inserted = await conn.execute(
+    `INSERT INTO ${tables.table('TRIGGERS')} (${cols.map(([c]) => c).join(', ')}) ` +
+      `VALUES (${cols.map(([, v]) => v).join(', ')})`,
+    b.values,
+  );
+  const s = new Binds(d);
+  await conn.execute(
+    `INSERT INTO ${tables.table('SIMPLE_TRIGGERS')} ` +
+      `(SCHED_NAME, TRIGGER_NAME, TRIGGER_GROUP, REPEAT_COUNT, REPEAT_INTERVAL, TIMES_TRIGGERED) ` +
+      `VALUES (${s.add(ctx.schedName)}, ${s.add(name)}, ${s.add(ins.group)}, ${s.add(0)}, ${s.add(0)}, ${s.add(0)})`,
+    s.values,
+  );
+  if (inserted !== 1) {
+    throw new TargetError('TARGET_ERROR', { detail: '즉시 실행 트리거를 넣지 못했습니다' });
+  }
+  return { ...ins, name };
+}
+
+export interface AppliedPlan {
+  /** 바뀐 행 수(트리거 상태, 그룹 행, 새 트리거) */
+  changed: number;
+  /** 실제로 넣은 트리거(이름 포함) */
+  inserts: CommandInsertDto[];
+}
+
+/**
+ * 계획을 적용한다. `PAUSED_TRIGGER_GRPS` 행, 트리거 상태, 새 트리거 순서로 바꾸고 바뀐 행 수를 돌려준다.
  * 그룹 행은 계획이 지금 상태를 보고 정했으므로(없을 때만 넣고 있을 때만 지움) 행마다 1이어야 한다.
  */
 export async function applyPlan(
   conn: TargetConn,
   ctx: SchedulerCommandContext,
-  plan: Pick<CommandPlan, 'changes' | 'groupChanges'>,
-): Promise<number> {
+  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts'>,
+): Promise<AppliedPlan> {
   const { dialect: d, tables } = ctx;
   let changed = 0;
   for (const g of plan.groupChanges) {
@@ -288,5 +397,10 @@ export async function applyPlan(
     );
   }
   changed += await applyStateChanges(conn, ctx, plan.changes);
-  return changed;
+  const inserts: CommandInsertDto[] = [];
+  for (const ins of plan.inserts) {
+    inserts.push(await insertTrigger(conn, ctx, ins));
+    changed++;
+  }
+  return { changed, inserts };
 }

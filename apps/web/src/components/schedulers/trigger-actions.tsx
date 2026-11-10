@@ -1,7 +1,7 @@
 'use client';
 
 import type { QuartzCommand, TriggerDto } from '@qa/shared';
-import { PauseIcon, PlayIcon } from 'lucide-react';
+import { PauseIcon, PlayIcon, ZapIcon } from 'lucide-react';
 
 import { ControlMenu } from '@/components/commands/control-menu';
 import { canPauseTrigger, canResumeTrigger } from '@/lib/commands';
@@ -44,7 +44,7 @@ export function TriggerActions({
 }
 
 /**
- * 잡의 제어 메뉴(잡의 모든 트리거). 잡 목록에는 트리거 상태가 없어 항목을 미리 끄지 않고,
+ * 잡의 제어 메뉴(잡의 모든 트리거의 일시정지·재개, 즉시 실행). 잡 목록에는 트리거 상태가 없어 항목을 미리 끄지 않고,
  * 바뀌는 것이 없으면 확인 대화상자가 알려 준다
  */
 export function JobActions({
@@ -69,6 +69,7 @@ export function JobActions({
       items={[
         { label: '잡 일시정지', icon: PauseIcon, command: { type: 'pauseJob', job: key } },
         { label: '잡 재개', icon: PlayIcon, command: { type: 'resumeJob', job: key } },
+        { label: '즉시 실행', icon: ZapIcon, command: { type: 'triggerJob', job: key } },
       ]}
     />
   );

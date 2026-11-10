@@ -68,6 +68,10 @@ class FakeTarget {
   committed: string | null = 'WAITING';
   nft = DB_NOW + 60_000;
   pausedGroups: string[] = [];
+  /** JOB_DETAILS에 잡(`jg/j`)이 있는지 */
+  jobExists = true;
+  /** 즉시 실행으로 넣은 TRIGGERS 행의 바인드 값 */
+  inserted: BindValue[][] = [];
   writes = 0;
   lockDelayMs = 0;
   lockError: TargetError | undefined;
@@ -109,7 +113,15 @@ class FakeTarget {
           return groups().map((g) => ({ G: g })) as Row[] as R[];
         }
         if (sql.includes('QRTZ_FIRED_TRIGGERS')) return [];
-        if (sql.includes('QRTZ_JOB_DETAILS')) return [{ C: 0 }] as Row[] as R[];
+        if (sql.includes('QRTZ_JOB_DETAILS')) {
+          return [{ C: this.jobExists ? 1 : 0 }] as Row[] as R[];
+        }
+        if (sql.includes('QRTZ_SCHEDULER_STATE')) {
+          return [{ N: 'node-1', L: DB_NOW - 1_000, I: 7_500 }] as Row[] as R[];
+        }
+        if (sql.includes('COUNT(*)') && sql.includes('QRTZ_TRIGGERS')) {
+          return [{ C: 0 }] as Row[] as R[];
+        }
         if (sql.includes('QRTZ_TRIGGERS')) {
           const state = current();
           const rows: Row[] =
@@ -120,6 +132,12 @@ class FakeTarget {
       },
       execute: (sql: string, binds: readonly BindValue[] = []) => {
         this.writes++;
+        if (sql.startsWith('INSERT INTO "QUARTZ"."QRTZ_TRIGGERS"')) {
+          this.inserted.push([...binds]);
+          return Promise.resolve(1);
+        }
+        if (sql.startsWith('INSERT INTO "QUARTZ"."QRTZ_SIMPLE_TRIGGERS"'))
+          return Promise.resolve(1);
         if (sql.startsWith('INSERT INTO "QUARTZ"."QRTZ_PAUSED_TRIGGER_GRPS"')) {
           touch().pausedGroups.push(binds[1] as string);
           return Promise.resolve(1);
@@ -282,6 +300,7 @@ describe('제어 명령 API (TRD §7.1)', () => {
       expected: { triggers: [{ group: 'g', name: 't', state: 'WAITING' }], pausedGroups: [] },
       changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
       groupChanges: [],
+      inserts: [],
       warnings: [],
       blocked: null,
     } satisfies CommandPreviewResponse);
@@ -497,5 +516,61 @@ describe('제어 명령 API (TRD §7.1)', () => {
       targetType: 'trigger_group',
       target: { schedName: 'S', group: 'g' },
     });
+  });
+
+  it('즉시 실행은 사용자 이름을 남긴 일회성 트리거를 넣고 잡 대상으로 감사 로그를 남긴다 (TRD §7.5)', async () => {
+    const id = await register('c');
+    const command: QuartzCommand = { type: 'triggerJob', job: { group: 'jg', name: 'j' } };
+    const preview = (
+      await t.send('post', `/schedulers/${id}/commands/preview`, { command }, cookie).expect(200)
+    ).body as CommandPreviewResponse;
+    expect(preview.expected).toEqual({ triggers: [], pausedGroups: [] });
+    expect(preview.inserts).toEqual([
+      {
+        group: 'DEFAULT',
+        name: null,
+        jobGroup: 'jg',
+        jobName: 'j',
+        state: 'WAITING',
+        startTime: DB_NOW,
+        description: `quartz-admin: ${ADMIN.username}`,
+      },
+    ]);
+
+    const result = (
+      await t
+        .send('post', `/schedulers/${id}/commands`, { command, expected: preview.expected }, cookie)
+        .expect(200)
+    ).body as CommandResultDto;
+    expect(result.changed).toBe(true);
+    expect(result.inserts[0]?.name).toMatch(/^MT_/);
+    expect(fake.inserted).toHaveLength(1);
+    const logs = (await t.get('/audit-logs?action=job.trigger', cookie).expect(200))
+      .body as AuditLogPage;
+    expect(logs.items[0]).toMatchObject({
+      result: 'success',
+      targetType: 'job',
+      target: { schedName: 'S', job: { group: 'jg', name: 'j' } },
+      after: { inserts: result.inserts },
+    });
+  });
+
+  it('즉시 실행할 잡이 없으면 404이고 실패를 기록한다', async () => {
+    const id = await register('c');
+    fake.jobExists = false;
+    const command: QuartzCommand = { type: 'triggerJob', job: { group: 'jg', name: 'missing' } };
+    await t.send('post', `/schedulers/${id}/commands/preview`, { command }, cookie).expect(404);
+    await t
+      .send(
+        'post',
+        `/schedulers/${id}/commands`,
+        { command, expected: { triggers: [], pausedGroups: [] } },
+        cookie,
+      )
+      .expect(404);
+    expect(fake.inserted).toEqual([]);
+    const logs = (await t.get('/audit-logs?action=job.trigger', cookie).expect(200))
+      .body as AuditLogPage;
+    expect(logs.items[0]).toMatchObject({ result: 'failure', errorCode: 'NOT_FOUND' });
   });
 });

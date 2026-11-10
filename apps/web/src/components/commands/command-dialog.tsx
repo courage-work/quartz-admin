@@ -80,7 +80,7 @@ function NoticeTriggers({ notice }: { notice: CommandNoticeDto }) {
 }
 
 function Summary({ data }: { data: CommandPreviewResponse }) {
-  const { scheduler, targets, changes, groupChanges, command } = data;
+  const { scheduler, targets, changes, groupChanges, inserts, command } = data;
   const single = commandScope(command) === 'trigger';
   const listed = targets.slice(0, COMMAND_TARGETS_LISTED);
   return (
@@ -98,7 +98,7 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
       <dt className="text-muted-foreground">대상</dt>
       <dd className="col-span-3 flex flex-col gap-2">
         <ScopeLine command={command} />
-        {single ? null : <span>트리거 {targets.length}개</span>}
+        {single || command.type === 'triggerJob' ? null : <span>트리거 {targets.length}개</span>}
         {listed.map((t) => (
           <span key={`${t.group}\u0000${t.name}`} className="flex flex-col items-start gap-1">
             <span className="text-xs text-muted-foreground">{t.group}</span>
@@ -121,11 +121,24 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
       </dd>
       <dt className="text-muted-foreground">영향 범위</dt>
       <dd className="col-span-3 flex flex-col gap-2">
-        <span>
-          {changes.length > 0
-            ? `트리거 ${changes.length}개의 상태가 바뀝니다`
-            : '상태가 바뀌는 트리거가 없습니다'}
-        </span>
+        {inserts.map((ins) => (
+          <span
+            key={`${ins.group}\u0000${ins.name ?? ''}`}
+            className="flex flex-col items-start gap-1"
+          >
+            <span>{ins.group} 그룹에 한 번 실행할 트리거를 넣습니다</span>
+            <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              넣을 때 상태 <TriggerStateBadge state={ins.state} />
+            </span>
+          </span>
+        ))}
+        {inserts.length > 0 && changes.length === 0 ? null : (
+          <span>
+            {changes.length > 0
+              ? `트리거 ${changes.length}개의 상태가 바뀝니다`
+              : '상태가 바뀌는 트리거가 없습니다'}
+          </span>
+        )}
         {summarizeChanges(changes).map((c) => (
           <span key={`${c.from}\u0000${c.to}`} className="flex flex-wrap items-center gap-2">
             <TriggerStateBadge state={c.from} />
@@ -139,8 +152,8 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
         {groupChanges.map((g) => (
           <span key={g.group}>
             {g.paused
-              ? '그룹을 일시정지 상태로 기록합니다. 나중에 이 그룹에 추가되는 트리거도 일시정지됩니다'
-              : '그룹의 일시정지 기록을 지웁니다'}
+              ? `${g.group} 그룹을 일시정지 상태로 기록합니다. 나중에 이 그룹에 추가되는 트리거도 일시정지됩니다`
+              : `${g.group} 그룹의 일시정지 기록을 지웁니다`}
           </span>
         ))}
       </dd>

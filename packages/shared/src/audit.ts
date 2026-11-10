@@ -31,6 +31,7 @@ export const AUDIT_ACTIONS = [
   'trigger_group.resume',
   'job_group.pause',
   'job_group.resume',
+  'job.trigger',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
