@@ -13,6 +13,7 @@ import { pinoOptions } from './logging/http-logger.js';
 import { InstanceLock, InstanceLockError } from './meta-db/instance-lock.js';
 import { metaDbPath } from './meta-db/meta-db.js';
 import { defaultWebDir } from './web/web-assets.js';
+import { defaultWebSourceDir, startWebDev } from './web/web-dev.js';
 
 /**
  * Nest 초기화 전에 다른 인스턴스가 있는지 먼저 본다.
@@ -41,11 +42,26 @@ async function bootstrap(): Promise<void> {
   });
   const logger = app.get(Logger);
   app.useLogger(logger);
-  configureApp(app, config, { webDir: defaultWebDir() });
+  // 개발 전용: 빌드한 화면 대신 Next 개발 서버(HMR)를 같은 포트에 붙인다 (`pnpm dev:hmr`)
+  const webDev = config.webDev ? await startWebDev(defaultWebSourceDir(), config.port) : null;
+  if (webDev) {
+    // Nest 종료 훅이 끝난 뒤 Next 개발 서버(파일 감시)도 닫아 프로세스가 남지 않게 한다
+    app.getHttpServer().once('close', () => void webDev.close());
+  }
+  configureApp(app, config, { webDir: defaultWebDir(), webDev });
   app.enableShutdownHooks();
 
   await app.listen(config.port);
   logger.log(`${APP_NAME} API listening on :${config.port}/${API_PREFIX}`, 'Bootstrap');
+  if (webDev) {
+    logger.log(`화면(HMR): http://localhost:${config.port}`, 'Bootstrap');
+    if (new URL(config.publicUrl).port !== String(config.port)) {
+      logger.warn(
+        `QA_PUBLIC_URL(${config.publicUrl})의 포트가 ${config.port}가 아니면 로그인·변경 요청이 Origin 검사에서 거부됩니다`,
+        'Bootstrap',
+      );
+    }
+  }
 }
 
 /** Nest가 뜨기 전 실패도 JSON으로 남긴다. 레벨은 환경변수 값이 올바를 때만 따른다 */

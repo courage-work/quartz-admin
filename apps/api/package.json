@@ -11,6 +11,7 @@
   "scripts": {
     "build": "nest build && node scripts/copy-web.mjs",
     "dev": "nest start --watch --exec \"node --env-file-if-exists=.env\"",
+    "dev:hmr": "node scripts/dev-hmr.mjs",
     "start": "node --env-file-if-exists=.env dist/main.js",
     "cli": "node --env-file-if-exists=.env dist/cli.js",
     "db:generate": "drizzle-kit generate",

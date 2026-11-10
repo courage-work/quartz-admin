@@ -35,6 +35,7 @@ describe('loadConfig', () => {
       alertRetentionDays: 90,
       monitorConcurrency: 8,
       logLevel: 'info',
+      webDev: false,
     });
     expect(config.encryption.activeKeyId).toBe('k1');
     expect(config.encryption.keys.get('k1')).toEqual(Buffer.from(K1, 'base64'));
