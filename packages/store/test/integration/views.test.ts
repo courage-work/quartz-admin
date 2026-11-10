@@ -9,6 +9,7 @@ import {
   createTableSet,
   getJobDetail,
   listExecuting,
+  listGroups,
   listJobs,
   listNodes,
   listPausedGroups,
@@ -263,6 +264,17 @@ describe('조회 쿼리 (Oracle Free 23)', () => {
     ]);
 
     expect(await run((c) => listPausedGroups(c, ctx))).toEqual([ALL_GROUPS_PAUSED, 'group-03']);
+
+    // 그룹 필터 선택지: 이름순으로 겹치지 않게, limit을 넘으면 잘랐다고 알린다
+    const jobGroups = await run((c) => listGroups(c, ctx, 'job', 200));
+    expect(jobGroups.truncated).toBe(false);
+    expect(jobGroups.items).toContain('jobs');
+    expect(jobGroups.items).toEqual([...new Set(jobGroups.items)].sort());
+    const triggerGroups = await run((c) => listGroups(c, ctx, 'trigger', 200));
+    expect(triggerGroups.items).toContain('group-03');
+    expect(triggerGroups.items).toEqual([...new Set(triggerGroups.items)].sort());
+    const cut = await run((c) => listGroups(c, ctx, 'trigger', 2));
+    expect(cut).toEqual({ items: triggerGroups.items.slice(0, 2), truncated: true });
 
     const executing = await run((c) => listExecuting(c, ctx, opts));
     expect(executing.map((e) => [e.entryId, e.state, e.stale])).toEqual([

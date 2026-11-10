@@ -26,6 +26,7 @@ function Tile({
   tone,
   pressed,
   onClick,
+  wide,
 }: {
   label: string;
   count: number;
@@ -33,6 +34,8 @@ function Tile({
   tone: Tone;
   pressed: boolean;
   onClick: () => void;
+  /** 둘째 줄 타일(두 개가 한 줄을 반씩). 넓은 화면에서는 다섯 개가 한 줄이라 차이가 없다 */
+  wide: boolean;
 }) {
   const classes = TONE_CLASSES[tone];
   return (
@@ -40,7 +43,7 @@ function Tile({
       type="button"
       aria-pressed={pressed}
       onClick={onClick}
-      className="flex min-h-11 items-center gap-3 rounded-xl border border-border bg-card p-3 text-left shadow-xs transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 aria-pressed:border-primary aria-pressed:ring-1 aria-pressed:ring-primary md:p-4"
+      className={`flex min-h-11 items-center gap-3 rounded-xl border border-border bg-card p-3 text-left shadow-xs transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 aria-pressed:border-primary aria-pressed:ring-1 aria-pressed:ring-primary md:p-4 xl:col-span-1 ${wide ? 'col-span-3' : 'col-span-2'}`}
     >
       {/* 넓은 화면: 톤 바탕 아이콘. 좁은 화면에서는 공간을 아끼려고 라벨 옆 작은 아이콘으로 바꾼다 */}
       <span
@@ -78,7 +81,8 @@ export function HealthSummary({
     <div
       role="group"
       aria-label="상태별 스케줄러 수"
-      className="grid grid-cols-3 gap-2 md:gap-3 xl:grid-cols-5"
+      // 좁은 화면은 6칸 격자: 첫 줄 셋(2칸씩), 둘째 줄 둘(3칸씩). 3칸 격자면 둘째 줄에 빈칸이 남는다
+      className="grid grid-cols-6 gap-2 md:gap-3 xl:grid-cols-5"
     >
       <Tile
         label="전체"
@@ -87,8 +91,9 @@ export function HealthSummary({
         tone="neutral"
         pressed={value === undefined}
         onClick={() => onChange(undefined)}
+        wide={false}
       />
-      {HEALTHS.map((h) => {
+      {HEALTHS.map((h, i) => {
         const meta = SCHEDULER_HEALTH_META[h];
         const n = counts[h] ?? 0;
         const quiet = ATTENTION.includes(h) && n === 0;
@@ -101,6 +106,7 @@ export function HealthSummary({
             tone={quiet ? 'neutral' : meta.tone}
             pressed={value === h}
             onClick={() => onChange(value === h ? undefined : h)}
+            wide={i >= 2}
           />
         );
       })}

@@ -104,7 +104,7 @@ export function TriggerTable({
   /** 서버 정렬. 있으면 "그룹 / 이름"과 "다음 실행" 열 머리를 눌러 바꾼다(트리거 탭). 없으면 머리는 글자뿐이다 */
   sort?: { value: TriggerSort; onChange: (sort: TriggerSort) => void };
 }) {
-  const columns = (showJob ? 9 : 8) + (actions ? 1 : 0);
+  const columns = (showJob ? 8 : 7) + (actions ? 1 : 0);
   return (
     <Table>
       <TableHeader>
@@ -120,7 +120,6 @@ export function TriggerTable({
           )}
           {showJob ? <TableHead>잡</TableHead> : null}
           <TableHead>상태</TableHead>
-          <TableHead>타입</TableHead>
           <TableHead>일정</TableHead>
           {sort ? (
             <SortHead
@@ -179,22 +178,24 @@ export function TriggerTable({
               <TableCell>
                 <TriggerStateBadge state={t.state} />
               </TableCell>
-              <TableCell>{triggerTypeLabel(t.type)}</TableCell>
               <TableCell>
-                {t.cron ? (
-                  <span className="flex flex-col">
-                    {/* flex 항목이 되면 Code의 세로 여백만큼 줄이 높아진다. 글줄 안에 두고, 글꼴이 섞여
-                        줄 상자가 1px 커지지 않게 줄도 고정폭 글꼴로 둔다 */}
+                {/* 줄 높이가 같도록 항상 두 줄(일정 / 타입·타임존). 타입은 열을 따로 두지 않고 여기에 쓴다.
+                    열 하나만큼 표가 좁아져 1440px에서 가로로 넘치지 않는다 */}
+                <span className="flex flex-col">
+                  {t.cron ? (
+                    // flex 항목이 되면 Code의 세로 여백만큼 줄이 높아진다. 글줄 안에 두고, 글꼴이 섞여
+                    // 줄 상자가 1px 커지지 않게 줄도 고정폭 글꼴로 둔다
                     <span className="font-mono">
                       <Code>{t.cron.expression}</Code>
                     </span>
-                    <span className="text-xs text-muted-foreground">
-                      {t.cron.timeZone ?? 'JVM 기본 타임존'}
-                    </span>
+                  ) : (
+                    <span>{describeSchedule(t)}</span>
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {triggerTypeLabel(t.type)}
+                    {t.cron ? ` · ${t.cron.timeZone ?? 'JVM 기본 타임존'}` : ''}
                   </span>
-                ) : (
-                  describeSchedule(t)
-                )}
+                </span>
               </TableCell>
               <TableCell>
                 <TimeCell ms={t.nextFireTime} timeZone={t.cron?.timeZone} />

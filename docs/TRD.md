@@ -800,7 +800,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
   - 문자열 안의 URL 자격증명(`scheme://user:pass@host`)의 비밀번호 부분도 가립니다.
 - 앱 코드에는 `audit_logs`를 수정하는 경로가 없습니다(INSERT와 `pending` 결과 갱신만 존재). 정리는 보존 정책 작업(`audit_logs`, §3.3)만 합니다. 테스트가 소스 전체에서 `audit_logs`를 바꾸는 코드가 `AuditService` 밖에 없는지 확인합니다.
 - `GET /audit-logs`: 로그인한 사용자 누구나 조회합니다(PRD 권한 모델).
-  - 필터: `from`(포함)·`to`(제외, epoch ms), `userId`, `username`, `schedulerId`, `action`, `result`
+  - 필터: `from`(포함)·`to`(제외, epoch ms), `userId`, `username`(부분 일치, 대소문자 무시), `schedulerId`, `action`, `result`
   - 페이지: 최신순(id 내림차순). `limit`(기본 50, 최대 200)과 이전 응답의 `nextCursor`를 `cursor`로 넘기는 키셋 방식입니다. 응답은 `{ items, nextCursor }`이고 `nextCursor`가 null이면 마지막 페이지입니다.
 - `GET /audit-logs/:id`: 기록 하나(상세 화면 `/audit-log?id=N`용). 없으면 404 `NOT_FOUND`
 - `GET /audit-logs/export.csv`(P1, 스트리밍, B-34)

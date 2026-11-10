@@ -8,7 +8,7 @@ import {
   type AuditTargetType,
 } from '@qa/shared';
 import { TargetError } from '@qa/store';
-import { and, desc, eq, gte, lt, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, sql, type SQL } from 'drizzle-orm';
 import { ApiError } from '../common/api-error.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { APP_CONFIG } from '../config/config.module.js';
@@ -198,7 +198,11 @@ export class AuditService implements OnModuleInit {
     if (query.from !== undefined) conds.push(gte(auditLogs.at, query.from));
     if (query.to !== undefined) conds.push(lt(auditLogs.at, query.to));
     if (query.userId !== undefined) conds.push(eq(auditLogs.userId, query.userId));
-    if (query.username !== undefined) conds.push(eq(auditLogs.username, query.username));
+    // 아이디를 정확히 몰라도 찾도록 부분 일치로 건다. 아이디에는 `_`가 올 수 있어 LIKE 글자를 이스케이프한다
+    if (query.username !== undefined) {
+      const pattern = `%${query.username.replace(/[!%_]/g, (c) => `!${c}`)}%`;
+      conds.push(sql`${auditLogs.username} LIKE ${pattern} ESCAPE '!'`);
+    }
     if (query.schedulerId !== undefined) conds.push(eq(auditLogs.schedulerId, query.schedulerId));
     if (query.action !== undefined) conds.push(eq(auditLogs.action, query.action));
     if (query.result !== undefined) conds.push(eq(auditLogs.result, query.result));

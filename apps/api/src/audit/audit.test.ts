@@ -247,6 +247,10 @@ describe('조회 API', () => {
       { action: 'auth.login', username: 'ghost' },
     ]);
     expect(actions(await logs(app, admin, '?username=ghost'))).toEqual(['auth.login']);
+    // 아이디 일부로도 찾고(부분 일치), LIKE 글자(`_`, `%`)는 글자 그대로 본다
+    expect(actions(await logs(app, admin, '?username=hos'))).toEqual(['auth.login']);
+    expect(actions(await logs(app, admin, '?username=g_ost'))).toEqual([]);
+    expect(actions(await logs(app, admin, '?username=%25'))).toEqual([]);
     expect(actions(await logs(app, admin, '?userId=1'))).toEqual(['user.create', 'auth.login']);
     expect(actions(await logs(app, admin, `?from=${t0 + 1}&to=${t0 + 60_001}`))).toEqual([
       'auth.login',

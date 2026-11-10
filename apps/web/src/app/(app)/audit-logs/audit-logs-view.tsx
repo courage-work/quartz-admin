@@ -8,7 +8,7 @@ import { type FormEvent, useState } from 'react';
 import { FormAlert } from '@/components/form/form-alert';
 import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
 import { type FilterChip, FilterChips } from '@/components/list/filter-chips';
-import { ListSearch } from '@/components/list/list-search';
+import { ServerSearch } from '@/components/list/server-search';
 import { PageHeader } from '@/components/shell/page-header';
 import { TableEmpty } from '@/components/table-empty';
 import { TableFrame } from '@/components/table-frame';
@@ -261,7 +261,6 @@ const AUDIT_CODEC: UrlCodec<AuditFilter> = {
 /** 감사 로그 목록 (PRD FR-AUD-03). 최신 기록부터 50건씩 불러온다(기본 정렬: 최신순) */
 export function AuditLogsView() {
   const [filter, setFilter] = useUrlState(AUDIT_CODEC);
-  const [q, setQ] = useState(filter.username);
   const logs = useInfiniteQuery({
     queryKey: ['audit-logs', filter],
     queryFn: ({ pageParam, signal }) =>
@@ -273,10 +272,7 @@ export function AuditLogsView() {
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const items = logs.data?.pages.flatMap((p) => p.items) ?? [];
-  const apply = (next: AuditFilter) => {
-    setFilter(next);
-    setQ(next.username);
-  };
+  const apply = (next: AuditFilter) => setFilter(next);
   const filtered = activeFilterCount(filter) > 0 || filter.username !== '';
 
   return (
@@ -287,15 +283,10 @@ export function AuditLogsView() {
       />
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-end gap-2">
-          <ListSearch
-            label="검색(사용자 아이디, 정확히 일치)"
-            value={q}
-            onChange={(v) => {
-              setQ(v);
-              if (v === '' && filter.username !== '') setFilter({ ...filter, username: '' });
-            }}
-            onSubmit={() => setFilter({ ...filter, username: q.trim().toLowerCase() })}
-            className="w-full max-w-md"
+          <ServerSearch
+            label="검색(사용자 아이디)"
+            value={filter.username}
+            onApply={(q) => setFilter({ ...filter, username: q.toLowerCase() })}
           />
           <FilterPopover value={filter} onApply={apply} />
         </div>

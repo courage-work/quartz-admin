@@ -102,15 +102,18 @@ export function RefreshControls({
           </SelectContent>
         </Select>
       </div>
-      <Button variant="outline" onClick={onRefresh} aria-busy={busy}>
-        {busy ? (
-          <Spinner data-icon="inline-start" />
-        ) : (
-          <RefreshCwIcon data-icon="inline-start" aria-hidden />
-        )}
-        새로고침
-      </Button>
-      {children}
+      {/* 좁은 화면에서 설정 버튼만 혼자 다음 줄로 떨어지지 않게 새로고침 버튼과 묶는다 */}
+      <div className="flex items-center gap-2">
+        <Button variant="outline" onClick={onRefresh} aria-busy={busy}>
+          {busy ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <RefreshCwIcon data-icon="inline-start" aria-hidden />
+          )}
+          새로고침
+        </Button>
+        {children}
+      </div>
     </div>
   );
 }
