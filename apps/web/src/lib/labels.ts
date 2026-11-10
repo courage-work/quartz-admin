@@ -17,6 +17,13 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   'scheduler.update': '스케줄러 설정 변경',
   'scheduler.delete': '스케줄러 등록 해제',
   'trigger.pause': '트리거 일시정지',
+  'trigger.resume': '트리거 재개',
+  'job.pause': '잡 일시정지',
+  'job.resume': '잡 재개',
+  'trigger_group.pause': '트리거 그룹 일시정지',
+  'trigger_group.resume': '트리거 그룹 재개',
+  'job_group.pause': '잡 그룹 일시정지',
+  'job_group.resume': '잡 그룹 재개',
 };
 
 export function auditActionLabel(action: string): string {

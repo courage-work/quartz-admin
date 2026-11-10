@@ -1,18 +1,21 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import type {
-  AuditAction,
-  CommandNoticeDto,
-  CommandPreviewResponse,
-  CommandRequest,
-  CommandResultDto,
-  CommandType,
-  QuartzCommand,
+import {
+  commandScope,
+  type AuditAction,
+  type AuditTargetType,
+  type CommandNoticeDto,
+  type CommandPreviewResponse,
+  type CommandRequest,
+  type CommandResultDto,
+  type CommandScope,
+  type CommandType,
+  type QuartzCommand,
 } from '@qa/shared';
 import {
   executeCommand,
+  expectedOf,
   isCommandRejection,
   previewCommand,
-  stateRefs,
   type CommandRejection,
   type SchedulerCommandContext,
 } from '@qa/store';
@@ -32,6 +35,21 @@ import { KeyedMutex } from './keyed-mutex.js';
 /** 명령 종류별 감사 작업 이름. 명령을 추가하면 타입 오류로 빠진 항목을 알려 준다 */
 const AUDIT_ACTION: Record<CommandType, AuditAction> = {
   pauseTrigger: 'trigger.pause',
+  resumeTrigger: 'trigger.resume',
+  pauseJob: 'job.pause',
+  resumeJob: 'job.resume',
+  pauseTriggerGroup: 'trigger_group.pause',
+  resumeTriggerGroup: 'trigger_group.resume',
+  pauseJobGroup: 'job_group.pause',
+  resumeJobGroup: 'job_group.resume',
+};
+
+/** 명령 대상 단위별 감사 대상 종류 */
+const AUDIT_TARGET_TYPE: Record<CommandScope, AuditTargetType> = {
+  trigger: 'trigger',
+  job: 'job',
+  triggerGroup: 'trigger_group',
+  jobGroup: 'job_group',
 };
 
 /** 실행할 수 없는 접속이면 이유를 돌려준다 (FR-CTL-00a, FR-CON-04) */
@@ -53,7 +71,10 @@ export function blockedReason(connection: ConnectionRow): CommandNoticeDto | nul
 
 /** 감사 기록의 대상. 잡·트리거 키는 이름이 바뀌어도 기록이 남도록 값 그대로 적는다 */
 function auditTarget(scheduler: SchedulerRow, command: QuartzCommand): Record<string, unknown> {
-  return { schedName: scheduler.schedName, trigger: command.trigger };
+  const { schedName } = scheduler;
+  if ('trigger' in command) return { schedName, trigger: command.trigger };
+  if ('job' in command) return { schedName, job: command.job };
+  return { schedName, group: command.group };
 }
 
 function rejectionError(err: CommandRejection): ApiError {
@@ -70,7 +91,12 @@ function rejectionError(err: CommandRejection): ApiError {
   );
 }
 
-interface CommandScope {
+/** 거부된 명령의 감사 기록 `after`. 상태 충돌이면 최신 상태, 그 밖에는 해당 트리거 */
+function rejectionAfter(err: CommandRejection): Record<string, unknown> {
+  return Array.isArray(err.current) ? { triggers: err.current } : { ...err.current };
+}
+
+interface Scope {
   scheduler: SchedulerRow;
   connection: ConnectionRow;
   ctx: SchedulerCommandContext;
@@ -120,11 +146,12 @@ export class QuartzCommandService {
         connectionName: connection.name,
         envLabel: connection.envLabel,
       },
-      targets: preview.targets,
-      expected: stateRefs(preview.targets),
-      changes: preview.changes,
-      warnings: preview.warnings,
-      blocked: blockedReason(connection),
+      targets: preview.subject.triggers,
+      expected: expectedOf(preview.subject),
+      changes: preview.plan.changes,
+      groupChanges: preview.plan.groupChanges,
+      warnings: preview.plan.warnings,
+      blocked: blockedReason(connection) ?? preview.plan.rejection,
     };
   }
 
@@ -139,7 +166,7 @@ export class QuartzCommandService {
     const entry: AuditEntry = {
       actor,
       action: AUDIT_ACTION[command.type],
-      targetType: 'trigger',
+      targetType: AUDIT_TARGET_TYPE[commandScope(command)],
       target: auditTarget(scheduler, command),
       connectionId: connection.id,
       schedulerId: scheduler.id,
@@ -159,21 +186,27 @@ export class QuartzCommandService {
         const out = await this.targets.withConnection(connection, (conn) =>
           executeCommand(conn, ctx, command, expected),
         );
-        const after = stateRefs(out.after);
-        pending.succeed({ after: { triggers: after, changes: out.changes } });
+        const after = expectedOf(out.after);
+        const changed = out.changes.length + out.groupChanges.length > 0;
+        pending.succeed({
+          after: { ...after, changes: out.changes, groupChanges: out.groupChanges },
+        });
         this.logger.log(
-          `제어 명령 성공 (스케줄러 ${scheduler.id}, ${command.type}): 변경 ${out.changes.length}건`,
+          `제어 명령 성공 (스케줄러 ${scheduler.id}, ${command.type}): ` +
+            `트리거 ${out.changes.length}건, 그룹 ${out.groupChanges.length}건`,
         );
-        if (out.changes.length > 0) {
+        if (changed) {
           // 대시보드 카드(스냅샷)도 바로 다시 읽게 한다 (NFR-UX-03)
           this.events.emit({ type: 'upsert', schedulerId: scheduler.id, immediate: true });
         }
         return {
           dbNow: out.dbNow,
           command,
-          changed: out.changes.length > 0,
+          changed,
           changes: out.changes,
-          before: stateRefs(out.before),
+          groupChanges: out.groupChanges,
+          warnings: out.warnings,
+          before: expectedOf(out.before),
           after,
           auditId: pending.id,
         };
@@ -181,7 +214,7 @@ export class QuartzCommandService {
         const failure = isCommandRejection(err) ? rejectionError(err) : err;
         pending.fail(
           failure,
-          isCommandRejection(err) && err.current ? { after: { triggers: err.current } } : undefined,
+          isCommandRejection(err) && err.current ? { after: rejectionAfter(err) } : undefined,
         );
         this.logger.warn(
           `제어 명령 실패 (스케줄러 ${scheduler.id}, ${command.type}): ${describeError(failure).code}`,
@@ -191,7 +224,7 @@ export class QuartzCommandService {
     });
   }
 
-  private scope(schedulerId: number): CommandScope {
+  private scope(schedulerId: number): Scope {
     const scheduler = this.connections.requireScheduler(schedulerId);
     const connection = this.connections.require(scheduler.connectionId);
     return { scheduler, connection, ctx: schedulerViewContext(scheduler, connection) };

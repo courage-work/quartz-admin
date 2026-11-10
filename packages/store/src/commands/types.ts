@@ -1,9 +1,11 @@
 import type {
   CommandChangeDto,
+  CommandExpected,
+  CommandGroupChangeDto,
   CommandNoticeDto,
   CommandTargetDto,
   QuartzCommand,
-  TriggerStateRef,
+  TriggerKey,
 } from '@qa/shared';
 import type { TargetConn } from '../adapter.js';
 import type { SchedulerViewContext } from '../views/views.js';
@@ -14,12 +16,32 @@ export type SchedulerCommandContext = SchedulerViewContext;
 /** 명령 대상 트리거. 잠금 안에서 다시 읽은 값이다 */
 export type CommandTarget = CommandTargetDto;
 
+/**
+ * 명령 대상과 계획에 필요한 주변 상태. 핸들러가 읽고, 계획(`plan`)은 이 값만 보고 정한다.
+ */
+export interface CommandSubject {
+  /** 대상 트리거. 그룹·이름 순이다 */
+  triggers: CommandTarget[];
+  /**
+   * 이 명령의 결과에 영향을 주는 그룹 중 `PAUSED_TRIGGER_GRPS`에 있는 것(`_$_ALL_GROUPS_PAUSED_$_` 포함). 이름순.
+   * 화면에서 본 상태와 비교하는 값에 들어간다(FR-CTL-00e)
+   */
+  pausedGroups: string[];
+  /**
+   * 동시 실행 금지로 실행 중인 잡의 키(`그룹\0이름`). 재개할 때 BLOCKED 판정에 쓴다(`JSS.checkBlockedState`).
+   * 재개 명령만 채운다
+   */
+  blockingJobs: ReadonlySet<string>;
+}
+
 /** 명령이 거부된 이유. 대상 DB는 바뀌지 않았다 */
 export type CommandRejectionCode =
   /** 대상이 없음 (404) */
   | 'NOT_FOUND'
   /** 실행 직전 상태가 화면에서 본 상태와 다름 (409, FR-CTL-00e) */
-  | 'STATE_CONFLICT';
+  | 'STATE_CONFLICT'
+  /** 일시정지된 그룹 안의 지난 트리거를 개별로 재개하려 함 (409, TRD §7.4) */
+  | 'RESUME_IN_PAUSED_GROUP';
 
 /**
  * 명령을 실행하지 않고 거부함. 대상 DB 오류(`TargetError`)와 달리 대상 DB는 정상이고 요청이 맞지 않는 경우다.
@@ -31,8 +53,11 @@ export class CommandRejection extends Error {
   constructor(
     readonly code: CommandRejectionCode,
     message: string,
-    /** `STATE_CONFLICT`일 때 잠금 안에서 다시 읽은 최신 상태 */
-    readonly current?: TriggerStateRef[],
+    /**
+     * 거부 근거. `STATE_CONFLICT`면 잠금 안에서 다시 읽은 최신 상태,
+     * `RESUME_IN_PAUSED_GROUP`이면 해당 트리거 키 목록이다
+     */
+    readonly current?: CommandExpected | TriggerKey[],
   ) {
     super(message);
   }
@@ -50,32 +75,31 @@ export interface PlanEnv {
 
 export interface CommandPlan {
   changes: CommandChangeDto[];
+  groupChanges: CommandGroupChangeDto[];
   warnings: CommandNoticeDto[];
+  /**
+   * 실행하면 안 되는 이유. 있으면 미리보기는 차단 사유로 보여 주고, 실행은 대상 DB를 바꾸지 않고 거부한다.
+   * 접속 단위 차단(읽기 전용)은 API가 따로 판정한다
+   */
+  rejection: CommandNoticeDto | null;
 }
 
 /**
  * 명령 하나의 동작 (TRD §7.3). 실행 절차(잠금, 상태 확인, 커밋)는 `executeCommand`가 맡고,
- * 핸들러는 대상을 읽고 바꿀 상태를 정해 적용하는 일만 한다.
+ * 핸들러는 대상을 읽고 바꿀 상태를 정하는 일만 한다. 적용은 공통(`applyPlan`)이다.
  */
 export interface CommandHandler<C extends QuartzCommand = QuartzCommand> {
   readonly type: C['type'];
   /**
-   * 대상 트리거를 읽는다. `lockWaitSec`를 주면 행을 `SELECT … FOR UPDATE`로 잠근다(TRD §7.1 d).
+   * 대상과 주변 상태를 읽는다. `lockWaitSec`를 주면 대상 트리거 행을 `SELECT … FOR UPDATE`로 잠근다(TRD §7.1 d).
    * 대상이 없으면 `CommandRejection('NOT_FOUND')`를 던진다.
    */
-  readTargets(
+  readSubject(
     conn: TargetConn,
     ctx: SchedulerCommandContext,
     command: C,
     lockWaitSec?: number,
-  ): Promise<CommandTarget[]>;
+  ): Promise<CommandSubject>;
   /** 바꿀 상태를 정한다. 대상 DB를 읽지 않는 순수 함수다 */
-  plan(command: C, targets: readonly CommandTarget[], env: PlanEnv): CommandPlan;
-  /** 계획을 적용하고 실제로 바뀐 행 수를 돌려준다. 계획의 변경 수와 다르면 실행기가 되돌린다 */
-  apply(
-    conn: TargetConn,
-    ctx: SchedulerCommandContext,
-    command: C,
-    plan: CommandPlan,
-  ): Promise<number>;
+  plan(command: C, subject: CommandSubject, env: PlanEnv): CommandPlan;
 }

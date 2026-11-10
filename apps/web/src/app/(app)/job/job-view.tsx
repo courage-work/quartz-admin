@@ -18,7 +18,7 @@ import { Code } from '@/components/code';
 import { useCommandDialog } from '@/components/commands/use-command-dialog';
 import { FormAlert } from '@/components/form/form-alert';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
-import { TriggerActions } from '@/components/schedulers/trigger-actions';
+import { JobActions, TriggerActions } from '@/components/schedulers/trigger-actions';
 import { TriggerTable } from '@/components/schedulers/trigger-table';
 import { PageHeader } from '@/components/shell/page-header';
 import { TableEmpty } from '@/components/table-empty';
@@ -265,14 +265,26 @@ export function JobView() {
         title={name ?? '잡'}
         description={s ? <EnvBadge environment={s.connection.envLabel} /> : undefined}
         actions={
-          <RefreshControls
-            dataTime={detail.data?.dbNow}
-            dataTimeLabel="대상 DB 시각"
-            refreshMs={refreshMs}
-            onRefreshMsChange={setRefreshMs}
-            onRefresh={() => void detail.refetch()}
-            refreshing={detail.isFetching}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <RefreshControls
+              dataTime={detail.data?.dbNow}
+              dataTimeLabel="대상 DB 시각"
+              refreshMs={refreshMs}
+              onRefreshMsChange={setRefreshMs}
+              onRefresh={() => void detail.refetch()}
+              refreshing={detail.isFetching}
+            />
+            {detail.data ? (
+              <JobActions
+                job={detail.data.job}
+                buttonLabel="잡 제어"
+                blockedReason={
+                  s ? controlBlockedReason(s.connection) : '스케줄러 정보를 읽는 중입니다'
+                }
+                onCommand={openCommand}
+              />
+            ) : null}
+          </div>
         }
       />
       {body}

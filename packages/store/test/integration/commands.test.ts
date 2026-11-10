@@ -1,4 +1,4 @@
-import type { QuartzCommand, TriggerStateRef } from '@qa/shared';
+import type { CommandExpected, QuartzCommand } from '@qa/shared';
 import type oracledb from 'oracledb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -9,6 +9,7 @@ import {
   acquireTriggerAccess,
   createTableSet,
   executeCommand,
+  expectedOf,
   oracleDialect,
   previewCommand,
   queryDbNowMillis,
@@ -46,6 +47,7 @@ const features = {
 
 /**
  * 제어 명령 프레임워크 (B-17, TRD §7.1~7.3, 부록 A.2 P-01~P-04, A.8 X-01~X-04).
+ * 일시정지와 재개의 나머지 케이스(B-18)는 `pause-resume.test.ts`에 있다.
  * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 Oracle 스키마에 띄운다.
  */
 describe(`제어 명령 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
@@ -73,13 +75,11 @@ describe(`제어 명령 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
   const run = <R>(fn: (c: TargetConn) => Promise<R>) => pools.withConnection(target, fn);
 
   /** 화면처럼 미리보기의 기대 상태를 붙여 실행한다 */
-  const toolRun = (schedName: string, command: QuartzCommand, expected?: TriggerStateRef[]) =>
+  const toolRun = (schedName: string, command: QuartzCommand, expected?: CommandExpected) =>
     run(async (c) => {
       const ctx = ctxFor(schedName);
       const preview = await previewCommand(c, ctx, command);
-      const exp =
-        expected ?? preview.targets.map(({ group, name, state }) => ({ group, name, state }));
-      return executeCommand(c, ctx, command, exp);
+      return executeCommand(c, ctx, command, expected ?? expectedOf(preview.subject));
     });
 
   /** TRIGGER_ACCESS가 풀려 있는지(부록 A.1 공통 사후 조건). 클러스터 노드가 잠깐씩 잡으므로 3초까지 기다린다 */
@@ -251,13 +251,13 @@ describe(`제어 명령 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
     const err: unknown = await toolRun(
       REF_TOOL,
       { type: 'pauseTrigger', trigger: { group: 'x04', name: 't' } },
-      [{ group: 'x04', name: 't', state: 'WAITING' }],
+      { triggers: [{ group: 'x04', name: 't', state: 'WAITING' }], pausedGroups: [] },
     ).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(CommandRejection);
     expect(err).toMatchObject({
       code: 'STATE_CONFLICT',
-      current: [{ group: 'x04', name: 't', state: 'PAUSED' }],
+      current: { triggers: [{ group: 'x04', name: 't', state: 'PAUSED' }], pausedGroups: [] },
     });
     expect(await refTool.client.snapshot(REF_TOOL)).toEqual(before);
     expect(await lockIsFree(REF_TOOL)).toBe(true);
@@ -307,7 +307,7 @@ describe(`제어 명령 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
 
       // 노드가 먼저 다시 넣었으면 'locked'다. 어느 쪽이든 성공해야 한다
       expect(['inserted', 'locked']).toContain(out.lock);
-      expect(out.after[0]?.state).toBe('PAUSED');
+      expect(out.after.triggers[0]?.state).toBe('PAUSED');
       expect((await node1.client.snapshot()).LOCKS).toContainEqual({ LOCK_NAME: 'TRIGGER_ACCESS' });
       await keepsFiring(lockedAt);
       await sleep(2_000);

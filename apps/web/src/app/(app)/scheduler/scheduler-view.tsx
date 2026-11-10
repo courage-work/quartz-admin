@@ -213,7 +213,11 @@ export function SchedulerView() {
           />
         </TabsContent>
         <TabsContent value="jobs">
-          <JobsTab schedulerId={id} refreshMs={refreshMs} />
+          <JobsTab
+            schedulerId={id}
+            refreshMs={refreshMs}
+            blockedReason={controlBlockedReason(s.connection)}
+          />
         </TabsContent>
         <TabsContent value="executing">
           <ExecutingTab schedulerId={id} refreshMs={refreshMs} />
@@ -222,7 +226,11 @@ export function SchedulerView() {
           <NodesTab schedulerId={id} refreshMs={refreshMs} />
         </TabsContent>
         <TabsContent value="paused">
-          <PausedGroupsTab schedulerId={id} refreshMs={refreshMs} />
+          <PausedGroupsTab
+            schedulerId={id}
+            refreshMs={refreshMs}
+            blockedReason={controlBlockedReason(s.connection)}
+          />
         </TabsContent>
       </Tabs>
     </>

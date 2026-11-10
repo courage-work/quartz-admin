@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.17 (한 프로세스 개발 모드 반영) |
+| 문서 버전 | v0.18 (B-18 일시정지·재개 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -31,6 +31,7 @@
 | v0.15 | 2026-11-07 | B-16: §8.1 대시보드 목록·스케줄러 상세 응답 형식과 화면 구성, §8.4 대시보드 응답 시간 확인 결과 추가 |
 | v0.16 | 2026-11-09 | B-17: §7.1에 명령 API(미리보기·실행), 기대 상태 비교 기준(Quartz `getTriggerState` 분류), 사전 검사·감사 기록·오류 코드(`READ_ONLY`, `STATE_CONFLICT`), 구현 위치 추가. §12.1 차등 테스트 도구(기준 인스턴스, 픽스처 SQL, 잠금 점유, 행 스냅샷) 구현 반영 |
 | v0.17 | 2026-11-09 | §2.2에 한 프로세스 개발 모드(`pnpm dev:hmr`, Next 개발 서버를 API에 붙여 같은 포트에서 HMR) 추가, §11.2에 `QA_WEB_DEV` 추가 |
+| v0.18 | 2026-11-10 | B-18: §7.1 명령 형식(일시정지·재개 8종), 기대 상태에 관련 그룹의 일시정지 여부(`pausedGroups`) 추가, 그룹 행 변경(`groupChanges`)·명령별 거부(`RESUME_IN_PAUSED_GROUP`)·경고 코드·감사 작업 종류 추가, 묶음 UPDATE. §7.4 전체 일시정지 중 `resumeTriggerGroup`도 거부 대상임을 명시 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -476,18 +477,20 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| POST | `/schedulers/:id/commands/preview` | `{ command }`. 잠금 없이 대상을 읽어 대상(스케줄러·접속·환경, 트리거와 잡), 바뀔 상태(`changes`), 경고, 차단 사유(`blocked`), 실행에 붙일 `expected`를 돌려준다. 대상 DB를 바꾸지 않고 감사 로그도 남기지 않는다 |
-| POST | `/schedulers/:id/commands` | `{ command, expected }`. 위 절차로 실행하고 `{ dbNow, changed, changes, before, after, auditId }`를 돌려준다 |
+| POST | `/schedulers/:id/commands/preview` | `{ command }`. 잠금 없이 대상을 읽어 대상(스케줄러·접속·환경, 트리거와 잡), 바뀔 트리거 상태(`changes`), 바뀔 그룹 일시정지 행(`groupChanges`), 경고, 차단 사유(`blocked`), 실행에 붙일 `expected`를 돌려준다. 대상 DB를 바꾸지 않고 감사 로그도 남기지 않는다 |
+| POST | `/schedulers/:id/commands` | `{ command, expected }`. 위 절차로 실행하고 `{ dbNow, changed, changes, groupChanges, warnings, before, after, auditId }`를 돌려준다 |
 
-- **명령 형식**: `command`는 `type`으로 나누는 zod 판별 유니온(`commandSchema`)입니다. B-17에는 `pauseTrigger { trigger: { group, name } }`만 있고, B-18~B-21이 이어 붙입니다. 서버는 명령 종류마다 핸들러(`@qa/store` `CommandHandler`: 대상 읽기, 계획, 적용)를 하나씩 둡니다.
+- **명령 형식**: `command`는 `type`으로 나누는 zod 판별 유니온(`commandSchema`)입니다. 일시정지와 재개(B-17, B-18)는 `pauseTrigger`·`resumeTrigger { trigger: { group, name } }`, `pauseJob`·`resumeJob { job: { group, name } }`, `pauseTriggerGroup`·`resumeTriggerGroup`·`pauseJobGroup`·`resumeJobGroup { group }`이고, B-19~B-21이 이어 붙입니다. 서버는 명령 종류마다 핸들러(`@qa/store` `CommandHandler`: 대상 읽기 `readSubject`, 계획 `plan`)를 하나씩 두고, 적용(`applyPlan`)은 공통입니다. 계획은 대상 DB를 읽지 않는 순수 함수라, 대상 읽기가 계획에 필요한 주변 상태(관련 그룹의 일시정지 여부, 동시 실행 금지로 실행 중인 잡)를 함께 읽습니다.
+- **대상이 없을 때**: 트리거·잡이 없으면 404 `NOT_FOUND`입니다. 트리거가 없는 잡은 "변경 없음"이고, 잡이 하나도 없는 잡 그룹은 404입니다. 트리거 그룹은 트리거가 없어도 일시정지하면 그룹 행을 넣으므로(부록 A.4 G-02) 404가 없습니다.
 - **사전 검사(1단계)**: 접속이 읽기 전용이거나 `write_capable`이 true가 아니면(false 또는 아직 감지 전 null) 409 `READ_ONLY`로 거부하고 대상 DB에 연결하지 않습니다. 미리보기는 같은 이유를 `blocked`로 알리고 화면은 실행 버튼과 줄 메뉴의 제어 항목을 끕니다(FR-CTL-00a).
-- **기대 상태 비교(4-d)**: `expected`는 미리보기에서 본 대상 트리거의 `{ group, name, state }` 목록입니다. 잠근 뒤 다시 읽은 대상과 집합이 같고, 트리거마다 상태를 Quartz `JSS.getTriggerState`의 분류(`NORMAL`=WAITING·ACQUIRED 등, `PAUSED`=PAUSED·PAUSED_BLOCKED, `BLOCKED`, `ERROR`, `COMPLETE`)로 바꿨을 때 같아야 합니다. WAITING과 ACQUIRED는 노드가 발화 30초 전부터 수시로 오가는 상태라 같은 것으로 봅니다. 다르면 ROLLBACK하고 409 `STATE_CONFLICT`와 함께 본문 `current`에 최신 상태를 돌려줍니다. 화면은 미리보기를 다시 읽어 보여 주고, 사용자가 다시 실행합니다.
-- **조건부 변경(4-e)**: `UPDATE … SET TRIGGER_STATE = 새 상태 WHERE 키 AND TRIGGER_STATE = 바꾸기 전 상태`입니다. 바뀐 행 수가 계획과 다르면(잠금을 거치지 않은 쓰기) ROLLBACK하고 `STATE_CONFLICT`로 응답합니다. 바뀌는 것이 없는 명령(예: 이미 PAUSED인 트리거 일시정지)은 UPDATE 없이 커밋하고 `changed: false`와 `NO_CHANGE` 경고로 알립니다(부록 A.2 P-04).
+- **기대 상태 비교(4-d)**: `expected`는 `{ triggers, pausedGroups }`입니다. `triggers`는 미리보기에서 본 대상 트리거의 `{ group, name, state }` 목록이고, `pausedGroups`는 명령 결과에 영향을 주는 그룹 중 `PAUSED_TRIGGER_GRPS`에 있던 것(`_$_ALL_GROUPS_PAUSED_$_` 포함)입니다. 재개는 대상 트리거의 그룹과 전체 일시정지 표시, 트리거 그룹 명령은 그 그룹을 보고, 그 밖의 일시정지 명령은 결과에 영향이 없어 비워 둡니다. 그룹 집합이 같아야 하고, 트리거는 잠근 뒤 다시 읽은 대상과 집합이 같고, 트리거마다 상태를 Quartz `JSS.getTriggerState`의 분류(`NORMAL`=WAITING·ACQUIRED 등, `PAUSED`=PAUSED·PAUSED_BLOCKED, `BLOCKED`, `ERROR`, `COMPLETE`)로 바꿨을 때 같아야 합니다. WAITING과 ACQUIRED는 노드가 발화 30초 전부터 수시로 오가는 상태라 같은 것으로 봅니다. 다르면 ROLLBACK하고 409 `STATE_CONFLICT`와 함께 본문 `current`에 최신 상태를 돌려줍니다. 화면은 미리보기를 다시 읽어 보여 주고, 사용자가 다시 실행합니다.
+- **조건부 변경(4-e)**: `UPDATE … SET TRIGGER_STATE = 새 상태 WHERE SCHED_NAME AND TRIGGER_GROUP = ? AND TRIGGER_STATE = 바꾸기 전 상태 AND TRIGGER_NAME IN (…)`입니다. 그룹과 전·후 상태가 같은 트리거를 500개까지 한 문장으로 묶습니다(Oracle IN 목록 상한 1,000). 그룹 명령처럼 대상이 많을 때 잠금을 잡고 있는 시간을 줄이기 위해서입니다. `PAUSED_TRIGGER_GRPS` 행은 계획이 지금 상태를 보고 정하므로(없을 때만 INSERT, 있을 때만 DELETE) 행마다 1이어야 합니다. 바뀐 행 수(트리거 + 그룹 행)가 계획과 다르면(잠금을 거치지 않은 쓰기) ROLLBACK하고 `STATE_CONFLICT`로 응답합니다. 바뀌는 것이 없는 명령(예: 이미 PAUSED인 트리거 일시정지)은 UPDATE 없이 커밋하고 `changed: false`와 `NO_CHANGE` 경고로 알립니다(부록 A.2 P-04).
 - **잠금 행 INSERT**: Oracle은 다른 세션이 커밋하지 않은 같은 키를 INSERT하면 그 세션이 끝날 때까지 기다립니다. Quartz의 잠금 행 INSERT는 짧은 트랜잭션이고, 기다림은 커넥션의 조회 제한(10초)에 묶입니다.
 - **직렬화(2단계)**: 프로세스 안 키별 뮤텍스(`KeyedMutex`)입니다. 같은 스케줄러의 명령은 들어온 순서대로 하나씩 실행하고, 앞 명령이 실패해도 다음 명령은 실행합니다.
-- **감사 기록**: 작업 종류는 명령마다 하나(`trigger.pause`), 대상 종류는 `trigger`, 대상은 SCHED_NAME과 트리거 키, `before`는 요청(`command`, `expected`), `after`는 변경 후 상태와 바뀐 목록입니다. `STATE_CONFLICT`면 `after`에 최신 상태를 남깁니다. 사전 검사에서 거부한 요청도 실패로 남깁니다. 요청 형식 검증(400)에서 막힌 요청은 남기지 않습니다(§10).
+- **명령별 거부와 경고**: 계획이 실행하면 안 되는 이유(`rejection`)를 내면 미리보기는 `blocked`로 보여 주고, 실행은 대상 DB를 바꾸지 않고 409로 거부합니다. 지금은 `RESUME_IN_PAUSED_GROUP`(§7.4)뿐이고 본문 `current`에 해당 트리거 키가 옵니다. 경고 코드는 `NO_CHANGE`, `MISFIRE_DELEGATED`(재개한 트리거 중 실행 시각이 지난 것, §7.4), `NO_NEXT_FIRE_TIME`(재개해도 바뀌지 않는 트리거, 부록 A.3 R-08), `JOB_GROUP_NOT_STORED`(잡 그룹 일시정지는 저장되지 않음, §7.3)이고, 해당 트리거를 앞쪽 20개까지 붙입니다.
+- **감사 기록**: 작업 종류는 명령마다 하나(`trigger.pause`·`trigger.resume`, `job.pause`·`job.resume`, `trigger_group.pause`·`trigger_group.resume`, `job_group.pause`·`job_group.resume`), 대상 종류는 `trigger`·`job`·`trigger_group`·`job_group`, 대상은 SCHED_NAME과 트리거·잡 키 또는 그룹 이름, `before`는 요청(`command`, `expected`), `after`는 변경 후 상태(`triggers`, `pausedGroups`)와 바뀐 목록(`changes`, `groupChanges`)입니다. `STATE_CONFLICT`면 `after`에 최신 상태를, `RESUME_IN_PAUSED_GROUP`이면 해당 트리거를 남깁니다. 사전 검사에서 거부한 요청도 실패로 남깁니다. 요청 형식 검증(400)에서 막힌 요청은 남기지 않습니다(§10).
 - **화면 갱신**: 실행이 성공하면 화면은 결과를 알림(toast)으로 알리고 그 스케줄러의 조회를 모두 다시 읽습니다. 서버는 상태가 바뀌었으면 감시 루프에 즉시 감시를 요청해 대시보드 카드도 갱신합니다(NFR-UX-03).
-- **구현**: 실행 절차 4단계는 `@qa/store`의 `commands/`(`executeCommand`, `previewCommand`, `acquireTriggerAccess`, 핸들러), 1·2·3·5단계는 `apps/api/src/commands/`(`QuartzCommandService`)입니다. 화면은 공통 확인 대화상자(`components/commands/command-dialog.tsx`)와 트리거 줄 메뉴(`components/schedulers/trigger-actions.tsx`)입니다.
+- **구현**: 실행 절차 4단계는 `@qa/store`의 `commands/`(`executeCommand`, `previewCommand`, `acquireTriggerAccess`, 핸들러 `pause-resume.ts`, 공통 읽기·계획·적용 `triggers.ts`), 1·2·3·5단계는 `apps/api/src/commands/`(`QuartzCommandService`)입니다. 화면은 공통 확인 대화상자(`components/commands/command-dialog.tsx`)와 제어 메뉴(`components/commands/control-menu.tsx`, 트리거·잡·그룹용은 `components/schedulers/trigger-actions.tsx`)입니다. 제어 메뉴는 트리거 표의 줄, 잡 목록의 줄, 잡 상세 머리, 트리거·잡 탭에서 그룹 필터를 골랐을 때 필터 옆에 있고, 일시정지 그룹 탭은 줄마다 재개 버튼을 둡니다.
 
 ### 7.2 잠금 규약과 동시성 근거
 
@@ -580,7 +583,7 @@ MisfireHandler는 `storeTrigger(…, forceState=false)`로 저장하므로 그�
 
 - 거부 조건: 재개 대상 트리거의 그룹이 `PAUSED_TRIGGER_GRPS`에 있거나 `_$_ALL_GROUPS_PAUSED_$_`가 있고, NEXT_FIRE_TIME이 dbNow보다 과거. 시계 차이 때문에 임계값 경계를 정확히 판정할 수 없으므로 "지났는지"만 봅니다.
 - 오류 코드 `RESUME_IN_PAUSED_GROUP`(409). `resumeJob`, `resumeJobGroup`은 대상 중 하나라도 해당하면 전체를 거부하고, 미리보기에서 해당 트리거 목록과 "그룹을 먼저 재개하세요"를 보여줍니다.
-- `resumeTriggerGroup`과 `resumeAll`은 그룹 행을 먼저 지우므로 해당하지 않습니다.
+- `resumeTriggerGroup`은 그룹 행을 먼저 지우므로 그룹 행 때문에는 거부하지 않습니다. 다만 `_$_ALL_GROUPS_PAUSED_$_`가 남아 있으면 MisfireHandler가 그룹 행을 다시 넣고 PAUSED로 되돌리므로(§7.3 "트리거 저장 시 상태 결정") 같은 조건으로 거부합니다. `resumeAll`(B-23)은 전체 표시도 지우므로 해당하지 않습니다.
 
 화면에는 "재개됨. 지난 실행은 Quartz 노드가 misfire 정책에 따라 최대 1분(misfireThreshold) 안에 처리합니다"라고 안내합니다. PRD FR-CTL-04에 반영했습니다(§13 제안 1은 PRD v0.3, 제안 7은 PRD v0.5).
 

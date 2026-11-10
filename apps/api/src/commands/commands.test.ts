@@ -61,11 +61,13 @@ const TABLES = [
 ];
 
 /**
- * 트리거 하나를 가진 가짜 Oracle 대상. UPDATE가 상태를 바꾸고, 커밋하지 않고 되돌리면 원래대로 돌아간다.
+ * 트리거 하나(그룹 `g`)를 가진 가짜 Oracle 대상. `nft`는 NEXT_FIRE_TIME, `pausedGroups`는 PAUSED_TRIGGER_GRPS 행이다. UPDATE가 상태를 바꾸고, 커밋하지 않고 되돌리면 원래대로 돌아간다.
  * 잠금 행을 잡은 트랜잭션 수를 세어 직렬화를 확인한다.
  */
 class FakeTarget {
   committed: string | null = 'WAITING';
+  nft = DB_NOW + 60_000;
+  pausedGroups: string[] = [];
   writes = 0;
   lockDelayMs = 0;
   lockError: TargetError | undefined;
@@ -79,8 +81,10 @@ class FakeTarget {
 
   private conn(): TargetConn {
     // 커밋하지 않은 변경. 없으면 커밋된 값을 읽는다(풀이 커넥션을 다시 써도 테스트가 바꾼 값을 본다)
-    let dirty: { state: string | null } | null = null;
+    let dirty: { state: string | null; pausedGroups: string[] } | null = null;
     const current = () => (dirty ? dirty.state : this.committed);
+    const groups = () => (dirty ? dirty.pausedGroups : this.pausedGroups);
+    const touch = () => (dirty ??= { state: this.committed, pausedGroups: [...this.pausedGroups] });
     let locked = false;
     const release = () => {
       if (locked) this.inLock--;
@@ -101,23 +105,41 @@ class FakeTarget {
           await new Promise((r) => setTimeout(r, this.lockDelayMs));
           return [{ L: 'TRIGGER_ACCESS' }] as Row[] as R[];
         }
+        if (sql.includes('QRTZ_PAUSED_TRIGGER_GRPS')) {
+          return groups().map((g) => ({ G: g })) as Row[] as R[];
+        }
+        if (sql.includes('QRTZ_FIRED_TRIGGERS')) return [];
+        if (sql.includes('QRTZ_JOB_DETAILS')) return [{ C: 0 }] as Row[] as R[];
         if (sql.includes('QRTZ_TRIGGERS')) {
           const state = current();
           const rows: Row[] =
-            state === null ? [] : [{ G: 'g', N: 't', JG: 'jg', JN: 'j', ST: state }];
+            state === null ? [] : [{ G: 'g', N: 't', JG: 'jg', JN: 'j', ST: state, NFT: this.nft }];
           return rows as R[];
         }
         throw new Error(`예상하지 못한 SQL: ${sql}`);
       },
-      execute: (_sql: string, binds: readonly BindValue[] = []) => {
+      execute: (sql: string, binds: readonly BindValue[] = []) => {
         this.writes++;
-        const [to, , , , from] = binds;
+        if (sql.startsWith('INSERT INTO "QUARTZ"."QRTZ_PAUSED_TRIGGER_GRPS"')) {
+          touch().pausedGroups.push(binds[1] as string);
+          return Promise.resolve(1);
+        }
+        if (sql.startsWith('DELETE FROM "QUARTZ"."QRTZ_PAUSED_TRIGGER_GRPS"')) {
+          const d = touch();
+          const before = d.pausedGroups.length;
+          d.pausedGroups = d.pausedGroups.filter((g) => g !== binds[1]);
+          return Promise.resolve(before - d.pausedGroups.length);
+        }
+        const [to, , , from] = binds;
         if (current() !== from) return Promise.resolve(0);
-        dirty = { state: to as string };
+        touch().state = to as string;
         return Promise.resolve(1);
       },
       commit: () => {
-        if (dirty) this.committed = dirty.state;
+        if (dirty) {
+          this.committed = dirty.state;
+          this.pausedGroups = dirty.pausedGroups;
+        }
         dirty = null;
         release();
         return Promise.resolve();
@@ -134,6 +156,11 @@ class FakeTarget {
 }
 
 const PAUSE: QuartzCommand = { type: 'pauseTrigger', trigger: { group: 'g', name: 't' } };
+const RESUME: QuartzCommand = { type: 'resumeTrigger', trigger: { group: 'g', name: 't' } };
+const expected = (state: string, pausedGroups: string[] = []) => ({
+  triggers: [{ group: 'g', name: 't', state }],
+  pausedGroups,
+});
 
 describe('제어 명령 API (TRD §7.1)', () => {
   let t: TestApp;
@@ -242,9 +269,19 @@ describe('제어 명령 API (TRD §7.1)', () => {
         connectionName: 'c',
         envLabel: 'prod',
       },
-      targets: [{ group: 'g', name: 't', jobGroup: 'jg', jobName: 'j', state: 'WAITING' }],
-      expected: [{ group: 'g', name: 't', state: 'WAITING' }],
+      targets: [
+        {
+          group: 'g',
+          name: 't',
+          jobGroup: 'jg',
+          jobName: 'j',
+          state: 'WAITING',
+          nextFireTime: DB_NOW + 60_000,
+        },
+      ],
+      expected: { triggers: [{ group: 'g', name: 't', state: 'WAITING' }], pausedGroups: [] },
       changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
+      groupChanges: [],
       warnings: [],
       blocked: null,
     } satisfies CommandPreviewResponse);
@@ -270,8 +307,8 @@ describe('제어 명령 API (TRD §7.1)', () => {
       dbNow: DB_NOW,
       changed: true,
       changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
-      before: [{ group: 'g', name: 't', state: 'WAITING' }],
-      after: [{ group: 'g', name: 't', state: 'PAUSED' }],
+      before: { triggers: [{ group: 'g', name: 't', state: 'WAITING' }], pausedGroups: [] },
+      after: { triggers: [{ group: 'g', name: 't', state: 'PAUSED' }], pausedGroups: [] },
     });
     expect(fake.committed).toBe('PAUSED');
 
@@ -287,7 +324,9 @@ describe('제어 명령 API (TRD §7.1)', () => {
       before: { command: PAUSE, expected: preview.expected },
       after: {
         triggers: [{ group: 'g', name: 't', state: 'PAUSED' }],
+        pausedGroups: [],
         changes: result.changes,
+        groupChanges: [],
       },
     });
   });
@@ -299,20 +338,20 @@ describe('제어 명령 API (TRD §7.1)', () => {
       .send(
         'post',
         `/schedulers/${id}/commands`,
-        { command: PAUSE, expected: [{ group: 'g', name: 't', state: 'WAITING' }] },
+        { command: PAUSE, expected: expected('WAITING') },
         cookie,
       )
       .expect(409);
     expect(res.body).toMatchObject({
       code: 'STATE_CONFLICT',
-      current: [{ group: 'g', name: 't', state: 'PAUSED' }],
+      current: expected('PAUSED'),
     });
     expect(fake.writes).toBe(0);
     const [log] = (await audits()).items;
     expect(log).toMatchObject({
       result: 'failure',
       errorCode: 'STATE_CONFLICT',
-      after: { triggers: [{ group: 'g', name: 't', state: 'PAUSED' }] },
+      after: expected('PAUSED'),
     });
   });
 
@@ -323,7 +362,7 @@ describe('제어 명령 API (TRD §7.1)', () => {
       .send(
         'post',
         `/schedulers/${id}/commands`,
-        { command: PAUSE, expected: [{ group: 'g', name: 't', state: 'WAITING' }] },
+        { command: PAUSE, expected: expected('WAITING') },
         cookie,
       )
       .expect(409);
@@ -385,12 +424,78 @@ describe('제어 명령 API (TRD §7.1)', () => {
       t.send(
         'post',
         `/schedulers/${id}/commands`,
-        { command: PAUSE, expected: [{ group: 'g', name: 't', state }] },
+        { command: PAUSE, expected: expected(state) },
         cookie,
       );
     const [first, second] = await Promise.all([send('WAITING'), send('WAITING')]);
     // 하나가 먼저 PAUSED로 바꾸므로, 다른 하나는 바뀐 상태를 보고 STATE_CONFLICT로 끝난다
     expect([first.status, second.status].sort()).toEqual([200, 409]);
     expect(fake.maxInLock).toBe(1);
+  });
+
+  it('그룹 일시정지 안의 지난 트리거 재개는 미리보기에서 막고 실행은 409로 거부한다 (TRD §7.4)', async () => {
+    const id = await register('c');
+    fake.committed = 'PAUSED';
+    fake.nft = DB_NOW - 60_000;
+    fake.pausedGroups = ['g'];
+    const preview = (
+      await t
+        .send('post', `/schedulers/${id}/commands/preview`, { command: RESUME }, cookie)
+        .expect(200)
+    ).body as CommandPreviewResponse;
+    expect(preview.blocked).toMatchObject({
+      code: 'RESUME_IN_PAUSED_GROUP',
+      triggers: [{ group: 'g', name: 't' }],
+    });
+    expect(preview.expected).toEqual(expected('PAUSED', ['g']));
+
+    const res = await t
+      .send(
+        'post',
+        `/schedulers/${id}/commands`,
+        { command: RESUME, expected: preview.expected },
+        cookie,
+      )
+      .expect(409);
+    expect(res.body).toMatchObject({
+      code: 'RESUME_IN_PAUSED_GROUP',
+      current: [{ group: 'g', name: 't' }],
+    });
+    expect(fake.committed).toBe('PAUSED');
+    const logs = (await t.get('/audit-logs?action=trigger.resume', cookie).expect(200))
+      .body as AuditLogPage;
+    expect(logs.items[0]).toMatchObject({
+      result: 'failure',
+      errorCode: 'RESUME_IN_PAUSED_GROUP',
+      targetType: 'trigger',
+    });
+  });
+
+  it('트리거 그룹 일시정지는 그룹 행을 넣고 그룹 대상으로 감사 로그를 남긴다', async () => {
+    const id = await register('c');
+    const command: QuartzCommand = { type: 'pauseTriggerGroup', group: 'g' };
+    const preview = (
+      await t.send('post', `/schedulers/${id}/commands/preview`, { command }, cookie).expect(200)
+    ).body as CommandPreviewResponse;
+    expect(preview.groupChanges).toEqual([{ group: 'g', paused: true }]);
+
+    const result = (
+      await t
+        .send('post', `/schedulers/${id}/commands`, { command, expected: preview.expected }, cookie)
+        .expect(200)
+    ).body as CommandResultDto;
+    expect(result).toMatchObject({
+      changed: true,
+      groupChanges: [{ group: 'g', paused: true }],
+      after: expected('PAUSED', ['g']),
+    });
+    expect(fake.pausedGroups).toEqual(['g']);
+    const logs = (await t.get('/audit-logs?action=trigger_group.pause', cookie).expect(200))
+      .body as AuditLogPage;
+    expect(logs.items[0]).toMatchObject({
+      result: 'success',
+      targetType: 'trigger_group',
+      target: { schedName: 'S', group: 'g' },
+    });
   });
 });

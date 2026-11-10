@@ -55,6 +55,11 @@ export const API_ERROR_CODES = [
   'READ_ONLY',
   /** 실행 직전 대상 상태가 화면에서 본 상태와 다름. 본문 `current`에 최신 상태가 온다 (409, FR-CTL-00e) */
   'STATE_CONFLICT',
+  /**
+   * 일시정지된 그룹(또는 전체 일시정지) 안의 지난 트리거를 개별로 재개하려 함. Quartz와 같은 결과를 보장할 수 없어
+   * 거부한다. 본문 `current`에 해당 트리거가 온다 (409, TRD §7.4)
+   */
+  'RESUME_IN_PAUSED_GROUP',
   /** 요청이 너무 많음 (429) */
   'RATE_LIMITED',
   /** 처리하지 못한 서버 오류 (500) */
@@ -68,7 +73,10 @@ export interface ApiErrorBody {
   message: string;
   /** 검증 실패 시 필드별 원인 */
   details?: { path: string; message: string }[];
-  /** `STATE_CONFLICT`일 때 대상의 최신 상태. 제어 명령은 `TriggerStateRef[]`다 */
+  /**
+   * 제어 명령이 거부됐을 때 대상의 최신 상태. `STATE_CONFLICT`면 `CommandExpected`,
+   * `RESUME_IN_PAUSED_GROUP`이면 해당 트리거 키 목록(`TriggerKey[]`)이다
+   */
   current?: unknown;
 }
 
