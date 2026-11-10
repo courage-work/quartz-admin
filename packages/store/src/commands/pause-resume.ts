@@ -39,7 +39,7 @@ type Where = (b: Binds) => string;
 
 const NO_JOBS: ReadonlySet<string> = new Set();
 
-const triggerWhere =
+export const triggerWhere =
   (group: string, name: string): Where =>
   (b) =>
     `t.TRIGGER_GROUP = ${b.add(group)} AND t.TRIGGER_NAME = ${b.add(name)}`;
@@ -145,6 +145,7 @@ export const pauseTriggerHandler: CommandHandler<PauseTriggerCommand> = {
         changes: pauseChanges(subject.triggers),
         groupChanges: [],
         inserts: [],
+        scheduleChanges: [],
         warnings: [],
         rejection: null,
       },
@@ -191,6 +192,7 @@ export const pauseJobHandler: CommandHandler<PauseJobCommand> = {
         changes: pauseChanges(subject.triggers),
         groupChanges: [],
         inserts: [],
+        scheduleChanges: [],
         warnings: [],
         rejection: null,
       },
@@ -252,6 +254,7 @@ export const pauseTriggerGroupHandler: CommandHandler<PauseTriggerGroupCommand> 
         changes: pauseChanges(subject.triggers),
         groupChanges: groupPaused ? [] : [{ group: command.group, paused: true }],
         inserts: [],
+        scheduleChanges: [],
         warnings: [],
         rejection: null,
       },
@@ -315,6 +318,7 @@ export const pauseJobGroupHandler: CommandHandler<PauseJobGroupCommand> = {
         changes: pauseChanges(subject.triggers),
         groupChanges: [],
         inserts: [],
+        scheduleChanges: [],
         warnings: [JOB_GROUP_NOT_STORED],
         rejection: null,
       },

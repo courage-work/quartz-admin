@@ -11,7 +11,10 @@ import {
   type NodesResponse,
   type Page,
   type PausedGroupsResponse,
+  type TriggerDetailResponse,
   type TriggerDto,
+  type TriggerKeyQuery,
+  triggerKeyQuerySchema,
   type TriggerListQuery,
   triggerListQuerySchema,
 } from '@qa/shared';
@@ -55,6 +58,15 @@ export class SchedulerViewsController {
     @Query(new ZodPipe(jobKeyQuerySchema)) key: JobKeyQuery,
   ): Promise<JobDetailResponse> {
     return this.views.jobDetail(id, key);
+  }
+
+  /** 트리거 하나 (스케줄 수정 화면). 키에 `/`가 들어갈 수 있어 쿼리로 받는다 */
+  @Get('triggers/detail')
+  triggerDetail(
+    @Param('id', ParseIntPipe) id: number,
+    @Query(new ZodPipe(triggerKeyQuerySchema)) key: TriggerKeyQuery,
+  ): Promise<TriggerDetailResponse> {
+    return this.views.triggerDetail(id, key);
   }
 
   @Get('triggers')

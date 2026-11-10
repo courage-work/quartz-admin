@@ -2,7 +2,9 @@ import type {
   AuditLogPage,
   CommandPreviewResponse,
   CommandResultDto,
+  CronPreviewResponse,
   QuartzCommand,
+  TimeZonesResponse,
 } from '@qa/shared';
 import {
   TargetError,
@@ -15,6 +17,7 @@ import {
 } from '@qa/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ADMIN, createTestApp, type TestApp } from '../auth/test-support.js';
+import { CLOCK } from '../common/clock.js';
 import { QUARTZ_DETECTOR, type QuartzDetector } from '../targets/targets.service.js';
 import { KeyedMutex } from './keyed-mutex.js';
 
@@ -72,6 +75,8 @@ class FakeTarget {
   jobExists = true;
   /** 즉시 실행으로 넣은 TRIGGERS 행의 바인드 값 */
   inserted: BindValue[][] = [];
+  /** 스케줄 수정으로 바꾼 SIMPLE_TRIGGERS 행의 바인드 값 */
+  rescheduled: BindValue[][] = [];
   writes = 0;
   lockDelayMs = 0;
   lockError: TargetError | undefined;
@@ -122,6 +127,36 @@ class FakeTarget {
         if (sql.includes('COUNT(*)') && sql.includes('QRTZ_TRIGGERS')) {
           return [{ C: 0 }] as Row[] as R[];
         }
+        if (sql.includes('LEFT JOIN') && sql.includes('QRTZ_TRIGGERS')) {
+          const state = current();
+          const rows: Row[] =
+            state === null
+              ? []
+              : [
+                  {
+                    G: 'g',
+                    N: 't',
+                    JG: 'jg',
+                    JN: 'j',
+                    D: null,
+                    TY: 'SIMPLE',
+                    ST: state,
+                    NFT: this.nft,
+                    PFT: -1,
+                    STT: DB_NOW - 86_400_000,
+                    ET: 0,
+                    PR: 5,
+                    MI: 0,
+                    CAL: null,
+                    CE: null,
+                    TZ: null,
+                    RC: -1,
+                    RI: 60_000,
+                    TT: 3,
+                  },
+                ];
+          return rows as R[];
+        }
         if (sql.includes('QRTZ_TRIGGERS')) {
           const state = current();
           const rows: Row[] =
@@ -138,6 +173,13 @@ class FakeTarget {
         }
         if (sql.startsWith('INSERT INTO "QUARTZ"."QRTZ_SIMPLE_TRIGGERS"'))
           return Promise.resolve(1);
+        if (sql.startsWith('UPDATE "QUARTZ"."QRTZ_SIMPLE_TRIGGERS"')) {
+          this.rescheduled.push([...binds]);
+          return Promise.resolve(1);
+        }
+        if (sql.startsWith('UPDATE "QUARTZ"."QRTZ_TRIGGERS" SET NEXT_FIRE_TIME')) {
+          return Promise.resolve(current() === binds.at(-1) ? 1 : 0);
+        }
         if (sql.startsWith('INSERT INTO "QUARTZ"."QRTZ_PAUSED_TRIGGER_GRPS"')) {
           touch().pausedGroups.push(binds[1] as string);
           return Promise.resolve(1);
@@ -301,6 +343,7 @@ describe('제어 명령 API (TRD §7.1)', () => {
       changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
       groupChanges: [],
       inserts: [],
+      scheduleChanges: [],
       warnings: [],
       blocked: null,
     } satisfies CommandPreviewResponse);
@@ -572,5 +615,139 @@ describe('제어 명령 API (TRD §7.1)', () => {
     const logs = (await t.get('/audit-logs?action=job.trigger', cookie).expect(200))
       .body as AuditLogPage;
     expect(logs.items[0]).toMatchObject({ result: 'failure', errorCode: 'NOT_FOUND' });
+  });
+
+  it('SIMPLE 스케줄 수정은 바꾸고 trigger.reschedule로 기록한다. 잘못된 값은 400 INVALID_SCHEDULE (TRD §7.6)', async () => {
+    const id = await register('c');
+    const command: QuartzCommand = {
+      type: 'updateSimpleSchedule',
+      trigger: { group: 'g', name: 't' },
+      repeatIntervalMs: 5_000,
+      repeatCount: 3,
+    };
+    const preview = (
+      await t.send('post', `/schedulers/${id}/commands/preview`, { command }, cookie).expect(200)
+    ).body as CommandPreviewResponse;
+    expect(preview.scheduleChanges).toEqual([
+      {
+        group: 'g',
+        name: 't',
+        from: {
+          kind: 'SIMPLE',
+          repeatIntervalMs: 60_000,
+          repeatCount: -1,
+          timesTriggered: 3,
+          startTime: DB_NOW - 86_400_000,
+          nextFireTime: DB_NOW + 60_000,
+        },
+        to: {
+          kind: 'SIMPLE',
+          repeatIntervalMs: 5_000,
+          repeatCount: 3,
+          timesTriggered: 0,
+          startTime: DB_NOW,
+          nextFireTime: DB_NOW,
+        },
+        upcoming: [DB_NOW, DB_NOW + 5_000, DB_NOW + 10_000, DB_NOW + 15_000],
+      },
+    ]);
+    const result = (
+      await t
+        .send('post', `/schedulers/${id}/commands`, { command, expected: preview.expected }, cookie)
+        .expect(200)
+    ).body as CommandResultDto;
+    expect(result.changed).toBe(true);
+    expect(fake.rescheduled[0]?.slice(0, 3)).toEqual([3, 5_000, 0]);
+    const logs = (await t.get('/audit-logs?action=trigger.reschedule', cookie).expect(200))
+      .body as AuditLogPage;
+    expect(logs.items[0]).toMatchObject({
+      result: 'success',
+      targetType: 'trigger',
+      after: { scheduleChanges: result.scheduleChanges },
+    });
+
+    const bad: QuartzCommand = { ...command, repeatIntervalMs: 0 };
+    const badPreview = (
+      await t
+        .send('post', `/schedulers/${id}/commands/preview`, { command: bad }, cookie)
+        .expect(200)
+    ).body as CommandPreviewResponse;
+    expect(badPreview.blocked).toMatchObject({ code: 'INVALID_SCHEDULE' });
+    const res = await t
+      .send(
+        'post',
+        `/schedulers/${id}/commands`,
+        { command: bad, expected: badPreview.expected },
+        cookie,
+      )
+      .expect(400);
+    expect(res.body).toMatchObject({ code: 'INVALID_SCHEDULE' });
+  });
+
+  it('트리거 상세를 돌려주고 없으면 404', async () => {
+    const id = await register('c');
+    const res = await t.get(`/schedulers/${id}/triggers/detail?group=g&name=t`, cookie).expect(200);
+    expect(res.body).toMatchObject({
+      dbNow: DB_NOW,
+      trigger: { group: 'g', name: 't', type: 'SIMPLE', simple: { repeatIntervalMs: 60_000 } },
+    });
+    fake.committed = null;
+    await t.get(`/schedulers/${id}/triggers/detail?group=g&name=t`, cookie).expect(404);
+  });
+});
+
+describe('cron 미리보기 API (TRD §7.6)', () => {
+  let t: TestApp;
+  let cookie: string;
+  const NOW = Date.UTC(2026, 10, 10, 3, 0, 0);
+
+  beforeEach(async () => {
+    t = await createTestApp({ overrides: [{ provide: CLOCK, useValue: () => NOW }] });
+    cookie = await t.login(ADMIN.username, ADMIN.password);
+  });
+
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it('다음 실행 시각을 계산한다. 식은 대문자로 돌려준다', async () => {
+    const res = await t
+      .send(
+        'post',
+        '/cron/preview',
+        { expression: '0 0 12 ? * mon-fri', timeZone: 'Asia/Seoul' },
+        cookie,
+      )
+      .expect(200);
+    const body = res.body as CronPreviewResponse;
+    expect(body).toMatchObject({ valid: true, expression: '0 0 12 ? * MON-FRI', after: NOW });
+    // 2026-11-10(화) 12:00 KST = 03:00Z는 지금이라 다음은 11일 03:00Z부터 평일 5개
+    expect(body.valid && body.nextFireTimes).toEqual(
+      [11, 12, 13, 16, 17].map((d) => Date.UTC(2026, 10, d, 3)),
+    );
+  });
+
+  it('문법 오류와 알 수 없는 타임존을 알려 준다', async () => {
+    const syntax = (
+      await t.send('post', '/cron/preview', { expression: '0 0 25 * * ?', timeZone: 'UTC' }, cookie)
+    ).body as CronPreviewResponse;
+    expect(syntax).toMatchObject({ valid: false, error: { code: 'RANGE', field: '시' } });
+
+    const zone = (
+      await t.send(
+        'post',
+        '/cron/preview',
+        { expression: '0 0 12 * * ?', timeZone: 'Mars/Olympus' },
+        cookie,
+      )
+    ).body as CronPreviewResponse;
+    expect(zone).toMatchObject({ valid: false, error: { code: 'TIME_ZONE' } });
+  });
+
+  it('고를 수 있는 타임존 목록', async () => {
+    const res = await t.get('/cron/time-zones', cookie).expect(200);
+    const { zones } = res.body as TimeZonesResponse;
+    expect(zones).toContain('Asia/Seoul');
+    expect(zones).toContain('UTC');
   });
 });

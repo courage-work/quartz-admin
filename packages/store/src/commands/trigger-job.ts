@@ -95,6 +95,7 @@ export const triggerJobHandler: CommandHandler<TriggerJobCommand> = {
           description: actor ? `quartz-admin: ${actor}` : 'quartz-admin',
         },
       ],
+      scheduleChanges: [],
       warnings,
       rejection: null,
     };

@@ -60,6 +60,14 @@ export const API_ERROR_CODES = [
    * 거부한다. 본문 `current`에 해당 트리거가 온다 (409, TRD §7.4)
    */
   'RESUME_IN_PAUSED_GROUP',
+  /** 스케줄 값이 잘못됨: cron 문법, 타임존, 반복 값, 시작·종료 시각, 더 이상 발화하지 않음 (400, TRD §7.6) */
+  'INVALID_SCHEDULE',
+  /** 캘린더가 연결된 트리거라 스케줄을 수정할 수 없음 (409, TRD §7.6) */
+  'CALENDAR_ATTACHED',
+  /** COMPLETE 트리거라 스케줄을 수정할 수 없음 (409, TRD §7.6) */
+  'TRIGGER_COMPLETE',
+  /** 트리거 종류가 명령과 맞지 않음 (409) */
+  'TRIGGER_TYPE_MISMATCH',
   /** 요청이 너무 많음 (429) */
   'RATE_LIMITED',
   /** 처리하지 못한 서버 오류 (500) */

@@ -7,6 +7,8 @@ import {
   type CommandNoticeDto,
   type CommandPreviewResponse,
   type CommandResultDto,
+  type CommandScheduleChangeDto,
+  type ScheduleSnapshotDto,
   type QuartzCommand,
 } from '@qa/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -38,7 +40,7 @@ import {
   summarizeChanges,
 } from '@/lib/commands';
 import { formatDateTime } from '@/lib/format';
-import { schedulerKey } from '@/lib/schedulers';
+import { browserTimeZone, formatInterval, isKnownTimeZone, schedulerKey } from '@/lib/schedulers';
 
 /** 그룹·잡 명령이 무엇을 대상으로 하는지 (FR-CTL-00b) */
 function ScopeLine({ command }: { command: QuartzCommand }) {
@@ -79,8 +81,51 @@ function NoticeTriggers({ notice }: { notice: CommandNoticeDto }) {
   );
 }
 
+/** 스케줄 한 시점 값의 한 줄 요약 */
+function scheduleText(s: ScheduleSnapshotDto): string {
+  if (s.kind === 'CRON') return `${s.cronExpression ?? ''} · ${s.timeZone ?? 'JVM 기본 타임존'}`;
+  const count = s.repeatCount === -1 ? '무한 반복' : `${s.repeatCount ?? 0}번 반복`;
+  return `${formatInterval(s.repeatIntervalMs ?? 0)}마다 · ${count}`;
+}
+
+/** 스케줄 수정의 전·후와 다음 실행 시각 (TRD §7.6) */
+function ScheduleChange({ change }: { change: CommandScheduleChangeDto }) {
+  // Intl이 모르는 Java 타임존 ID(EST 등)는 이름만 쓰고 시각은 브라우저 타임존으로만 보여 준다
+  const tzId = change.to.kind === 'CRON' ? (change.to.timeZone ?? undefined) : undefined;
+  // 브라우저 타임존과 같으면 같은 시각을 두 번 쓰지 않는다
+  const timeZone = tzId && tzId !== browserTimeZone() && isKnownTimeZone(tzId) ? tzId : undefined;
+  return (
+    <span className="flex flex-col gap-2">
+      <span className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">지금</span>
+        <span className="font-mono break-all">{scheduleText(change.from)}</span>
+        <span className="text-xs text-muted-foreground">바꿀 스케줄</span>
+        <span className="font-mono font-medium break-all">{scheduleText(change.to)}</span>
+      </span>
+      <span className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">
+          다음 실행{timeZone ? ` (트리거 타임존 ${timeZone})` : ''}
+        </span>
+        <ol className="flex flex-col gap-0.5 tabular-nums">
+          {change.upcoming.map((t) => (
+            <li key={t}>
+              {formatDateTime(t)}
+              {timeZone ? (
+                <span className="text-xs text-muted-foreground">
+                  {' '}
+                  · {formatDateTime(t, timeZone)}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      </span>
+    </span>
+  );
+}
+
 function Summary({ data }: { data: CommandPreviewResponse }) {
-  const { scheduler, targets, changes, groupChanges, inserts, command } = data;
+  const { scheduler, targets, changes, groupChanges, inserts, scheduleChanges, command } = data;
   const single = commandScope(command) === 'trigger';
   const listed = targets.slice(0, COMMAND_TARGETS_LISTED);
   return (
@@ -119,6 +164,16 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
           </span>
         ) : null}
       </dd>
+      {scheduleChanges.length > 0 ? (
+        <>
+          <dt className="text-muted-foreground">스케줄</dt>
+          <dd className="col-span-3 flex flex-col gap-3">
+            {scheduleChanges.map((c) => (
+              <ScheduleChange key={`${c.group}\u0000${c.name}`} change={c} />
+            ))}
+          </dd>
+        </>
+      ) : null}
       <dt className="text-muted-foreground">영향 범위</dt>
       <dd className="col-span-3 flex flex-col gap-2">
         {inserts.map((ins) => (
@@ -175,6 +230,7 @@ export function CommandDialog({
   open,
   onClose,
   returnFocus,
+  onDone,
 }: {
   schedulerId: number;
   command: QuartzCommand;
@@ -182,6 +238,8 @@ export function CommandDialog({
   onClose: () => void;
   /** 닫힌 뒤 포커스를 돌려줄 요소. 메뉴 항목으로 열기 때문에 직접 알려 준다 */
   returnFocus?: () => HTMLElement | null;
+  /** 실행에 성공한 뒤 할 일(수정 화면에서 돌아가기 등) */
+  onDone?: (result: CommandResultDto) => void;
 }) {
   const queryClient = useQueryClient();
   /** 직전 실행이 상태 충돌로 멈췄는지. 다시 실행하면 지운다 */
@@ -216,6 +274,7 @@ export function CommandDialog({
       else toast.info(commandResultMessage(result));
       refreshScheduler();
       onClose();
+      onDone?.(result);
     },
     onError: (err) => {
       if (isApiError(err, 'STATE_CONFLICT')) {

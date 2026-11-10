@@ -5,6 +5,7 @@ import type { DestinationStream } from 'pino';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { CommandsModule } from './commands/commands.module.js';
+import { CronModule } from './cron/cron.module.js';
 import { ApiExceptionFilter } from './common/api-exception.filter.js';
 import { ClockModule } from './common/clock.module.js';
 import { ConnectionsModule } from './connections/connections.module.js';
@@ -44,6 +45,7 @@ export class AppModule {
         MonitorModule,
         ConnectionsModule,
         ViewsModule,
+        CronModule,
         CommandsModule,
       ],
       controllers: [HealthController],

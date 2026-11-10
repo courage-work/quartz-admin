@@ -1,23 +1,36 @@
 'use client';
 
 import type { QuartzCommand, TriggerDto } from '@qa/shared';
-import { PauseIcon, PlayIcon, ZapIcon } from 'lucide-react';
+import { CalendarClockIcon, PauseIcon, PlayIcon, ZapIcon } from 'lucide-react';
 
 import { ControlMenu } from '@/components/commands/control-menu';
-import { canPauseTrigger, canResumeTrigger } from '@/lib/commands';
+import {
+  canPauseTrigger,
+  canResumeTrigger,
+  rescheduleBlockedReason,
+  rescheduleHref,
+} from '@/lib/commands';
 
 type OnCommand = (command: QuartzCommand, returnTo: HTMLElement | null) => void;
 
-/** 트리거 한 줄의 제어 메뉴. 지금 상태에서 바뀌는 것이 없는 항목은 끈다 */
+/**
+ * 트리거 한 줄의 제어 메뉴. 지금 상태에서 바뀌는 것이 없는 항목은 끈다.
+ * 스케줄 수정은 입력이 길어 확인 대화상자 대신 수정 화면으로 간다(DESIGN §8 오버레이 선택).
+ */
 export function TriggerActions({
+  schedulerId,
   trigger,
   blockedReason,
   onCommand,
+  fromJob,
 }: {
+  schedulerId: number;
   trigger: TriggerDto;
   /** 제어할 수 없는 이유. 있으면 모든 항목을 끈다 */
   blockedReason: string | null;
   onCommand: OnCommand;
+  /** 잡 상세에서 열었으면 스케줄 수정 뒤 잡 상세로 돌아온다 */
+  fromJob?: boolean;
 }) {
   const key = { group: trigger.group, name: trigger.name };
   return (
@@ -37,6 +50,16 @@ export function TriggerActions({
           icon: PlayIcon,
           command: { type: 'resumeTrigger', trigger: key },
           disabled: !canResumeTrigger(trigger.state),
+        },
+        {
+          label: '스케줄 수정',
+          icon: CalendarClockIcon,
+          href: rescheduleHref(
+            schedulerId,
+            key,
+            fromJob ? { job: { group: trigger.jobGroup, name: trigger.jobName } } : undefined,
+          ),
+          disabled: rescheduleBlockedReason(trigger) !== null,
         },
       ]}
     />

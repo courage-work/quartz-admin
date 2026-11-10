@@ -2,6 +2,7 @@
 
 import type { QuartzCommand } from '@qa/shared';
 import { ChevronDownIcon, type LucideIcon, MoreHorizontalIcon } from 'lucide-react';
+import Link from 'next/link';
 import { useRef } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -14,13 +15,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-export interface ControlItem {
+interface ControlItemBase {
   label: string;
   icon: LucideIcon;
-  command: QuartzCommand;
-  /** 지금 상태에서 바뀌는 것이 없으면 끈다 */
+  /** 지금 상태에서 바뀌는 것이 없거나 할 수 없으면 끈다 */
   disabled?: boolean;
 }
+
+/** 확인 대화상자를 여는 항목, 또는 입력이 긴 명령(스케줄 수정)의 화면으로 가는 항목 */
+export type ControlItem =
+  | (ControlItemBase & { command: QuartzCommand; href?: never })
+  | (ControlItemBase & { href: string; command?: never });
 
 /**
  * 제어 메뉴. 고르면 확인 대화상자를 연다(FR-CTL-00b). 줄 끝에는 아이콘 버튼(`icon`), 화면 머리나 필터 옆에는
@@ -72,16 +77,34 @@ export function ControlMenu({
             <DropdownMenuSeparator />
           </>
         ) : null}
-        {items.map(({ label: itemLabel, icon: Icon, command, disabled }) => (
-          <DropdownMenuItem
-            key={command.type}
-            disabled={!!blockedReason || disabled}
-            onSelect={() => onCommand(command, button.current)}
-          >
-            <Icon aria-hidden />
-            {itemLabel}
-          </DropdownMenuItem>
-        ))}
+        {items.map((item) => {
+          const { label: itemLabel, icon: Icon } = item;
+          const off = !!blockedReason || item.disabled;
+          return item.href !== undefined ? (
+            <DropdownMenuItem key={item.href} disabled={off} asChild={!off}>
+              {off ? (
+                <>
+                  <Icon aria-hidden />
+                  {itemLabel}
+                </>
+              ) : (
+                <Link href={item.href}>
+                  <Icon aria-hidden />
+                  {itemLabel}
+                </Link>
+              )}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              key={item.command.type}
+              disabled={off}
+              onSelect={() => onCommand(item.command, button.current)}
+            >
+              <Icon aria-hidden />
+              {itemLabel}
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );

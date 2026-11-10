@@ -65,6 +65,13 @@ export const jobKeyQuerySchema = z.object({
 });
 export type JobKeyQuery = z.infer<typeof jobKeyQuerySchema>;
 
+/** `GET /schedulers/:id/triggers/detail`의 쿼리 */
+export const triggerKeyQuerySchema = z.object({
+  group: z.string({ error: '트리거 그룹이 필요합니다' }).min(1).max(NAME_MAX),
+  name: z.string({ error: '트리거 이름이 필요합니다' }).min(1).max(NAME_MAX),
+});
+export type TriggerKeyQuery = z.infer<typeof triggerKeyQuerySchema>;
+
 export interface Page<T> {
   dbNow: number;
   items: T[];
@@ -180,6 +187,12 @@ export type JobDataDto =
   | { format: 'properties'; entries: { key: string; value: string }[] }
   | { format: 'java-serialized'; bytes: number }
   | { format: 'unreadable'; bytes: number };
+
+/** 트리거 하나 (스케줄 수정 화면) */
+export interface TriggerDetailResponse {
+  dbNow: number;
+  trigger: TriggerDto;
+}
 
 export interface JobDetailResponse {
   dbNow: number;

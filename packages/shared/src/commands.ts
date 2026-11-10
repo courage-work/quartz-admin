@@ -1,5 +1,5 @@
 /**
- * 제어 명령 API의 요청 스키마와 응답 타입 (TRD §7.1~7.5, PRD FR-CTL)
+ * 제어 명령 API의 요청 스키마와 응답 타입 (TRD §7.1~7.6, PRD FR-CTL)
  *
  * 화면은 먼저 미리보기(`POST /schedulers/:id/commands/preview`)로 대상과 영향 범위를 받아 확인 대화상자에 보여 주고,
  * 미리보기가 돌려준 `expected`(화면에서 본 대상 상태)를 붙여 실행(`POST /schedulers/:id/commands`)한다.
@@ -94,8 +94,57 @@ export const triggerJobCommandSchema = z.object({
 });
 export type TriggerJobCommand = z.infer<typeof triggerJobCommandSchema>;
 
+/** `CRON_TRIGGERS.CRON_EXPRESSION` 길이(VARCHAR2(120)) */
+export const CRON_EXPRESSION_MAX = 120;
+/** `CRON_TRIGGERS.TIME_ZONE_ID` 길이(VARCHAR2(80)) */
+export const TIME_ZONE_ID_MAX = 80;
+/** `SIMPLE_TRIGGERS.REPEAT_COUNT` 상한(Oracle NUMBER(7)) */
+export const REPEAT_COUNT_MAX = 9_999_999;
+/** `SIMPLE_TRIGGERS.REPEAT_INTERVAL` 상한(Oracle NUMBER(12), ms) */
+export const REPEAT_INTERVAL_MAX = 999_999_999_999;
+
+/** CRON 스케줄 수정 (FR-CTL-06, TRD §7.6): 식과 타임존을 바꾸고 다음 실행 시각을 다시 계산한다 */
+export const updateCronScheduleCommandSchema = z.object({
+  type: z.literal('updateCronSchedule'),
+  trigger: triggerKeySchema,
+  cronExpression: z
+    .string({ error: 'cron 표현식이 필요합니다' })
+    .trim()
+    .min(1, 'cron 표현식이 필요합니다')
+    .max(CRON_EXPRESSION_MAX, `cron 표현식은 ${CRON_EXPRESSION_MAX}자까지입니다`),
+  /** Java TimeZone ID */
+  timeZone: z
+    .string({ error: '타임존이 필요합니다' })
+    .trim()
+    .min(1, '타임존이 필요합니다')
+    .max(TIME_ZONE_ID_MAX),
+});
+export type UpdateCronScheduleCommand = z.infer<typeof updateCronScheduleCommandSchema>;
+
 /**
- * 제어 명령. `type`으로 나눈다. 명령을 추가하는 작업(B-20, B-21)이 여기에 이어 붙인다.
+ * SIMPLE 스케줄 수정 (FR-CTL-07, TRD §7.6): 간격과 반복 횟수를 바꾸고 `startAt`(기본은 대상 DB 현재 시각)부터 다시 시작한다
+ */
+export const updateSimpleScheduleCommandSchema = z.object({
+  type: z.literal('updateSimpleSchedule'),
+  trigger: triggerKeySchema,
+  repeatIntervalMs: z
+    .number({ error: '반복 간격이 필요합니다' })
+    .int('반복 간격은 정수(ms)여야 합니다')
+    .min(0, '반복 간격은 0 이상이어야 합니다')
+    .max(REPEAT_INTERVAL_MAX),
+  /** -1은 무한 반복 */
+  repeatCount: z
+    .number({ error: '반복 횟수가 필요합니다' })
+    .int('반복 횟수는 정수여야 합니다')
+    .min(-1, '반복 횟수는 0 이상이거나 -1(무한)이어야 합니다')
+    .max(REPEAT_COUNT_MAX),
+  /** 다시 시작할 시각(epoch ms). 없으면 대상 DB 현재 시각 */
+  startAt: z.number().int().positive().optional(),
+});
+export type UpdateSimpleScheduleCommand = z.infer<typeof updateSimpleScheduleCommandSchema>;
+
+/**
+ * 제어 명령. `type`으로 나눈다. 명령을 추가하는 작업(B-21)이 여기에 이어 붙인다.
  * 서버(`@qa/store`의 명령 핸들러)와 화면이 같은 목록을 쓴다.
  */
 export const commandSchema = z.discriminatedUnion('type', [
@@ -108,6 +157,8 @@ export const commandSchema = z.discriminatedUnion('type', [
   pauseJobGroupCommandSchema,
   resumeJobGroupCommandSchema,
   triggerJobCommandSchema,
+  updateCronScheduleCommandSchema,
+  updateSimpleScheduleCommandSchema,
 ]);
 export type QuartzCommand = z.infer<typeof commandSchema>;
 export type CommandType = QuartzCommand['type'];
@@ -119,6 +170,8 @@ export function commandScope(command: QuartzCommand): CommandScope {
   switch (command.type) {
     case 'pauseTrigger':
     case 'resumeTrigger':
+    case 'updateCronSchedule':
+    case 'updateSimpleSchedule':
       return 'trigger';
     case 'pauseJob':
     case 'resumeJob':
@@ -231,6 +284,26 @@ export interface CommandInsertDto {
   description: string;
 }
 
+/** 트리거 스케줄의 한 시점 값. 스케줄 수정의 전·후를 보여 준다 */
+export interface ScheduleSnapshotDto {
+  kind: 'CRON' | 'SIMPLE';
+  cronExpression?: string;
+  /** Java TimeZone ID. 없으면 Quartz는 JVM 기본 타임존을 쓴다 */
+  timeZone?: string | null;
+  repeatIntervalMs?: number;
+  repeatCount?: number;
+  timesTriggered?: number;
+  startTime: number | null;
+  nextFireTime: number | null;
+}
+
+/** 스케줄 수정 (TRD §7.6). `upcoming`은 수정 뒤 다음 실행 시각부터 최대 5개 */
+export interface CommandScheduleChangeDto extends TriggerKey {
+  from: ScheduleSnapshotDto;
+  to: ScheduleSnapshotDto;
+  upcoming: number[];
+}
+
 /** `PAUSED_TRIGGER_GRPS` 행 변경. `paused`가 참이면 넣고 거짓이면 지운다 */
 export interface CommandGroupChangeDto {
   group: string;
@@ -259,6 +332,18 @@ export const COMMAND_NOTICE_CODES = [
   'NO_ACTIVE_NODE',
   /** 트리거 그룹(또는 전체)이 일시정지돼 즉시 실행 트리거가 PAUSED로 들어감 (TRD §7.5) */
   'INSERTED_PAUSED',
+  /** 스케줄 값이 잘못됨: cron 문법, 타임존, 반복 값, 시작·종료 시각, 더 이상 발화하지 않음 (400, TRD §7.6) */
+  'INVALID_SCHEDULE',
+  /** 캘린더가 연결된 트리거라 스케줄을 수정할 수 없음 (409, TRD §7.6) */
+  'CALENDAR_ATTACHED',
+  /** COMPLETE 트리거(곧 삭제됨)라 스케줄을 수정할 수 없음 (409, TRD §7.6) */
+  'TRIGGER_COMPLETE',
+  /** 트리거 종류가 명령과 맞지 않음(CRON 수정을 SIMPLE 트리거에 등) (409) */
+  'TRIGGER_TYPE_MISMATCH',
+  /** ERROR 상태가 풀려 WAITING이 됨 (TRD §7.6) */
+  'ERROR_CLEARED',
+  /** 개별 일시정지는 수정 뒤에도 유지됨(Quartz `rescheduleJob`과 의도된 차이, TRD §7.6) */
+  'PAUSE_KEPT',
 ] as const;
 export type CommandNoticeCode = (typeof COMMAND_NOTICE_CODES)[number];
 
@@ -293,6 +378,8 @@ export interface CommandPreviewResponse {
   groupChanges: CommandGroupChangeDto[];
   /** 실행하면 새로 넣을 트리거. 이름은 실행할 때 정한다 */
   inserts: CommandInsertDto[];
+  /** 실행하면 바뀔 스케줄 */
+  scheduleChanges: CommandScheduleChangeDto[];
   warnings: CommandNoticeDto[];
   /** 실행할 수 없는 이유. 있으면 화면은 실행 버튼을 끈다 */
   blocked: CommandNoticeDto | null;
@@ -308,6 +395,7 @@ export interface CommandResultDto {
   groupChanges: CommandGroupChangeDto[];
   /** 실제로 넣은 트리거(이름 포함) */
   inserts: CommandInsertDto[];
+  scheduleChanges: CommandScheduleChangeDto[];
   /** 실행 결과에 붙는 안내(misfire 위임 등) */
   warnings: CommandNoticeDto[];
   /** 잠금 안에서 다시 읽은 실행 직전 상태 */

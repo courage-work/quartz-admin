@@ -25,6 +25,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   'job_group.pause': '잡 그룹 일시정지',
   'job_group.resume': '잡 그룹 재개',
   'job.trigger': '잡 즉시 실행',
+  'trigger.reschedule': '트리거 스케줄 수정',
 };
 
 export function auditActionLabel(action: string): string {

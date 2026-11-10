@@ -6,6 +6,7 @@ import {
   type CommandChangeDto,
   type CommandInsertDto,
   type CommandNoticeDto,
+  type CommandScheduleChangeDto,
   type TriggerKey,
 } from '@qa/shared';
 import type { Row, TargetConn } from '../adapter.js';
@@ -196,6 +197,7 @@ export function resumePlanOf(
       changes: [],
       groupChanges: [],
       inserts,
+      scheduleChanges: [],
       warnings,
       rejection: {
         code: 'RESUME_IN_PAUSED_GROUP',
@@ -226,6 +228,7 @@ export function resumePlanOf(
     changes: resume.changes,
     groupChanges: rest.groupChanges,
     inserts,
+    scheduleChanges: [],
     warnings,
     rejection: null,
   };
@@ -239,9 +242,14 @@ export function noChangeWarning(plan: CommandPlan, message: string): CommandPlan
 
 /** 계획이 바꿀 행 수(트리거 상태, 그룹 행, 새 트리거). 적용한 행 수와 비교한다 */
 export function plannedRows(
-  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts'>,
+  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts' | 'scheduleChanges'>,
 ): number {
-  return plan.changes.length + plan.groupChanges.length + plan.inserts.length;
+  return (
+    plan.changes.length +
+    plan.groupChanges.length +
+    plan.inserts.length +
+    plan.scheduleChanges.length
+  );
 }
 
 /** 한 UPDATE에 넣는 트리거 이름 수. Oracle의 IN 목록 상한(1,000)보다 작게 둔다 */
@@ -375,13 +383,48 @@ export interface AppliedPlan {
 }
 
 /**
- * 계획을 적용한다. `PAUSED_TRIGGER_GRPS` 행, 트리거 상태, 새 트리거 순서로 바꾸고 바뀐 행 수를 돌려준다.
+ * 스케줄을 바꾼다 (TRD §7.6). 하위 테이블(CRON_TRIGGERS 또는 SIMPLE_TRIGGERS)의 값과 TRIGGERS의 시각 컬럼을 UPDATE한다.
+ * TRIGGERS UPDATE에는 `TRIGGER_STATE = 바꾸기 전 상태`를 붙인다(이중 안전장치, §7.2). 상태 자체는 뒤이은 상태 변경이 바꾼다.
+ * 바뀐 TRIGGERS 행 수를 돌려준다.
+ */
+async function applyScheduleChange(
+  conn: TargetConn,
+  ctx: SchedulerCommandContext,
+  c: CommandScheduleChangeDto & { state: string },
+): Promise<number> {
+  const { dialect: d, tables, features } = ctx;
+  const key = (b: Binds) =>
+    `SCHED_NAME = ${b.add(ctx.schedName)} AND TRIGGER_GROUP = ${b.add(c.group)} AND TRIGGER_NAME = ${b.add(c.name)}`;
+  const child = new Binds(d);
+  const childSql =
+    c.to.kind === 'CRON'
+      ? `UPDATE ${tables.table('CRON_TRIGGERS')} SET CRON_EXPRESSION = ${child.add(c.to.cronExpression ?? '')}` +
+        (features.cronTimeZone ? `, TIME_ZONE_ID = ${child.add(c.to.timeZone ?? null)}` : '') +
+        ` WHERE ${key(child)}`
+      : `UPDATE ${tables.table('SIMPLE_TRIGGERS')} SET REPEAT_COUNT = ${child.add(c.to.repeatCount ?? 0)}, ` +
+        `REPEAT_INTERVAL = ${child.add(c.to.repeatIntervalMs ?? 0)}, TIMES_TRIGGERED = ${child.add(0)} ` +
+        `WHERE ${key(child)}`;
+  if ((await conn.execute(childSql, child.values)) !== 1) {
+    throw new TargetError('TARGET_ERROR', { detail: '스케줄 행을 찾지 못했습니다' });
+  }
+  const b = new Binds(d);
+  const sets = [`NEXT_FIRE_TIME = ${b.add(c.to.nextFireTime ?? -1)}`];
+  if (c.to.kind === 'SIMPLE') sets.push(`START_TIME = ${b.add(c.to.startTime ?? 0)}`);
+  return conn.execute(
+    `UPDATE ${tables.table('TRIGGERS')} SET ${sets.join(', ')} WHERE ${key(b)} AND TRIGGER_STATE = ${b.add(c.state)}`,
+    b.values,
+  );
+}
+
+/**
+ * 계획을 적용한다. `PAUSED_TRIGGER_GRPS` 행, 스케줄, 트리거 상태, 새 트리거 순서로 바꾸고 바뀐 행 수를 돌려준다.
+ * 스케줄 UPDATE가 바꾸기 전 상태를 조건으로 쓰므로 상태 변경보다 먼저 한다.
  * 그룹 행은 계획이 지금 상태를 보고 정했으므로(없을 때만 넣고 있을 때만 지움) 행마다 1이어야 한다.
  */
 export async function applyPlan(
   conn: TargetConn,
   ctx: SchedulerCommandContext,
-  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts'>,
+  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts' | 'scheduleChanges'>,
 ): Promise<AppliedPlan> {
   const { dialect: d, tables } = ctx;
   let changed = 0;
@@ -396,6 +439,7 @@ export async function applyPlan(
       b.values,
     );
   }
+  for (const c of plan.scheduleChanges) changed += await applyScheduleChange(conn, ctx, c);
   changed += await applyStateChanges(conn, ctx, plan.changes);
   const inserts: CommandInsertDto[] = [];
   for (const ins of plan.inserts) {
