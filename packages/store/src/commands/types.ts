@@ -59,7 +59,9 @@ export type CommandRejectionCode =
   /** COMPLETE 트리거 (409, TRD §7.6) */
   | 'TRIGGER_COMPLETE'
   /** 트리거 종류가 명령과 맞지 않음 (409) */
-  | 'TRIGGER_TYPE_MISMATCH';
+  | 'TRIGGER_TYPE_MISMATCH'
+  /** 노드가 집은 트리거를 경합이 나는 시각으로 수정하려 함 (409, TRD §7.6) */
+  | 'TRIGGER_ACQUIRED';
 
 /** 계획의 거부 사유 중 실행을 거부하는 코드 */
 export const REJECTION_CODES: ReadonlySet<string> = new Set<CommandRejectionCode>([
@@ -68,6 +70,7 @@ export const REJECTION_CODES: ReadonlySet<string> = new Set<CommandRejectionCode
   'CALENDAR_ATTACHED',
   'TRIGGER_COMPLETE',
   'TRIGGER_TYPE_MISMATCH',
+  'TRIGGER_ACQUIRED',
 ]);
 
 /**

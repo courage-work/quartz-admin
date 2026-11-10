@@ -1071,6 +1071,41 @@ describe('스케줄 수정 (부록 A.6)', () => {
     }
   });
 
+  it('C-14·S-08 집힌 트리거를 옛 발화 시각 직후(35초 안)로 고치면 TRIGGER_ACQUIRED, 그 밖이면 실행한다', async () => {
+    // 옛 발화 시각 F = FUTURE(DB_NOW + 60초)
+    const everySecond = { ...CRON, cronExpression: '* * * * * ?' } as QuartzCommand;
+    const cases: [FakeConn, QuartzCommand][] = [
+      [new FakeConn({ triggers: [cronTrig('ACQUIRED')] }), everySecond],
+      [
+        new FakeConn({ triggers: [trig('t', 'ACQUIRED')] }),
+        simpleCmd({ startAt: FUTURE + 10_000, repeatCount: 0 }),
+      ],
+      // F보다 먼저 시작해도 F 직후에 다음 실행이 있으면 경합이다
+      [
+        new FakeConn({ triggers: [trig('t', 'ACQUIRED')] }),
+        simpleCmd({ repeatIntervalMs: 20_000, repeatCount: -1 }),
+      ],
+    ];
+    for (const [conn, command] of cases) {
+      const preview = await previewCommand(conn, ctx, command);
+      expect(preview.plan.rejection?.code).toBe('TRIGGER_ACQUIRED');
+      const err = await rejected(executeCommand(conn, ctx, command, expectedOf(preview.subject)));
+      expect(err).toMatchObject({ code: 'TRIGGER_ACQUIRED' });
+      expect(conn.writes()).toEqual([]);
+      expect(conn.state('t')).toBe('ACQUIRED');
+    }
+
+    // 35초 밖이면 실행하고 WAITING으로 바꾼다
+    const later = new FakeConn({ triggers: [trig('t', 'ACQUIRED')] });
+    await previewThenRun(later, simpleCmd({ startAt: FUTURE + 40_000, repeatCount: 0 }));
+    expect(later.state('t')).toBe('WAITING');
+
+    // 집히지 않은 트리거는 같은 시각이어도 경합이 없다
+    const waiting = new FakeConn({ triggers: [cronTrig('WAITING')] });
+    const out = await previewThenRun(waiting, everySecond);
+    expect(out.scheduleChanges).toHaveLength(1);
+  });
+
   it('S-01·S-02 SIMPLE: 간격·횟수를 바꾸고 횟수를 0으로, START = NFT = startAt(기본 지금)', async () => {
     const now = new FakeConn({ triggers: [trig('t', 'WAITING')] });
     const out = await previewThenRun(now, simpleCmd({}));

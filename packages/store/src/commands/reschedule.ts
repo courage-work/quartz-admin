@@ -42,6 +42,12 @@ import {
 /** 확인 대화상자에 보여 줄 다음 실행 시각 수 */
 const UPCOMING = 5;
 
+/**
+ * 노드가 트리거를 미리 집는 범위(Quartz `org.quartz.scheduler.idleWaitTime` 기본값 30초)에 시계 차이와 처리 시간 여유 5초를 더한 값.
+ * 집힌(ACQUIRED) 트리거를 고칠 때 새 스케줄의 실행 시각이 옛 발화 시각부터 이만큼 안에 있으면 거부한다(TRD §7.6 "집힌 트리거")
+ */
+export const ACQUIRED_RACE_WINDOW_MS = 35_000;
+
 /** 대상 트리거와 그 스케줄, 상태 결정에 필요한 그룹 일시정지·실행 중인 잡을 읽는다 */
 async function readScheduleSubject(
   conn: TargetConn,
@@ -145,6 +151,35 @@ function decideState(subject: CommandSubject, detail: TriggerDto): StateDecision
   return { state, groupChanges, warnings };
 }
 
+/**
+ * 집힌(ACQUIRED) 트리거를 경합이 나는 시각으로 고치는지 (TRD §7.6 "집힌 트리거").
+ *
+ * 트리거를 집은 노드는 옛 발화 시각 F에 상태가 ACQUIRED인지만 보고(`JSS.triggerFired`) 메모리의 옛 트리거로 발화한 뒤
+ * 행을 덮어쓴다. 도구가 상태를 WAITING으로 되돌려도, 새 스케줄의 실행 시각이 F 직후면 다른 노드가 F 전에 새 스케줄로
+ * 다시 집어 ACQUIRED로 만들 수 있고, 그러면 옛 스케줄로 실행되고 수정이 사라진다. 그래서 F 이후 첫 새 실행 시각이
+ * F + `ACQUIRED_RACE_WINDOW_MS`보다 이르면 거부한다. Quartz `rescheduleJob`에도 같은 경합이 있다.
+ *
+ * @param nextAtOrAfter `t` 이상인 첫 새 실행 시각
+ */
+function acquiredRace(
+  subject: CommandSubject,
+  detail: TriggerDto,
+  nextAtOrAfter: (t: number) => number | null,
+): CommandPlan | null {
+  const current = subject.triggers[0]?.state ?? detail.state;
+  const oldFire = detail.nextFireTime;
+  if (current !== 'ACQUIRED' || oldFire === null) return null;
+  const next = nextAtOrAfter(oldFire);
+  if (next === null || next >= oldFire + ACQUIRED_RACE_WINDOW_MS) return null;
+  return reject({
+    code: 'TRIGGER_ACQUIRED',
+    message:
+      'Quartz 노드가 곧 실행하려고 집은 트리거인데, 새 스케줄의 실행 시각이 그 직후라 다른 노드가 먼저 집으면 ' +
+      '옛 스케줄로 실행되고 수정이 되돌아갈 수 있습니다. 예정된 실행이 지난 뒤 다시 시도하거나, ' +
+      '트리거를 일시정지한 뒤 수정하고 재개하세요',
+  });
+}
+
 /** 상태 결정과 스케줄 변경을 계획으로 묶는다 */
 function schedulePlan(
   subject: CommandSubject,
@@ -228,6 +263,8 @@ export const updateCronScheduleHandler: CommandHandler<UpdateCronScheduleCommand
         '이 스케줄로는 더 이상 실행되지 않습니다. 종료 시각이 지났거나 남은 실행 시각이 없습니다',
       );
     }
+    const race = acquiredRace(subject, detail, (t) => calc.fireTimeAfter(t - 1));
+    if (race) return race;
     const cron = detail.cron!;
     return schedulePlan(
       subject,
@@ -287,6 +324,8 @@ export const updateSimpleScheduleHandler: CommandHandler<UpdateSimpleScheduleCom
       if (err instanceof TriggerSpecError) return invalid(err.message);
       throw err;
     }
+    const race = acquiredRace(subject, detail, (t) => calc.fireTimeAfter(t - 1));
+    if (race) return race;
     const simple = detail.simple!;
     return schedulePlan(
       subject,

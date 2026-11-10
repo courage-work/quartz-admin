@@ -340,6 +340,11 @@ export const COMMAND_NOTICE_CODES = [
   'TRIGGER_COMPLETE',
   /** 트리거 종류가 명령과 맞지 않음(CRON 수정을 SIMPLE 트리거에 등) (409) */
   'TRIGGER_TYPE_MISMATCH',
+  /**
+   * 노드가 집은(ACQUIRED) 트리거인데 새 스케줄의 실행 시각이 옛 발화 시각 직후라, 다른 노드가 먼저 집으면 옛 스케줄로
+   * 실행되고 수정이 되돌아갈 수 있음 (409, TRD §7.2·§7.6)
+   */
+  'TRIGGER_ACQUIRED',
   /** ERROR 상태가 풀려 WAITING이 됨 (TRD §7.6) */
   'ERROR_CLEARED',
   /** 개별 일시정지는 수정 뒤에도 유지됨(Quartz `rescheduleJob`과 의도된 차이, TRD §7.6) */
