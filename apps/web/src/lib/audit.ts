@@ -20,6 +20,17 @@ export const EMPTY_AUDIT_FILTER: AuditFilter = {
   username: '',
 };
 
+/** 빠른 기간: 오늘을 끝으로 하는 최근 `days`일(오늘 포함). 사용자 타임존의 날짜(`YYYY-MM-DD`)로 돌려준다 */
+export function recentDays(
+  days: number,
+  now: Date = new Date(),
+): Pick<AuditFilter, 'fromDate' | 'toDate'> {
+  const ymd = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
+  return { fromDate: ymd(from), toDate: ymd(now) };
+}
+
 /** 화면 필터 → `GET /audit-logs` 쿼리. 비어 있는 값은 빼고, 날짜는 사용자 타임존의 하루 경계로 바꾼다 */
 export function auditQuery(filter: AuditFilter): Query & Partial<AuditLogQuery> {
   const username = filter.username.trim().toLowerCase();

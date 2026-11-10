@@ -53,6 +53,7 @@ import {
 } from '@/lib/connections';
 import { formatDateTime } from '@/lib/format';
 import { parseId } from '@/lib/navigation';
+import { usePageTitle } from '@/lib/page-title';
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -278,6 +279,8 @@ export function ConnectionView() {
     },
     onError: (err) => toast.error(err.message),
   });
+
+  usePageTitle(connection.data?.name);
 
   // 아직 못 읽었거나 읽지 못했어도 화면 머리(경로, 돌아가기)는 남긴다
   if (connection.isError || connection.isPending) {

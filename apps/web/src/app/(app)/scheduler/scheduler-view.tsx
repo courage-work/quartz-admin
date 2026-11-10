@@ -2,7 +2,7 @@
 
 import type { SchedulerDetailDto } from '@qa/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { SearchXIcon, UnplugIcon } from 'lucide-react';
+import { SearchXIcon, Settings2Icon, UnplugIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
@@ -26,10 +26,12 @@ import {
 } from '@/components/ui/empty';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { api, isApiError } from '@/lib/api';
 import { controlBlockedReason } from '@/lib/commands';
 import { formatDateTime } from '@/lib/format';
 import { parseId } from '@/lib/navigation';
+import { usePageTitle } from '@/lib/page-title';
 import { schedulerKey } from '@/lib/schedulers';
 
 import { ExecutingTab, JobsTab, NodesTab, PausedGroupsTab, TriggersTab } from './tabs';
@@ -102,6 +104,8 @@ export function SchedulerView() {
     refetchInterval: refreshMs || false,
   });
 
+  usePageTitle(detail.data?.displayName);
+
   // 아직 못 읽었거나 읽지 못했어도 화면 머리(경로, 돌아가기)는 남긴다
   if (id === null || detail.isError || detail.isPending) {
     return (
@@ -153,7 +157,22 @@ export function SchedulerView() {
             onRefreshMsChange={setRefreshMs}
             onRefresh={() => void queryClient.invalidateQueries({ queryKey: ['schedulers', id] })}
             refreshing={queryClient.isFetching({ queryKey: ['schedulers', id] }) > 0}
-          />
+          >
+            {/* 설정은 접속 상세의 줄 메뉴에도 있다. 여기서 들어가면 저장·취소 뒤 이 화면으로 돌아온다 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button asChild variant="outline" size="icon">
+                  <Link
+                    href={`/scheduler/settings?id=${id}&from=scheduler`}
+                    aria-label="스케줄러 설정"
+                  >
+                    <Settings2Icon aria-hidden />
+                  </Link>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>스케줄러 설정</TooltipContent>
+            </Tooltip>
+          </RefreshControls>
         }
       />
       {/* 연결하지 못하면 머리글의 회색 글이 아니라 알림으로 먼저 알리고, 지표는 지난 값임을 밝힌다 */}

@@ -47,16 +47,8 @@ import { type StatusMeta, TRIGGER_STATE_META } from '@/components/status/tones';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { FieldGroup } from '@/components/ui/field';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -571,21 +563,6 @@ export function TriggersTab({
           groups={groups.data?.triggerGroups}
           onApply={(f) => update({ ...f, page: 1 })}
         />
-        {/* 좁은 화면에서는 필터 버튼과 한 줄을 나눠 쓴다 */}
-        <Field className="w-auto min-w-40 flex-1 md:ml-auto md:w-44 md:flex-none">
-          <FieldLabel htmlFor="view-sort">정렬</FieldLabel>
-          <Select value={sort} onValueChange={(v) => setSort(v as TriggerSort)}>
-            <SelectTrigger id="view-sort" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="key">그룹·이름 순</SelectItem>
-                <SelectItem value="nextFireTime">다음 실행 시각 순</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </Field>
       </div>
       <FilterChips chips={chips} onClearAll={clearFilters} />
       {res.isError ? <FormAlert error={res.error} /> : null}
@@ -595,6 +572,7 @@ export function TriggersTab({
           schedulerId={schedulerId}
           triggers={res.data?.items}
           loading={res.isFetching}
+          sort={{ value: sort, onChange: setSort }}
           empty={
             filtered
               ? {

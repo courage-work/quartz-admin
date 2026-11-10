@@ -44,10 +44,17 @@ import {
   describeTarget,
   EMPTY_AUDIT_FILTER,
   isCodeTarget,
+  recentDays,
 } from '@/lib/audit';
 import { formatDateTime } from '@/lib/format';
 import { AUDIT_ACTION_LABELS, auditActionLabel } from '@/lib/labels';
 import { setParam, type UrlCodec, useUrlState } from '@/lib/use-url-state';
+
+const QUICK_RANGES = [
+  { days: 1, label: '오늘' },
+  { days: 7, label: '최근 7일' },
+  { days: 30, label: '최근 30일' },
+] as const;
 
 /** 필터 하나에 기간·작업 종류·결과를 모은다 (VectorLab list 패턴: Filters 컨트롤은 하나) */
 function FilterPopover({
@@ -86,6 +93,25 @@ function FilterPopover({
       <PopoverContent align="start" className="w-80">
         <form onSubmit={submit}>
           <FieldGroup>
+            {/* 날짜를 두 번 고르지 않도록 자주 쓰는 기간을 한 번에 채운다 */}
+            <div className="flex flex-col gap-2">
+              <span id="audit-quick" className="text-sm font-medium">
+                빠른 기간
+              </span>
+              <div role="group" aria-labelledby="audit-quick" className="flex flex-wrap gap-2">
+                {QUICK_RANGES.map((r) => (
+                  <Button
+                    key={r.days}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDraft((d) => ({ ...d, ...recentDays(r.days) }))}
+                  >
+                    {r.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
             <Field>
               <FieldLabel htmlFor="audit-from">시작일</FieldLabel>
               <Input

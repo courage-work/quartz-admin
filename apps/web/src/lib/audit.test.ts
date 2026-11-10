@@ -1,7 +1,14 @@
 import { AUDIT_ACTIONS } from '@qa/shared';
 import { describe, expect, it } from 'vitest';
 
-import { auditQuery, describeActor, describeTarget, EMPTY_AUDIT_FILTER } from './audit';
+import {
+  auditQuery,
+  describeActor,
+  describeTarget,
+  EMPTY_AUDIT_FILTER,
+  isCodeTarget,
+  recentDays,
+} from './audit';
 import { AUDIT_ACTION_LABELS, auditActionLabel } from './labels';
 
 describe('auditQuery', () => {
@@ -25,6 +32,36 @@ describe('auditQuery', () => {
       result: 'failure',
       username: 'ghost',
     });
+  });
+});
+
+describe('recentDays', () => {
+  it('오늘을 끝으로 하는 최근 n일을 사용자 타임존 날짜로 돌려준다', () => {
+    const now = new Date(2026, 10, 10, 9, 30);
+    expect(recentDays(1, now)).toEqual({ fromDate: '2026-11-10', toDate: '2026-11-10' });
+    expect(recentDays(7, now)).toEqual({ fromDate: '2026-11-04', toDate: '2026-11-10' });
+    expect(recentDays(30, now)).toEqual({ fromDate: '2026-10-12', toDate: '2026-11-10' });
+  });
+
+  it('달과 해를 넘어간다', () => {
+    expect(recentDays(7, new Date(2026, 2, 3))).toEqual({
+      fromDate: '2026-02-25',
+      toDate: '2026-03-03',
+    });
+    expect(recentDays(7, new Date(2027, 0, 2, 23, 59))).toEqual({
+      fromDate: '2026-12-27',
+      toDate: '2027-01-02',
+    });
+  });
+});
+
+describe('isCodeTarget', () => {
+  it('아이디와 트리거 키만 식별자로 본다', () => {
+    expect(isCodeTarget({ targetType: 'user' })).toBe(true);
+    expect(isCodeTarget({ targetType: 'trigger' })).toBe(true);
+    expect(isCodeTarget({ targetType: 'connection' })).toBe(false);
+    expect(isCodeTarget({ targetType: 'scheduler' })).toBe(false);
+    expect(isCodeTarget({ targetType: null })).toBe(false);
   });
 });
 

@@ -47,6 +47,7 @@ import { api, isApiError } from '@/lib/api';
 import { controlBlockedReason } from '@/lib/commands';
 import { formatDateTime } from '@/lib/format';
 import { parseId } from '@/lib/navigation';
+import { usePageTitle } from '@/lib/page-title';
 import { schedulerKey, schedulerViewKey } from '@/lib/schedulers';
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -184,6 +185,7 @@ export function JobView() {
     refetchInterval: refreshMs || false,
   });
   const { openCommand, dialog } = useCommandDialog(schedulerId ?? 0);
+  usePageTitle(valid ? name : undefined);
 
   let body: ReactNode;
   if (!valid || isApiError(detail.error, 'NOT_FOUND'))

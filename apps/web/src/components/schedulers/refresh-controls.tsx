@@ -1,7 +1,7 @@
 'use client';
 
 import { RefreshCwIcon } from 'lucide-react';
-import { useEffect, useId, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useId, useState, useSyncExternalStore } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -66,6 +66,7 @@ export function RefreshControls({
   onRefreshMsChange,
   onRefresh,
   refreshing,
+  children,
 }: {
   dataTime: number | null | undefined;
   dataTimeLabel?: string;
@@ -73,6 +74,8 @@ export function RefreshControls({
   onRefreshMsChange: (ms: number) => void;
   onRefresh: () => void;
   refreshing: boolean;
+  /** 새로고침 버튼 뒤에 붙이는 화면별 버튼(스케줄러 설정). 좁은 화면에서 같이 줄바꿈한다 */
+  children?: ReactNode;
 }) {
   const busy = useDelayedFlag(refreshing);
   const intervalId = useId();
@@ -107,6 +110,7 @@ export function RefreshControls({
         )}
         새로고침
       </Button>
+      {children}
     </div>
   );
 }
