@@ -1,5 +1,5 @@
 /**
- * 제어 명령 API의 요청 스키마와 응답 타입 (TRD §7.1~7.4, PRD FR-CTL)
+ * 제어 명령 API의 요청 스키마와 응답 타입 (TRD §7.1~7.5, PRD FR-CTL)
  *
  * 화면은 먼저 미리보기(`POST /schedulers/:id/commands/preview`)로 대상과 영향 범위를 받아 확인 대화상자에 보여 주고,
  * 미리보기가 돌려준 `expected`(화면에서 본 대상 상태)를 붙여 실행(`POST /schedulers/:id/commands`)한다.
@@ -87,8 +87,15 @@ export const resumeJobGroupCommandSchema = z.object({
 });
 export type ResumeJobGroupCommand = z.infer<typeof resumeJobGroupCommandSchema>;
 
+/** 잡 즉시 실행 (FR-CTL-05, `triggerJob(jobKey)`, TRD §7.5): 지금 한 번 실행하는 일회성 SIMPLE 트리거를 넣는다 */
+export const triggerJobCommandSchema = z.object({
+  type: z.literal('triggerJob'),
+  job: jobKeySchema,
+});
+export type TriggerJobCommand = z.infer<typeof triggerJobCommandSchema>;
+
 /**
- * 제어 명령. `type`으로 나눈다. 명령을 추가하는 작업(B-19~B-21)이 여기에 이어 붙인다.
+ * 제어 명령. `type`으로 나눈다. 명령을 추가하는 작업(B-20, B-21)이 여기에 이어 붙인다.
  * 서버(`@qa/store`의 명령 핸들러)와 화면이 같은 목록을 쓴다.
  */
 export const commandSchema = z.discriminatedUnion('type', [
@@ -100,6 +107,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   resumeTriggerGroupCommandSchema,
   pauseJobGroupCommandSchema,
   resumeJobGroupCommandSchema,
+  triggerJobCommandSchema,
 ]);
 export type QuartzCommand = z.infer<typeof commandSchema>;
 export type CommandType = QuartzCommand['type'];
@@ -114,6 +122,7 @@ export function commandScope(command: QuartzCommand): CommandScope {
       return 'trigger';
     case 'pauseJob':
     case 'resumeJob':
+    case 'triggerJob':
       return 'job';
     case 'pauseTriggerGroup':
     case 'resumeTriggerGroup':
@@ -205,6 +214,23 @@ export interface CommandChangeDto extends TriggerKey {
   to: string;
 }
 
+/**
+ * 새로 넣는 트리거(즉시 실행, TRD §7.5). 미리보기에서는 이름이 아직 없고(`name`이 null), 실행 결과에는 실제로 넣은 이름이 온다.
+ * 이름은 Quartz `triggerJob`과 같은 형식(`MT_` + 난수)이라 실행할 때 정한다
+ */
+export interface CommandInsertDto {
+  group: string;
+  name: string | null;
+  jobGroup: string;
+  jobName: string;
+  /** 넣을 때의 상태(`JSS.storeTrigger`의 상태 결정 규칙) */
+  state: string;
+  /** START_TIME = NEXT_FIRE_TIME(epoch ms). 대상 DB 현재 시각이다 */
+  startTime: number;
+  /** DESCRIPTION. 누가 넣었는지 남긴다(\`quartz-admin: <사용자명>\`, Quartz와 의도된 차이) */
+  description: string;
+}
+
 /** `PAUSED_TRIGGER_GRPS` 행 변경. `paused`가 참이면 넣고 거짓이면 지운다 */
 export interface CommandGroupChangeDto {
   group: string;
@@ -227,6 +253,12 @@ export const COMMAND_NOTICE_CODES = [
   'NO_NEXT_FIRE_TIME',
   /** 잡 그룹 일시정지는 저장되지 않아 이후 추가되는 잡에는 적용되지 않음 (TRD §7.3) */
   'JOB_GROUP_NOT_STORED',
+  /** 동시 실행 금지 잡이 이미 실행 중이라 즉시 실행 트리거가 BLOCKED로 들어감 (FR-CTL-05) */
+  'JOB_RUNNING_NONCONCURRENT',
+  /** 활성 노드가 없어 노드가 다시 뜰 때까지 실행되지 않음 (FR-CTL-05) */
+  'NO_ACTIVE_NODE',
+  /** 트리거 그룹(또는 전체)이 일시정지돼 즉시 실행 트리거가 PAUSED로 들어감 (TRD §7.5) */
+  'INSERTED_PAUSED',
 ] as const;
 export type CommandNoticeCode = (typeof COMMAND_NOTICE_CODES)[number];
 
@@ -259,6 +291,8 @@ export interface CommandPreviewResponse {
   changes: CommandChangeDto[];
   /** 실행하면 바뀔 그룹 일시정지 행 */
   groupChanges: CommandGroupChangeDto[];
+  /** 실행하면 새로 넣을 트리거. 이름은 실행할 때 정한다 */
+  inserts: CommandInsertDto[];
   warnings: CommandNoticeDto[];
   /** 실행할 수 없는 이유. 있으면 화면은 실행 버튼을 끈다 */
   blocked: CommandNoticeDto | null;
@@ -272,6 +306,8 @@ export interface CommandResultDto {
   changed: boolean;
   changes: CommandChangeDto[];
   groupChanges: CommandGroupChangeDto[];
+  /** 실제로 넣은 트리거(이름 포함) */
+  inserts: CommandInsertDto[];
   /** 실행 결과에 붙는 안내(misfire 위임 등) */
   warnings: CommandNoticeDto[];
   /** 잠금 안에서 다시 읽은 실행 직전 상태 */

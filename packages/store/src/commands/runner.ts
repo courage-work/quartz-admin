@@ -3,6 +3,7 @@ import {
   type CommandChangeDto,
   type CommandExpected,
   type CommandGroupChangeDto,
+  type CommandInsertDto,
   type CommandNoticeDto,
   type CommandType,
   type QuartzCommand,
@@ -21,7 +22,8 @@ import {
   resumeTriggerGroupHandler,
   resumeTriggerHandler,
 } from './pause-resume.js';
-import { applyPlan } from './triggers.js';
+import { triggerJobHandler } from './trigger-job.js';
+import { applyPlan, plannedRows } from './triggers.js';
 import {
   CommandRejection,
   type CommandHandler,
@@ -43,6 +45,7 @@ const HANDLERS: HandlerMap = {
   resumeTriggerGroup: resumeTriggerGroupHandler,
   pauseJobGroup: pauseJobGroupHandler,
   resumeJobGroup: resumeJobGroupHandler,
+  triggerJob: triggerJobHandler,
 };
 
 function handlerFor(command: QuartzCommand): CommandHandler {
@@ -97,16 +100,19 @@ export async function previewCommand(
   conn: TargetConn,
   ctx: SchedulerCommandContext,
   command: QuartzCommand,
+  options: Pick<ExecuteOptions, 'actor'> = {},
 ): Promise<CommandPreview> {
   const handler = handlerFor(command);
   const dbNow = await queryDbNowMillis(conn, ctx.dialect);
   const subject = await handler.readSubject(conn, ctx, command);
-  return { dbNow, subject, plan: handler.plan(command, subject, { dbNow }) };
+  return { dbNow, subject, plan: handler.plan(command, subject, { dbNow, actor: options.actor }) };
 }
 
 export interface ExecuteOptions {
   /** 잠금 대기 제한(초). 기본 5 (FR-CTL-00c) */
   lockWaitSec?: number;
+  /** 명령을 실행하는 사용자 이름. 즉시 실행 트리거의 DESCRIPTION에 남긴다 */
+  actor?: string | null;
 }
 
 export interface CommandOutcome {
@@ -119,6 +125,8 @@ export interface CommandOutcome {
   after: CommandSubject;
   changes: CommandChangeDto[];
   groupChanges: CommandGroupChangeDto[];
+  /** 실제로 넣은 트리거(이름 포함) */
+  inserts: CommandInsertDto[];
   warnings: CommandNoticeDto[];
 }
 
@@ -165,7 +173,7 @@ export async function executeCommand(
       );
     }
 
-    const plan = handler.plan(command, before, { dbNow });
+    const plan = handler.plan(command, before, { dbNow, actor: options.actor });
     if (plan.rejection) {
       throw new CommandRejection(
         'RESUME_IN_PAUSED_GROUP',
@@ -174,9 +182,12 @@ export async function executeCommand(
       );
     }
     let after = before;
-    const planned = plan.changes.length + plan.groupChanges.length;
+    let inserts: CommandInsertDto[] = [];
+    const planned = plannedRows(plan);
     if (planned > 0) {
-      const changed = await applyPlan(conn, ctx, plan);
+      const applied = await applyPlan(conn, ctx, plan);
+      const changed = applied.changed;
+      inserts = applied.inserts;
       after = await handler.readSubject(conn, ctx, command);
       if (changed !== planned) {
         // 잠근 행이 그 사이 바뀌었다. 잠금을 거치지 않은 쓰기가 있다는 뜻이므로 되돌린다
@@ -195,6 +206,7 @@ export async function executeCommand(
       after,
       changes: plan.changes,
       groupChanges: plan.groupChanges,
+      inserts,
       warnings: plan.warnings,
     };
   } catch (err) {

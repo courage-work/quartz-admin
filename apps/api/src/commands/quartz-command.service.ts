@@ -42,6 +42,7 @@ const AUDIT_ACTION: Record<CommandType, AuditAction> = {
   resumeTriggerGroup: 'trigger_group.resume',
   pauseJobGroup: 'job_group.pause',
   resumeJobGroup: 'job_group.resume',
+  triggerJob: 'job.trigger',
 };
 
 /** 명령 대상 단위별 감사 대상 종류 */
@@ -126,12 +127,16 @@ export class QuartzCommandService {
   ) {}
 
   /** 확인 대화상자용 미리보기 (FR-CTL-00b). 대상 DB를 바꾸지 않고 감사 로그도 남기지 않는다 */
-  async preview(schedulerId: number, command: QuartzCommand): Promise<CommandPreviewResponse> {
+  async preview(
+    schedulerId: number,
+    command: QuartzCommand,
+    actor?: AuditActor,
+  ): Promise<CommandPreviewResponse> {
     const { scheduler, connection, ctx } = this.scope(schedulerId);
     let preview;
     try {
       preview = await this.targets.withConnection(connection, (conn) =>
-        previewCommand(conn, ctx, command),
+        previewCommand(conn, ctx, command, { actor: actor?.username }),
       );
     } catch (err) {
       throw isCommandRejection(err) ? rejectionError(err) : err;
@@ -150,6 +155,7 @@ export class QuartzCommandService {
       expected: expectedOf(preview.subject),
       changes: preview.plan.changes,
       groupChanges: preview.plan.groupChanges,
+      inserts: preview.plan.inserts,
       warnings: preview.plan.warnings,
       blocked: blockedReason(connection) ?? preview.plan.rejection,
     };
@@ -184,16 +190,21 @@ export class QuartzCommandService {
       const pending = this.audit.begin(entry);
       try {
         const out = await this.targets.withConnection(connection, (conn) =>
-          executeCommand(conn, ctx, command, expected),
+          executeCommand(conn, ctx, command, expected, { actor: actor.username }),
         );
         const after = expectedOf(out.after);
-        const changed = out.changes.length + out.groupChanges.length > 0;
+        const changed = out.changes.length + out.groupChanges.length + out.inserts.length > 0;
         pending.succeed({
-          after: { ...after, changes: out.changes, groupChanges: out.groupChanges },
+          after: {
+            ...after,
+            changes: out.changes,
+            groupChanges: out.groupChanges,
+            ...(out.inserts.length > 0 ? { inserts: out.inserts } : {}),
+          },
         });
         this.logger.log(
           `제어 명령 성공 (스케줄러 ${scheduler.id}, ${command.type}): ` +
-            `트리거 ${out.changes.length}건, 그룹 ${out.groupChanges.length}건`,
+            `트리거 ${out.changes.length}건, 그룹 ${out.groupChanges.length}건, 추가 ${out.inserts.length}건`,
         );
         if (changed) {
           // 대시보드 카드(스냅샷)도 바로 다시 읽게 한다 (NFR-UX-03)
@@ -205,6 +216,7 @@ export class QuartzCommandService {
           changed,
           changes: out.changes,
           groupChanges: out.groupChanges,
+          inserts: out.inserts,
           warnings: out.warnings,
           before: expectedOf(out.before),
           after,
@@ -227,6 +239,13 @@ export class QuartzCommandService {
   private scope(schedulerId: number): Scope {
     const scheduler = this.connections.requireScheduler(schedulerId);
     const connection = this.connections.require(scheduler.connectionId);
-    return { scheduler, connection, ctx: schedulerViewContext(scheduler, connection) };
+    return {
+      scheduler,
+      connection,
+      ctx: {
+        ...schedulerViewContext(scheduler, connection),
+        checkinMultiplier: scheduler.checkinMultiplier,
+      },
+    };
   }
 }

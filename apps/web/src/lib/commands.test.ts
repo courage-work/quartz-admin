@@ -65,6 +65,35 @@ describe('재개·잡·그룹 문구', () => {
   });
 });
 
+describe('즉시 실행 문구 (TRD §7.5)', () => {
+  const TRIGGER: QuartzCommand = { type: 'triggerJob', job: { group: 'jg', name: 'report' } };
+  const ins = (state: string) => [
+    {
+      group: 'DEFAULT',
+      name: 'MT_1',
+      jobGroup: 'jg',
+      jobName: 'report',
+      state,
+      startTime: 0,
+      description: '',
+    },
+  ];
+
+  it('넣은 트리거 상태에 따라 언제 실행되는지 알린다', () => {
+    expect(commandTitle(TRIGGER)).toBe('잡 즉시 실행');
+    expect(commandConfirmLabel(TRIGGER)).toBe('실행하기');
+    expect(commandResultMessage({ command: TRIGGER, changed: true, inserts: ins('WAITING') })).toBe(
+      'report 잡을 즉시 실행으로 걸었습니다. Quartz 노드가 다음 확인 때(기본 최대 30초) 실행합니다',
+    );
+    expect(
+      commandResultMessage({ command: TRIGGER, changed: true, inserts: ins('BLOCKED') }),
+    ).toMatch(/실행 중인 잡이 끝난 뒤/);
+    expect(
+      commandResultMessage({ command: TRIGGER, changed: true, inserts: ins('PAUSED') }),
+    ).toMatch(/재개해야 실행됩니다/);
+  });
+});
+
 describe('canResumeTrigger', () => {
   it('PAUSED, PAUSED_BLOCKED만 재개할 수 있다', () => {
     expect(['PAUSED', 'PAUSED_BLOCKED'].every(canResumeTrigger)).toBe(true);

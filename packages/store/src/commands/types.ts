@@ -2,6 +2,7 @@ import type {
   CommandChangeDto,
   CommandExpected,
   CommandGroupChangeDto,
+  CommandInsertDto,
   CommandNoticeDto,
   CommandTargetDto,
   QuartzCommand,
@@ -10,8 +11,11 @@ import type {
 import type { TargetConn } from '../adapter.js';
 import type { SchedulerViewContext } from '../views/views.js';
 
-/** 스케줄러 하나를 제어하는 데 필요한 값. 조회 문맥과 같다 */
-export type SchedulerCommandContext = SchedulerViewContext;
+/** 스케줄러 하나를 제어하는 데 필요한 값. 조회 문맥에 스케줄러 설정 일부를 더한다 */
+export interface SchedulerCommandContext extends SchedulerViewContext {
+  /** 활성 노드 판정의 체크인 배수(TRD §9.2). 없으면 기본값 3 */
+  checkinMultiplier?: number;
+}
 
 /** 명령 대상 트리거. 잠금 안에서 다시 읽은 값이다 */
 export type CommandTarget = CommandTargetDto;
@@ -32,6 +36,8 @@ export interface CommandSubject {
    * 재개 명령만 채운다
    */
   blockingJobs: ReadonlySet<string>;
+  /** 활성 노드 수. 즉시 실행만 채운다(활성 노드가 없으면 경고, FR-CTL-05) */
+  activeNodeCount?: number;
 }
 
 /** 명령이 거부된 이유. 대상 DB는 바뀌지 않았다 */
@@ -71,11 +77,15 @@ export function isCommandRejection(value: unknown): value is CommandRejection {
 export interface PlanEnv {
   /** 대상 DB 현재 시각(epoch ms). 잠금 안에서 읽었다 */
   dbNow: number;
+  /** 명령을 실행하는 사용자 이름. 즉시 실행 트리거의 DESCRIPTION에 남긴다 */
+  actor?: string | null;
 }
 
 export interface CommandPlan {
   changes: CommandChangeDto[];
   groupChanges: CommandGroupChangeDto[];
+  /** 새로 넣을 트리거. 이름은 적용할 때 정한다(`name`은 null) */
+  inserts: CommandInsertDto[];
   warnings: CommandNoticeDto[];
   /**
    * 실행하면 안 되는 이유. 있으면 미리보기는 차단 사유로 보여 주고, 실행은 대상 DB를 바꾸지 않고 거부한다.
@@ -86,7 +96,7 @@ export interface CommandPlan {
 
 /**
  * 명령 하나의 동작 (TRD §7.3). 실행 절차(잠금, 상태 확인, 커밋)는 `executeCommand`가 맡고,
- * 핸들러는 대상을 읽고 바꿀 상태를 정하는 일만 한다. 적용은 공통(`applyPlan`)이다.
+ * 핸들러는 대상을 읽고 바꿀 상태를 정하는 일만 한다. 적용(상태 변경, 그룹 행, 트리거 INSERT)은 공통(`applyPlan`)이다.
  */
 export interface CommandHandler<C extends QuartzCommand = QuartzCommand> {
   readonly type: C['type'];

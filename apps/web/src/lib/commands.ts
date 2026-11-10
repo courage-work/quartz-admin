@@ -27,6 +27,8 @@ export function commandTitle(command: QuartzCommand): string {
       return '잡 그룹 일시정지';
     case 'resumeJobGroup':
       return '잡 그룹 재개';
+    case 'triggerJob':
+      return '잡 즉시 실행';
   }
 }
 
@@ -34,6 +36,7 @@ const isPause = (command: QuartzCommand) => command.type.startsWith('pause');
 
 /** 실행 버튼 문구. 동사로 쓴다(DESIGN §10) */
 export function commandConfirmLabel(command: QuartzCommand): string {
+  if (command.type === 'triggerJob') return '실행하기';
   return isPause(command) ? '일시정지하기' : '재개하기';
 }
 
@@ -45,6 +48,7 @@ export function commandSubject(command: QuartzCommand): string {
       return `${command.trigger.name} 트리거`;
     case 'pauseJob':
     case 'resumeJob':
+    case 'triggerJob':
       return `${command.job.name} 잡`;
     case 'pauseTriggerGroup':
     case 'resumeTriggerGroup':
@@ -58,7 +62,7 @@ export function commandSubject(command: QuartzCommand): string {
 /** 실행 결과 알림 (NFR-UX-03). 재개한 트리거 중 실행 시각이 지난 것이 있으면 misfire 처리 안내를 붙인다 */
 export function commandResultMessage(
   result: Pick<CommandResultDto, 'command' | 'changed'> &
-    Partial<Pick<CommandResultDto, 'warnings'>>,
+    Partial<Pick<CommandResultDto, 'warnings' | 'inserts'>>,
 ): string {
   const { command } = result;
   const subject = commandSubject(command);
@@ -66,6 +70,7 @@ export function commandResultMessage(
   const vowel = commandScope(command) === 'trigger';
   const topic = `${subject}${vowel ? '는' : '은'}`;
   const object = `${subject}${vowel ? '를' : '을'}`;
+  if (command.type === 'triggerJob') return triggerJobMessage(object, result.inserts?.[0]?.state);
   if (!result.changed) {
     return isPause(command)
       ? `${topic} 바뀐 것이 없습니다. 이미 일시정지됐거나 일시정지할 수 없는 상태입니다`
@@ -76,6 +81,20 @@ export function commandResultMessage(
   return misfire
     ? `${object} 재개했습니다. 지난 실행은 Quartz 노드가 misfire 정책에 따라 최대 1분(misfireThreshold) 안에 처리합니다`
     : `${object} 재개했습니다`;
+}
+
+/** 즉시 실행 결과. 넣은 트리거의 상태에 따라 언제 실행되는지 알린다 (TRD §7.5) */
+function triggerJobMessage(object: string, state: string | undefined): string {
+  switch (state) {
+    case 'BLOCKED':
+      return `${object} 즉시 실행으로 걸었습니다. 지금 실행 중인 잡이 끝난 뒤에 실행됩니다`;
+    case 'PAUSED':
+    case 'PAUSED_BLOCKED':
+      return `${object} 즉시 실행으로 걸었지만 그룹이 일시정지 상태라 재개해야 실행됩니다`;
+    default:
+      // 도구는 노드를 깨울 수 없어 노드가 다음 획득 주기에 집는다(TRD §7.5)
+      return `${object} 즉시 실행으로 걸었습니다. Quartz 노드가 다음 확인 때(기본 최대 30초) 실행합니다`;
+  }
 }
 
 /** 이 상태에서 일시정지하면 바뀌는 것이 있는지 (TRD §7.3) */

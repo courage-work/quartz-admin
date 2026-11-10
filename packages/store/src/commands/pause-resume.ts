@@ -44,7 +44,7 @@ const triggerWhere =
   (b) =>
     `t.TRIGGER_GROUP = ${b.add(group)} AND t.TRIGGER_NAME = ${b.add(name)}`;
 
-const jobWhere =
+export const jobWhere =
   (alias: 't' | 'j', group: string, name: string): Where =>
   (b) =>
     `${alias}.JOB_GROUP = ${b.add(group)} AND ${alias}.JOB_NAME = ${b.add(name)}`;
@@ -141,7 +141,13 @@ export const pauseTriggerHandler: CommandHandler<PauseTriggerCommand> = {
 
   plan(_command, subject) {
     return noChangeWarning(
-      { changes: pauseChanges(subject.triggers), groupChanges: [], warnings: [], rejection: null },
+      {
+        changes: pauseChanges(subject.triggers),
+        groupChanges: [],
+        inserts: [],
+        warnings: [],
+        rejection: null,
+      },
       `지금 상태(${singleState(subject)})에서는 일시정지해도 바뀌는 것이 없습니다`,
     );
   },
@@ -181,7 +187,13 @@ export const pauseJobHandler: CommandHandler<PauseJobCommand> = {
 
   plan(_command, subject) {
     return noChangeWarning(
-      { changes: pauseChanges(subject.triggers), groupChanges: [], warnings: [], rejection: null },
+      {
+        changes: pauseChanges(subject.triggers),
+        groupChanges: [],
+        inserts: [],
+        warnings: [],
+        rejection: null,
+      },
       subject.triggers.length === 0
         ? '이 잡에는 트리거가 없어 바뀌는 것이 없습니다'
         : '이미 모두 일시정지됐거나 일시정지할 수 없는 상태라 바뀌는 것이 없습니다',
@@ -239,6 +251,7 @@ export const pauseTriggerGroupHandler: CommandHandler<PauseTriggerGroupCommand> 
       {
         changes: pauseChanges(subject.triggers),
         groupChanges: groupPaused ? [] : [{ group: command.group, paused: true }],
+        inserts: [],
         warnings: [],
         rejection: null,
       },
@@ -301,6 +314,7 @@ export const pauseJobGroupHandler: CommandHandler<PauseJobGroupCommand> = {
       {
         changes: pauseChanges(subject.triggers),
         groupChanges: [],
+        inserts: [],
         warnings: [JOB_GROUP_NOT_STORED],
         rejection: null,
       },

@@ -14,6 +14,7 @@ import {
   sameExpected,
   sameTargets,
 } from './index.js';
+import { newTriggerName } from './triggers.js';
 import type { SchedulerCommandContext } from './types.js';
 
 const ctx: SchedulerCommandContext = {
@@ -56,6 +57,10 @@ interface FakeDb {
   fired: { jobGroup: string | null; jobName: string | null; nonConcurrent: boolean }[];
   /** JOB_DETAILS 행 (`그룹/이름`) */
   jobs: string[];
+  /** SCHEDULER_STATE 행 */
+  nodes: { name: string; lastCheckin: number; interval: number }[];
+  /** 즉시 실행으로 넣은 트리거의 INSERT 값(컬럼 → 값) */
+  inserted: Record<string, BindValue>[];
 }
 
 interface Call {
@@ -79,6 +84,8 @@ const clone = (db: FakeDb): FakeDb => ({
   pausedGroups: [...db.pausedGroups],
   fired: db.fired.map((f) => ({ ...f })),
   jobs: [...db.jobs],
+  nodes: db.nodes.map((n) => ({ ...n })),
+  inserted: db.inserted.map((r) => ({ ...r })),
 });
 
 /**
@@ -101,6 +108,8 @@ class FakeConn implements TargetConn {
       insertDuplicate?: boolean;
       /** 트리거 UPDATE가 0행을 돌려준다(잠금을 거치지 않은 쓰기를 흉내 낸다) */
       updateMisses?: boolean;
+      /** 이미 쓰고 있는 것으로 볼 트리거 이름(이름이 겹치면 다시 만드는지 확인) */
+      takenNames?: string[];
     } = {},
   ) {
     const full: FakeDb = {
@@ -108,6 +117,8 @@ class FakeConn implements TargetConn {
       pausedGroups: db.pausedGroups ?? [],
       fired: db.fired ?? [],
       jobs: db.jobs ?? [...new Set((db.triggers ?? []).map((t) => `${t.jobGroup}/${t.jobName}`))],
+      nodes: db.nodes ?? [{ name: 'node-1', lastCheckin: DB_NOW - 1_000, interval: 7_500 }],
+      inserted: db.inserted ?? [],
     };
     this.committed = clone(full);
     this.pending = clone(full);
@@ -132,6 +143,16 @@ class FakeConn implements TargetConn {
       return this.opts.lockRow === false ? [] : [{ L: 'TRIGGER_ACCESS' }];
     if (sql.includes('QRTZ_PAUSED_TRIGGER_GRPS')) {
       return [...db.pausedGroups].sort().map((g) => ({ G: g }));
+    }
+    if (sql.includes('QRTZ_SCHEDULER_STATE')) {
+      return db.nodes.map((n) => ({ N: n.name, L: n.lastCheckin, I: n.interval }));
+    }
+    if (sql.includes('COUNT(*)') && sql.includes('QRTZ_TRIGGERS')) {
+      const [, group, name] = binds;
+      const taken =
+        db.triggers.some((t) => t.group === group && t.name === name) ||
+        this.opts.takenNames?.includes(name as string);
+      return [{ C: taken ? 1 : 0 }];
     }
     if (sql.includes('QRTZ_FIRED_TRIGGERS')) {
       return db.fired
@@ -192,6 +213,23 @@ class FakeConn implements TargetConn {
         }
       }
       return Promise.resolve(n);
+    }
+    if (sql.startsWith('INSERT INTO "Q"."QRTZ_TRIGGERS"')) {
+      const cols = sql.slice(sql.indexOf('(') + 1, sql.indexOf(')')).split(', ');
+      const row = Object.fromEntries(cols.map((c, i) => [c, binds[i]!]));
+      db.inserted.push(row);
+      db.triggers.push({
+        group: row.TRIGGER_GROUP as string,
+        name: row.TRIGGER_NAME as string,
+        jobGroup: row.JOB_GROUP as string,
+        jobName: row.JOB_NAME as string,
+        state: row.TRIGGER_STATE as string,
+        nft: row.NEXT_FIRE_TIME as number,
+      });
+      return Promise.resolve(1);
+    }
+    if (sql.startsWith('INSERT INTO "Q"."QRTZ_SIMPLE_TRIGGERS"')) {
+      return Promise.resolve(1);
     }
     if (sql.startsWith('INSERT INTO "Q"."QRTZ_PAUSED_TRIGGER_GRPS"')) {
       const group = binds[1] as string;
@@ -686,6 +724,141 @@ describe('잡 그룹 (부록 A.4 G-08, G-10)', () => {
   });
 });
 
+describe('triggerJob (부록 A.5)', () => {
+  const TRIGGER_JOB: QuartzCommand = { type: 'triggerJob', job: { group: 'jg', name: 'j' } };
+  const run = (conn: FakeConn) =>
+    previewCommand(conn, ctx, TRIGGER_JOB, { actor: 'kim' }).then((preview) =>
+      executeCommand(conn, ctx, TRIGGER_JOB, expectedOf(preview.subject), { actor: 'kim' }),
+    );
+
+  it('DEFAULT 그룹에 반복 0회 SIMPLE 트리거를 넣는다 (T-01)', async () => {
+    const conn = new FakeConn({ jobs: ['jg/j'] });
+    const out = await run(conn);
+    const [row] = conn.committed.inserted;
+    expect(row).toMatchObject({
+      SCHED_NAME: 'S',
+      TRIGGER_GROUP: 'DEFAULT',
+      JOB_NAME: 'j',
+      JOB_GROUP: 'jg',
+      DESCRIPTION: 'quartz-admin: kim',
+      NEXT_FIRE_TIME: DB_NOW,
+      START_TIME: DB_NOW,
+      PREV_FIRE_TIME: -1,
+      END_TIME: 0,
+      PRIORITY: 5,
+      MISFIRE_INSTR: 0,
+      TRIGGER_STATE: 'WAITING',
+      TRIGGER_TYPE: 'SIMPLE',
+    });
+    expect(row?.TRIGGER_NAME).toMatch(/^MT_[0-9a-z]+$/);
+    expect(row).not.toHaveProperty('JOB_DATA');
+    expect(out.inserts).toEqual([
+      expect.objectContaining({ name: row?.TRIGGER_NAME, state: 'WAITING', group: 'DEFAULT' }),
+    ]);
+    const simple = conn.calls.find((c) =>
+      c.sql?.startsWith('INSERT INTO "Q"."QRTZ_SIMPLE_TRIGGERS"'),
+    );
+    expect(simple?.binds).toEqual(['S', row?.TRIGGER_NAME, 'DEFAULT', 0, 0, 0]);
+    expect(out.warnings).toEqual([]);
+  });
+
+  it('DEFAULT 그룹이 일시정지면 PAUSED, 전체 일시정지만 있으면 그룹 행을 넣고 PAUSED (T-02, T-03)', async () => {
+    const grouped = new FakeConn({ jobs: ['jg/j'], pausedGroups: ['DEFAULT'] });
+    const a = await run(grouped);
+    expect(a.inserts[0]?.state).toBe('PAUSED');
+    expect(a.groupChanges).toEqual([]);
+    expect(a.warnings.map((w) => w.code)).toEqual(['INSERTED_PAUSED']);
+
+    const all = new FakeConn({ jobs: ['jg/j'], pausedGroups: [ALL_GROUPS_PAUSED] });
+    const b = await run(all);
+    expect(b.inserts[0]?.state).toBe('PAUSED');
+    expect(b.groupChanges).toEqual([{ group: 'DEFAULT', paused: true }]);
+    expect(all.committed.pausedGroups.sort()).toEqual([ALL_GROUPS_PAUSED, 'DEFAULT'].sort());
+  });
+
+  it('동시 실행 금지 잡이 실행 중이면 BLOCKED, 그룹 일시정지까지면 PAUSED_BLOCKED (T-04, T-05)', async () => {
+    const fired = [{ jobGroup: 'jg', jobName: 'j', nonConcurrent: true }];
+    const running = await run(new FakeConn({ jobs: ['jg/j'], fired }));
+    expect(running.inserts[0]?.state).toBe('BLOCKED');
+    expect(running.warnings.map((w) => w.code)).toEqual(['JOB_RUNNING_NONCONCURRENT']);
+
+    const both = await run(new FakeConn({ jobs: ['jg/j'], fired, pausedGroups: ['DEFAULT'] }));
+    expect(both.inserts[0]?.state).toBe('PAUSED_BLOCKED');
+  });
+
+  it('동시 실행 허용 잡은 실행 중이어도 WAITING (T-06)', async () => {
+    const out = await run(
+      new FakeConn({
+        jobs: ['jg/j'],
+        fired: [{ jobGroup: 'jg', jobName: 'j', nonConcurrent: false }],
+      }),
+    );
+    expect(out.inserts[0]?.state).toBe('WAITING');
+  });
+
+  it('잡이 없으면 NOT_FOUND이고 아무것도 넣지 않는다 (T-07)', async () => {
+    const conn = new FakeConn({});
+    await expect(previewCommand(conn, ctx, TRIGGER_JOB)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    const err = await rejected(
+      executeCommand(conn, ctx, TRIGGER_JOB, { triggers: [], pausedGroups: [] }),
+    );
+    expect(err).toMatchObject({ code: 'NOT_FOUND' });
+    expect(conn.writes()).toEqual([]);
+  });
+
+  it('활성 노드가 없으면 경고한다', async () => {
+    const conn = new FakeConn({
+      jobs: ['jg/j'],
+      nodes: [{ name: 'node-1', lastCheckin: DB_NOW - 600_000, interval: 7_500 }],
+    });
+    const preview = await previewCommand(conn, ctx, TRIGGER_JOB);
+    expect(preview.subject.activeNodeCount).toBe(0);
+    expect(preview.plan.warnings.map((w) => w.code)).toEqual(['NO_ACTIVE_NODE']);
+    expect(preview.plan.inserts[0]?.name).toBeNull();
+  });
+
+  it('미리보기 뒤 DEFAULT 그룹이 일시정지되면 STATE_CONFLICT', async () => {
+    const conn = new FakeConn({ jobs: ['jg/j'], pausedGroups: ['DEFAULT'] });
+    const err = await rejected(
+      executeCommand(conn, ctx, TRIGGER_JOB, { triggers: [], pausedGroups: [] }),
+    );
+    expect(err).toMatchObject({ code: 'STATE_CONFLICT' });
+    expect(conn.writes()).toEqual([]);
+  });
+
+  it('이름이 겹치면 다시 만든다', async () => {
+    const conn = new FakeConn({ jobs: ['jg/j'] });
+    // 첫 이름 확인만 겹친다고 답한다. 가로챈 호출은 calls에 남지 않는다
+    let first = true;
+    const query = conn.query.bind(conn);
+    conn.query = (sql, binds) => {
+      if (first && sql.includes('COUNT(*)') && sql.includes('QRTZ_TRIGGERS')) {
+        first = false;
+        return Promise.resolve([{ C: 1 }] as never);
+      }
+      return query(sql, binds);
+    };
+    await run(conn);
+    const checks = conn.calls.filter(
+      (c) => c.sql?.includes('COUNT(*)') && c.sql.includes('QRTZ_TRIGGERS'),
+    );
+    expect(checks).toHaveLength(1);
+    expect(conn.committed.inserted).toHaveLength(1);
+  });
+});
+
+describe('newTriggerName', () => {
+  it('Quartz와 같은 MT_ 형식이고 30~36진법이다', () => {
+    for (let i = 0; i < 7; i++) {
+      const name = newTriggerName(i);
+      expect(name).toMatch(/^MT_[0-9a-z]+$/);
+    }
+    expect(new Set(Array.from({ length: 50 }, () => newTriggerName())).size).toBe(50);
+  });
+});
+
 describe('previewCommand', () => {
   it('잠금 없이 읽고 바뀔 상태를 계산한다', async () => {
     const conn = one('WAITING');
@@ -709,6 +882,7 @@ describe('previewCommand', () => {
       plan: {
         changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
         groupChanges: [],
+        inserts: [],
         warnings: [],
         rejection: null,
       },
