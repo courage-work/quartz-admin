@@ -1,20 +1,23 @@
 import { Injectable } from '@nestjs/common';
-import type {
-  ExecutingResponse,
-  JobDetailResponse,
-  JobDto,
-  JobKeyQuery,
-  JobListQuery,
-  NodesResponse,
-  Page,
-  PausedGroupsResponse,
-  TriggerDto,
-  TriggerListQuery,
+import {
+  type ExecutingResponse,
+  GROUP_OPTIONS_MAX,
+  type GroupsResponse,
+  type JobDetailResponse,
+  type JobDto,
+  type JobKeyQuery,
+  type JobListQuery,
+  type NodesResponse,
+  type Page,
+  type PausedGroupsResponse,
+  type TriggerDto,
+  type TriggerListQuery,
 } from '@qa/shared';
 import {
   ALL_GROUPS_PAUSED,
   getJobDetail,
   listExecuting,
+  listGroups,
   listJobs,
   listNodes,
   listPausedGroups,
@@ -64,6 +67,15 @@ export class SchedulerViewsService {
         allPaused: groups.includes(ALL_GROUPS_PAUSED),
       };
     });
+  }
+
+  /** 그룹 필터 선택지. 잡 그룹과 트리거 그룹은 이름 공간이 달라 따로 읽는다 */
+  groups(id: number): Promise<GroupsResponse> {
+    return this.withScheduler(id, async ({ conn, ctx, dbNow }) => ({
+      dbNow,
+      jobGroups: await listGroups(conn, ctx, 'job', GROUP_OPTIONS_MAX),
+      triggerGroups: await listGroups(conn, ctx, 'trigger', GROUP_OPTIONS_MAX),
+    }));
   }
 
   jobs(id: number, query: JobListQuery): Promise<Page<JobDto>> {

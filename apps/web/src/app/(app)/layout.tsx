@@ -33,7 +33,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <ThemeToggle />
             <UserMenu />
           </header>
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">{children}</div>
+          {/* 열이 많은 표가 있는 화면(`WidePage`)은 본문 폭을 넓힌다 */}
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8 has-data-wide-page:max-w-384">
+            {children}
+          </div>
         </SidebarInset>
       </SidebarProvider>
     </AuthGate>

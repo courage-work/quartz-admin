@@ -61,6 +61,7 @@ export {
   getJobDetail,
   isActiveNode,
   listExecuting,
+  listGroups,
   listJobs,
   listNodes,
   listPausedGroups,

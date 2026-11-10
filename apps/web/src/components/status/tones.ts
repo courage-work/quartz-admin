@@ -48,7 +48,8 @@ export const SCHEDULER_HEALTH_META = {
   ok: { tone: 'success', label: '정상', icon: CircleCheckIcon },
   warning: { tone: 'warning', label: '경고', icon: TriangleAlertIcon },
   critical: { tone: 'destructive', label: '장애', icon: OctagonAlertIcon },
-  unreachable: { tone: 'neutral', label: '연결 불가', icon: UnplugIcon },
+  // 상태를 읽지 못하는 것도 손봐야 하는 상태다. 회색이면 정상보다 조용해 보인다
+  unreachable: { tone: 'warning', label: '연결 불가', icon: UnplugIcon },
 } as const satisfies Record<SchedulerHealth, StatusMeta>;
 
 /** 알림 심각도 */

@@ -4,7 +4,13 @@ import { oracleDialect } from '../oracle/dialect.js';
 import { QUARTZ_REQUIRED_TABLES } from '../quartz-tables.js';
 import { createTableSet } from '../table-set.js';
 import { containsPattern } from './sql.js';
-import { isActiveNode, listJobs, listTriggers, type SchedulerViewContext } from './views.js';
+import {
+  isActiveNode,
+  listGroups,
+  listJobs,
+  listTriggers,
+  type SchedulerViewContext,
+} from './views.js';
 
 const features = {
   simpropTriggers: true,
@@ -34,10 +40,12 @@ class RecordingConn implements TargetConn {
   readonly kind = 'oracle' as const;
   readonly inTransaction = false;
   readonly calls: { sql: string; binds: readonly BindValue[] }[] = [];
+  /** COUNT가 아닌 쿼리에 돌려줄 행 */
+  rows: Row[] = [];
   query<R extends Row = Row>(sql: string, binds: readonly BindValue[] = []): Promise<R[]> {
     this.calls.push({ sql, binds });
     return Promise.resolve(
-      (sql.includes('COUNT(*) AS "CNT"') ? [{ CNT: 7 }] : []) as unknown as R[],
+      (sql.includes('COUNT(*) AS "CNT"') ? [{ CNT: 7 }] : this.rows) as unknown as R[],
     );
   }
   execute(): Promise<number> {
@@ -123,6 +131,30 @@ describe('listTriggers SQL', () => {
     expect(sql).not.toContain('t.PRIORITY');
     expect(sql).not.toContain('TIME_ZONE_ID');
     expect(conn.calls[1]!.binds).toEqual(['S', 50, 0]);
+  });
+});
+
+describe('listGroups SQL', () => {
+  it('그룹을 이름순으로 limit + 1개 읽고, 넘으면 잘랐다고 알린다', async () => {
+    const conn = new RecordingConn();
+    conn.rows = [{ G: 'a' }, { G: 'b' }, { G: 'c' }];
+    expect(await listGroups(conn, ctx, 'trigger', 2)).toEqual({
+      items: ['a', 'b'],
+      truncated: true,
+    });
+    expect(conn.calls[0]!.sql).toBe(
+      'SELECT DISTINCT TRIGGER_GROUP AS "G" FROM "Q"."QRTZ_TRIGGERS" WHERE SCHED_NAME = :p1 ' +
+        'ORDER BY TRIGGER_GROUP OFFSET :p3 ROWS FETCH NEXT :p2 ROWS ONLY',
+    );
+    expect(conn.calls[0]!.binds).toEqual(['S', 3, 0]);
+
+    expect(await listGroups(conn, ctx, 'job', 3)).toEqual({
+      items: ['a', 'b', 'c'],
+      truncated: false,
+    });
+    expect(conn.calls[1]!.sql).toContain(
+      'SELECT DISTINCT JOB_GROUP AS "G" FROM "Q"."QRTZ_JOB_DETAILS"',
+    );
   });
 });
 

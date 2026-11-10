@@ -67,11 +67,25 @@ const ALL = 'all';
 /** 카드에 보여 줄 트리거 상태와 순서 */
 const CARD_STATES = ['WAITING', 'EXECUTING', 'ACQUIRED', 'PAUSED', 'BLOCKED', 'ERROR'] as const;
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Stat({
+  label,
+  value,
+  hint,
+  stale,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  /** 지금 값이 아니라 마지막으로 읽은 값이다. 옅게 보인다 */
+  stale?: boolean;
+}) {
   return (
     <div className="flex flex-col gap-1 px-3 first:pl-0">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-xl leading-none font-semibold tabular-nums" title={hint}>
+      <span
+        className={`text-xl leading-none font-semibold tabular-nums ${stale ? 'text-muted-foreground' : ''}`}
+        title={hint}
+      >
         {value}
       </span>
     </div>
@@ -129,22 +143,44 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-4">
+          {/* 연결하지 못하면 문제를 먼저 알리고, 그 아래 값은 마지막으로 읽은 값임을 밝힌다 */}
+          {unreachable ? (
+            <Alert variant="warning">
+              <UnplugIcon aria-hidden />
+              <AlertTitle>
+                대상 DB에 연결하지 못했습니다 (연속 {snap.consecutiveFailures}회)
+              </AlertTitle>
+              <AlertDescription>
+                {/* 서버 메시지는 마침표 없이 끝나기도 해서 기준 시각은 줄을 바꿔 쓴다 */}
+                <span className="block">{snap.errorMessage}</span>
+                {snap.dbNow !== null ? (
+                  <span className="block">
+                    아래 값은 마지막으로 읽은 {formatDateTime(snap.dbNow)} 기준입니다.
+                  </span>
+                ) : null}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           <div className="grid grid-cols-4 divide-x divide-border">
             <Stat
               label="활성 노드"
               value={active === null ? '-' : `${active}/${nodes!.length}`}
               hint={`기대 노드 ${item.expectedNodeCount}개`}
+              stale={unreachable}
             />
-            <Stat label="트리거" value={total === null ? '-' : String(total)} />
+            <Stat label="트리거" value={total === null ? '-' : String(total)} stale={unreachable} />
             <Stat
               label="실행 중"
               value={snap?.executingCount === null || !snap ? '-' : String(snap.executingCount)}
+              stale={unreachable}
             />
             <Stat label="열린 알림" value={String(item.openAlertCount)} />
           </div>
           {counts ? (
             <div className="flex flex-col gap-2">
-              <TriggerDistribution counts={counts} />
+              <div className={unreachable ? 'opacity-50' : undefined}>
+                <TriggerDistribution counts={counts} />
+              </div>
               <div className="flex flex-wrap gap-1">
                 {CARD_STATES.filter((s) => (counts[s] ?? 0) > 0).map((s) => {
                   const meta = TRIGGER_STATE_META[s];
@@ -157,18 +193,6 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
                 })}
               </div>
             </div>
-          ) : null}
-          {unreachable ? (
-            <Alert>
-              <UnplugIcon aria-hidden />
-              <AlertTitle>
-                대상 DB에 연결하지 못했습니다 (연속 {snap.consecutiveFailures}회)
-              </AlertTitle>
-              <AlertDescription>
-                {snap.errorMessage}
-                {snap.dbNow !== null ? ` 위 값은 ${formatDateTime(snap.dbNow)} 기준입니다.` : ''}
-              </AlertDescription>
-            </Alert>
           ) : null}
           {skewWarn ? (
             <Alert variant="warning">

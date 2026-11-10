@@ -97,6 +97,8 @@ class FakeTarget {
   private answer(sql: string): Row[] {
     if (sql.includes('SYSTIMESTAMP')) return [{ NOW_MS: DB_NOW }];
     if (sql.includes('COUNT(*) AS "CNT"')) return [{ CNT: 1 }];
+    if (sql.includes('SELECT DISTINCT JOB_GROUP')) return [{ G: 'jobs' }];
+    if (sql.includes('SELECT DISTINCT TRIGGER_GROUP')) return [{ G: 'g/1' }, { G: 'g/2' }];
     if (sql.includes('SCHEDULER_STATE')) {
       return [
         { N: 'node-1', L: DB_NOW - 1_000, I: 7_500 },
@@ -273,6 +275,15 @@ describe('스케줄러 조회 API (TRD §8.1)', () => {
       10,
       10,
     ]);
+  });
+
+  it('그룹 필터 선택지: 잡 그룹과 트리거 그룹을 따로 돌려준다', async () => {
+    const res = await t.get(`/schedulers/${schedulerId}/groups`, cookie).expect(200);
+    expect(res.body).toEqual({
+      dbNow: DB_NOW,
+      jobGroups: { items: ['jobs'], truncated: false },
+      triggerGroups: { items: ['g/1', 'g/2'], truncated: false },
+    });
   });
 
   it('잘못된 쿼리는 400, 없는 스케줄러와 없는 잡은 404', async () => {

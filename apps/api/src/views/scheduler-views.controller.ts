@@ -1,6 +1,7 @@
 import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
 import {
   type ExecutingResponse,
+  type GroupsResponse,
   type JobDetailResponse,
   type JobDto,
   type JobKeyQuery,
@@ -33,6 +34,11 @@ export class SchedulerViewsController {
   @Get('paused-groups')
   pausedGroups(@Param('id', ParseIntPipe) id: number): Promise<PausedGroupsResponse> {
     return this.views.pausedGroups(id);
+  }
+
+  @Get('groups')
+  groups(@Param('id', ParseIntPipe) id: number): Promise<GroupsResponse> {
+    return this.views.groups(id);
   }
 
   @Get('jobs')

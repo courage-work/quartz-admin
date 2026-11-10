@@ -82,7 +82,8 @@ export function TriggerTable({
           <TableHead className="text-right">우선순위</TableHead>
           <TableHead>misfire 처리</TableHead>
           {actions ? (
-            <TableHead className="w-0">
+            // 표가 넓어 가로로 스크롤돼도 제어 메뉴는 보이는 폭 안에 남긴다
+            <TableHead pinned className="w-0">
               <span className="sr-only">제어</span>
             </TableHead>
           ) : null}
@@ -152,7 +153,11 @@ export function TriggerTable({
                 <span className="tabular-nums">{t.priority ?? '-'}</span>
               </TableCell>
               <TableCell>{misfireLabel(t.type, t.misfireInstruction)}</TableCell>
-              {actions ? <TableCell className="text-right">{actions(t)}</TableCell> : null}
+              {actions ? (
+                <TableCell pinned className="text-right">
+                  {actions(t)}
+                </TableCell>
+              ) : null}
             </TableRow>
           ))
         )}

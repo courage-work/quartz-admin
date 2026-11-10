@@ -2,11 +2,12 @@
 
 import { AUDIT_ACTIONS, AUDIT_RESULTS, type AuditLogPage } from '@qa/shared';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { ListFilterIcon, ScrollTextIcon, SearchXIcon, XIcon } from 'lucide-react';
+import { ListFilterIcon, ScrollTextIcon, SearchXIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 
 import { FormAlert } from '@/components/form/form-alert';
 import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
+import { type FilterChip, FilterChips } from '@/components/list/filter-chips';
 import { ListSearch } from '@/components/list/list-search';
 import { PageHeader } from '@/components/shell/page-header';
 import { TableEmpty } from '@/components/table-empty';
@@ -168,45 +169,35 @@ function ActiveFilters({
   value: AuditFilter;
   onChange: (filter: AuditFilter) => void;
 }) {
-  const chips: { key: string; label: string; clear: Partial<AuditFilter> }[] = [];
+  const chips: FilterChip[] = [];
+  const clear = (patch: Partial<AuditFilter>) => () => onChange({ ...value, ...patch });
   if (value.username)
-    chips.push({ key: 'user', label: `사용자: ${value.username}`, clear: { username: '' } });
+    chips.push({
+      key: 'user',
+      label: `사용자: ${value.username}`,
+      onClear: clear({ username: '' }),
+    });
   if (value.fromDate)
-    chips.push({ key: 'from', label: `시작일: ${value.fromDate}`, clear: { fromDate: '' } });
+    chips.push({
+      key: 'from',
+      label: `시작일: ${value.fromDate}`,
+      onClear: clear({ fromDate: '' }),
+    });
   if (value.toDate)
-    chips.push({ key: 'to', label: `종료일: ${value.toDate}`, clear: { toDate: '' } });
+    chips.push({ key: 'to', label: `종료일: ${value.toDate}`, onClear: clear({ toDate: '' }) });
   if (value.action !== 'all')
     chips.push({
       key: 'action',
       label: `작업: ${auditActionLabel(value.action)}`,
-      clear: { action: 'all' },
+      onClear: clear({ action: 'all' }),
     });
   if (value.result !== 'all')
     chips.push({
       key: 'result',
       label: `결과: ${AUDIT_RESULT_META[value.result as keyof typeof AUDIT_RESULT_META]?.label ?? value.result}`,
-      clear: { result: 'all' },
+      onClear: clear({ result: 'all' }),
     });
-  if (chips.length === 0) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-2" aria-label="적용 중인 필터">
-      {chips.map((c) => (
-        <Button
-          key={c.key}
-          variant="secondary"
-          size="sm"
-          onClick={() => onChange({ ...value, ...c.clear })}
-          aria-label={`${c.label} 필터 지우기`}
-        >
-          {c.label}
-          <XIcon data-icon="inline-end" aria-hidden />
-        </Button>
-      ))}
-      <Button variant="link" size="sm" onClick={() => onChange(EMPTY_AUDIT_FILTER)}>
-        모두 지우기
-      </Button>
-    </div>
-  );
+  return <FilterChips chips={chips} onClearAll={() => onChange(EMPTY_AUDIT_FILTER)} />;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

@@ -643,6 +643,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 | GET | `/schedulers/:id` | 상세. 설정·감지 정보에 접속 요약(이름, 환경, 태그, 읽기 전용, 쓰기 가능), 마지막 스냅샷, 열린 알림 수를 붙인다 |
 | GET | `/schedulers/:id/nodes` | 실시간 노드 목록 |
 | GET | `/schedulers/:id/paused-groups` | 일시정지된 트리거 그룹 |
+| GET | `/schedulers/:id/groups` | 그룹 필터 선택지. 잡 그룹과 트리거 그룹 이름(각각 이름순, 최대 200개) |
 | GET | `/schedulers/:id/jobs` | `group`, `q`, `page`, `size`(최대 200), `sort` |
 | GET | `/schedulers/:id/jobs/detail?group=&name=` | 잡 상세, 트리거 목록, JobDataMap(가능한 경우) |
 | GET | `/schedulers/:id/triggers` | `state[]`, `type[]`, `group`, `q`, `page`, `size`, `sort`(`key`/`nextFireTime`) |
@@ -659,6 +660,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 | --- | --- |
 | `nodes` | 인스턴스명, 마지막 체크인 시각, 체크인 간격, 활성 여부(§9.2, 스케줄러의 `checkin_multiplier`), 마지막 체크인 후 경과 시간 |
 | `paused-groups` | 일시정지된 그룹 목록. `pauseAll` 표시 행(`_$_ALL_GROUPS_PAUSED_$_`)은 목록에서 빼고 `allPaused`로 알립니다 |
+| `groups` | `jobGroups`, `triggerGroups`: 각각 `{ items, truncated }`. 그룹이 200개(`GROUP_OPTIONS_MAX`)를 넘으면 앞 200개만 주고 `truncated: true`로 알리며, 화면은 선택 상자 대신 직접 입력을 받습니다 |
 | `jobs` | 그룹, 이름, 잡 클래스, 설명, durable, 동시 실행 금지, 데이터 갱신, 복구 요청, 트리거 수. 정렬은 그룹·이름 |
 | `jobs/detail` | 잡, 연결된 트리거 전체(목록과 같은 형식), JobDataMap 판정(§8.3). 없는 잡은 404 |
 | `triggers` | 그룹, 이름, 대상 잡, 설명, 타입, 상태, 다음·이전 실행 시각, 시작·종료 시각, 우선순위, `MISFIRE_INSTR` 원래 값, 캘린더, 일정(CRON: 표현식·타임존, SIMPLE: 반복 횟수·간격·실행 횟수, CAL_INT·DAILY_I: `SIMPROP_TRIGGERS` 원래 값) |
