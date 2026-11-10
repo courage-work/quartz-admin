@@ -68,6 +68,8 @@ export const API_ERROR_CODES = [
   'TRIGGER_COMPLETE',
   /** 트리거 종류가 명령과 맞지 않음 (409) */
   'TRIGGER_TYPE_MISMATCH',
+  /** 노드가 집은 트리거를 경합이 나는 시각으로 수정하려 함. 발화 뒤 다시 하거나 일시정지 후 수정 (409, TRD §7.6) */
+  'TRIGGER_ACQUIRED',
   /** 요청이 너무 많음 (429) */
   'RATE_LIMITED',
   /** 처리하지 못한 서버 오류 (500) */

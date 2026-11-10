@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.20 (B-20 스케줄 수정 반영) |
+| 문서 버전 | v0.21 (집힌 트리거 수정 경합 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -34,6 +34,7 @@
 | v0.18 | 2026-11-10 | B-18: §7.1 명령 형식(일시정지·재개 8종), 기대 상태에 관련 그룹의 일시정지 여부(`pausedGroups`) 추가, 그룹 행 변경(`groupChanges`)·명령별 거부(`RESUME_IN_PAUSED_GROUP`)·경고 코드·감사 작업 종류 추가, 묶음 UPDATE. §7.4 전체 일시정지 중 `resumeTriggerGroup`도 거부 대상임을 명시 |
 | v0.19 | 2026-11-10 | B-19: §7.1 명령 형식에 `triggerJob`, 계획의 새 트리거(`inserts`)와 적용 순서, 감사 작업 종류 `job.trigger`, 경고 코드(`JOB_RUNNING_NONCONCURRENT`, `NO_ACTIVE_NODE`, `INSERTED_PAUSED`) 추가. §7.5 이름 정하는 방식(잠금 안에서 겹침 확인), 활성 노드 판정, 기대 상태, 넣지 않는 컬럼 확정 |
 | v0.20 | 2026-11-10 | B-20: §7.1 명령 형식에 `updateCronSchedule`·`updateSimpleSchedule`, 계획의 스케줄 변경(`scheduleChanges`)과 적용 순서, 명령별 거부 코드(`INVALID_SCHEDULE` 400, `CALENDAR_ATTACHED`·`TRIGGER_COMPLETE`·`TRIGGER_TYPE_MISMATCH` 409)와 경고(`ERROR_CLEARED`, `PAUSE_KEPT`), 감사 작업 종류 `trigger.reschedule`. §7.6 식 대문자 저장, 모르는 타임존 거부, 적용 방식, 미리보기·타임존 API, 수정 화면. §8.1 트리거 상세 API |
+| v0.21 | 2026-11-10 | §7.2·§7.6: 집힌(ACQUIRED) 트리거를 고친 뒤 다른 노드가 새 스케줄로 다시 집으면 옛 노드가 옛 스케줄로 발화하고 수정이 사라지는 경합을 확인(Quartz 2.5.2 CI 실패, 로컬 재현). 새 실행 시각이 옛 발화 시각부터 35초 안이면 `TRIGGER_ACQUIRED`(409)로 거부. 부록 A.6 C-05·S-07 조건을 경합 구간 밖으로 바꾸고 C-14·S-08 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -490,7 +491,7 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 - **조건부 변경(4-e)**: `UPDATE … SET TRIGGER_STATE = 새 상태 WHERE SCHED_NAME AND TRIGGER_GROUP = ? AND TRIGGER_STATE = 바꾸기 전 상태 AND TRIGGER_NAME IN (…)`입니다. 그룹과 전·후 상태가 같은 트리거를 500개까지 한 문장으로 묶습니다(Oracle IN 목록 상한 1,000). 그룹 명령처럼 대상이 많을 때 잠금을 잡고 있는 시간을 줄이기 위해서입니다. `PAUSED_TRIGGER_GRPS` 행은 계획이 지금 상태를 보고 정하므로(없을 때만 INSERT, 있을 때만 DELETE) 행마다 1이어야 합니다. 바뀐 행 수(트리거 + 그룹 행)가 계획과 다르면(잠금을 거치지 않은 쓰기) ROLLBACK하고 `STATE_CONFLICT`로 응답합니다. 바뀌는 것이 없는 명령(예: 이미 PAUSED인 트리거 일시정지)은 UPDATE 없이 커밋하고 `changed: false`와 `NO_CHANGE` 경고로 알립니다(부록 A.2 P-04).
 - **잠금 행 INSERT**: Oracle은 다른 세션이 커밋하지 않은 같은 키를 INSERT하면 그 세션이 끝날 때까지 기다립니다. Quartz의 잠금 행 INSERT는 짧은 트랜잭션이고, 기다림은 커넥션의 조회 제한(10초)에 묶입니다.
 - **직렬화(2단계)**: 프로세스 안 키별 뮤텍스(`KeyedMutex`)입니다. 같은 스케줄러의 명령은 들어온 순서대로 하나씩 실행하고, 앞 명령이 실패해도 다음 명령은 실행합니다.
-- **명령별 거부와 경고**: 계획이 실행하면 안 되는 이유(`rejection`)를 내면 미리보기는 `blocked`로 보여 주고, 실행은 대상 DB를 바꾸지 않고 거부합니다. 코드는 `RESUME_IN_PAUSED_GROUP`(409, §7.4, 본문 `current`에 해당 트리거 키), 스케줄 수정의 `INVALID_SCHEDULE`(400: cron 문법·타임존·반복 값·시작·종료 시각·더 이상 발화하지 않음), `CALENDAR_ATTACHED`·`TRIGGER_COMPLETE`·`TRIGGER_TYPE_MISMATCH`(409, §7.6)입니다. 경고 코드는 `NO_CHANGE`, `MISFIRE_DELEGATED`(재개한 트리거 중 실행 시각이 지난 것, §7.4), `NO_NEXT_FIRE_TIME`(재개해도 바뀌지 않는 트리거, 부록 A.3 R-08), `JOB_GROUP_NOT_STORED`(잡 그룹 일시정지는 저장되지 않음, §7.3), 즉시 실행의 `JOB_RUNNING_NONCONCURRENT`·`NO_ACTIVE_NODE`·`INSERTED_PAUSED`(§7.5), 스케줄 수정의 `ERROR_CLEARED`·`PAUSE_KEPT`(§7.6)이고, 해당 트리거를 앞쪽 20개까지 붙입니다.
+- **명령별 거부와 경고**: 계획이 실행하면 안 되는 이유(`rejection`)를 내면 미리보기는 `blocked`로 보여 주고, 실행은 대상 DB를 바꾸지 않고 거부합니다. 코드는 `RESUME_IN_PAUSED_GROUP`(409, §7.4, 본문 `current`에 해당 트리거 키), 스케줄 수정의 `INVALID_SCHEDULE`(400: cron 문법·타임존·반복 값·시작·종료 시각·더 이상 발화하지 않음), `CALENDAR_ATTACHED`·`TRIGGER_COMPLETE`·`TRIGGER_TYPE_MISMATCH`·`TRIGGER_ACQUIRED`(409, §7.6)입니다. 경고 코드는 `NO_CHANGE`, `MISFIRE_DELEGATED`(재개한 트리거 중 실행 시각이 지난 것, §7.4), `NO_NEXT_FIRE_TIME`(재개해도 바뀌지 않는 트리거, 부록 A.3 R-08), `JOB_GROUP_NOT_STORED`(잡 그룹 일시정지는 저장되지 않음, §7.3), 즉시 실행의 `JOB_RUNNING_NONCONCURRENT`·`NO_ACTIVE_NODE`·`INSERTED_PAUSED`(§7.5), 스케줄 수정의 `ERROR_CLEARED`·`PAUSE_KEPT`(§7.6)이고, 해당 트리거를 앞쪽 20개까지 붙입니다.
 - **감사 기록**: 작업 종류는 명령마다 하나(`trigger.pause`·`trigger.resume`, `job.pause`·`job.resume`, `trigger_group.pause`·`trigger_group.resume`, `job_group.pause`·`job_group.resume`, `job.trigger`, `trigger.reschedule`), 대상 종류는 `trigger`·`job`·`trigger_group`·`job_group`, 대상은 SCHED_NAME과 트리거·잡 키 또는 그룹 이름, `before`는 요청(`command`, `expected`), `after`는 변경 후 상태(`triggers`, `pausedGroups`)와 바뀐 목록(`changes`, `groupChanges`, 즉시 실행이면 넣은 트리거 `inserts`, 스케줄 수정이면 전·후 스케줄 `scheduleChanges`)입니다. `STATE_CONFLICT`면 `after`에 최신 상태를, `RESUME_IN_PAUSED_GROUP`이면 해당 트리거를 남깁니다. 사전 검사에서 거부한 요청도 실패로 남깁니다. 요청 형식 검증(400)에서 막힌 요청은 남기지 않습니다(§10).
 - **화면 갱신**: 실행이 성공하면 화면은 결과를 알림(toast)으로 알리고 그 스케줄러의 조회를 모두 다시 읽습니다. 서버는 상태가 바뀌었으면 감시 루프에 즉시 감시를 요청해 대시보드 카드도 갱신합니다(NFR-UX-03).
 - **구현**: 실행 절차 4단계는 `@qa/store`의 `commands/`(`executeCommand`, `previewCommand`, `acquireTriggerAccess`, 핸들러 `pause-resume.ts`·`trigger-job.ts`·`reschedule.ts`, 공통 읽기·계획·적용 `triggers.ts`), 1·2·3·5단계는 `apps/api/src/commands/`(`QuartzCommandService`)입니다. 화면은 공통 확인 대화상자(`components/commands/command-dialog.tsx`)와 제어 메뉴(`components/commands/control-menu.tsx`, 트리거·잡·그룹용은 `components/schedulers/trigger-actions.tsx`)입니다. 제어 메뉴는 트리거 표의 줄, 잡 목록의 줄, 잡 상세 머리, 트리거·잡 탭에서 그룹 필터를 골랐을 때 필터 옆에 있고, 일시정지 그룹 탭은 줄마다 재개 버튼을 둡니다.
@@ -534,6 +535,7 @@ S1(B-08)에서 Quartz 2.3.2와 2.5.2 소스로 확인한 내용입니다. 두 �
 - 잠금을 잡은 뒤 대상 트리거 행을 `SELECT … FOR UPDATE`로 잠그고 상태를 다시 읽습니다(§7.1 d). 잠금 없는 획득의 3단계 UPDATE는 이 행 잠금을 기다렸다가, 도구가 커밋한 뒤 WHERE 조건을 다시 평가합니다. 도구가 PAUSED로 바꿨다면 0행이 되어 획득하지 않습니다.
 - 상태 변경 UPDATE에는 항상 `WHERE TRIGGER_STATE IN (기대 상태들)`을 붙입니다. 행 잠금으로 이미 보호되지만, 잠금이 빠진 경로가 생겨도 잘못 덮어쓰지 않게 하는 이중 안전장치입니다. Quartz의 `pauseTrigger`는 상태를 읽은 뒤 조건 없는 UPDATE를 하는데, 도구의 방식은 그보다 엄격하고 결과는 같습니다.
 - **ACQUIRED 트리거의 스케줄 컬럼을 바꿀 때는 상태도 반드시 ACQUIRED에서 벗어나게 합니다.** ACQUIRED로 남겨 두면 노드가 발화할 때 메모리의 옛 트리거로 행 전체를 덮어써 변경이 사라집니다. Quartz `rescheduleJob`도 트리거를 지우고 WAITING으로 다시 넣으므로 같은 결과입니다(§7.6). 일시정지와 삭제는 상태가 ACQUIRED에서 벗어나므로 문제가 없습니다.
+- **집힌 트리거를 고친 뒤의 클러스터 경합**: 상태를 WAITING으로 되돌려도, 새 스케줄의 실행 시각이 옛 발화 시각 F 직후면 **다른 노드가 F 전에 새 스케줄로 다시 집을 수 있습니다**. 그러면 상태가 다시 ACQUIRED가 되고, 처음 집은 노드는 F에 상태가 ACQUIRED인 것만 확인해(`JSS.triggerFired`는 누가 집었는지 보지 않음) 메모리의 옛 트리거로 발화한 뒤 행을 옛 스케줄로 덮어씁니다. 새 스케줄은 사라지고 옛 시각에 한 번 실행됩니다. 노드는 `idleWaitTime`(기본 30초) 앞까지 집으므로, F 이후 첫 새 실행 시각이 F + 30초보다 이르면 생길 수 있습니다. Quartz 2.5.2 CI에서 실패했고 2노드 테스트베드에서 3번 중 2번 재현했습니다. Quartz `rescheduleJob`도 같은 경합을 가집니다(호출한 노드의 스레드만 깨움). 도구는 이 경우를 거부합니다(§7.6 "집힌 트리거").
 - 남는 경합 창: 획득 2단계(읽기)와 3단계(UPDATE) 사이에 도구가 스케줄을 바꾸고 커밋하면, 노드는 옛 스케줄로 획득합니다. 이 창은 수 ms이고 Quartz 자체의 `rescheduleJob`에도 똑같이 있습니다(기본 설정의 Quartz가 감수하는 위험). 도구는 이 이상을 보장하지 않습니다.
 - 교착: 도구는 항상 "잠금 행 → 대상 행" 순서로 잠급니다. 잠금 없는 획득은 잠금 행을 기다리지 않고 트리거 행을 하나만 성공적으로 잠그므로, 단일 트리거 명령에서는 교착 순환이 생기지 않습니다. 여러 행을 바꾸는 명령(잡, 그룹)은 MySQL의 REPEATABLE READ에서 획득 쪽의 실패한 UPDATE가 행 잠금을 남길 수 있어 교착이 생길 수 있습니다. Quartz 자체의 `pauseTriggers`도 같은 위험을 가집니다. DB가 교착을 감지하면 한쪽을 롤백합니다. 도구 쪽이 롤백되면 `TARGET_ERROR`(재시도 가능)로 응답하고 대상 DB는 바뀌지 않습니다. Quartz 쪽이 롤백되면 노드가 다음 루프에서 다시 획득합니다(`QST.run`의 `acquiresFailed` 처리).
 - Quartz의 misfire 판정과 노드 장애 판정은 **노드의 시계**(`System.currentTimeMillis()`)를 씁니다. 도구는 DB 시각을 쓰므로, 노드와 DB의 시계 차이만큼 경계값 판정이 어긋날 수 있습니다. 도구는 경계값에 걸리는 판단을 하지 않도록 설계합니다(§7.4의 재개 거부 조건은 "지났는지"만 봄).
@@ -640,6 +642,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
   2. 기준 상태가 WAITING이면 §7.3 "트리거 저장 시 상태 결정"의 그룹 규칙을 적용합니다(전체 일시정지면 그룹 행 INSERT 포함).
   3. 잡이 동시 실행 금지이면 BLOCKED 판정을 적용합니다.
   - 그래서 ACQUIRED → WAITING이 됩니다. §7.2의 규약대로 노드가 옛 스케줄로 덮어쓰는 것을 막는 핵심 규칙입니다. ERROR → WAITING도 Quartz와 같습니다(미리보기에서 "오류 상태가 해제됩니다"라고 경고). COMPLETE 트리거는 곧 삭제될 트리거이므로 거부합니다.
+- **집힌 트리거**: 지금 상태가 ACQUIRED이고, 옛 발화 시각 F(지금 NEXT_FIRE_TIME) 이후 첫 새 실행 시각이 F + 35초보다 이르면 `TRIGGER_ACQUIRED`(409)로 거부하고 아무것도 바꾸지 않습니다(§7.2 "집힌 트리거를 고친 뒤의 클러스터 경합"). 35초는 `idleWaitTime` 기본값 30초에 시계 차이와 처리 시간 여유 5초를 더한 값입니다. `idleWaitTime`을 늘린 클러스터는 그만큼 경합 구간이 넓어지며, 도구는 그 설정을 알 수 없으므로 보장하지 않습니다. 안내 문구는 "예정된 실행이 지난 뒤 다시 시도하거나, 트리거를 일시정지한 뒤 수정하고 재개하세요"입니다. 일시정지된 트리거는 노드가 집지 않고 수정 뒤에도 일시정지가 유지되므로(아래), 일시정지 → 수정 → 재개는 경합 없이 고치는 방법입니다. 30초 이하 간격으로 도는 트리거는 거의 늘 집혀 있으므로 이 방법을 써야 합니다. 상태 비교는 WAITING과 ACQUIRED를 같게 보므로(§7.1), 미리보기에서 WAITING이었어도 실행 직전에 집혔으면 이 이유로 거부될 수 있습니다.
 - **개별 일시정지 유지**: 개별로 일시정지된 트리거는 수정 후에도 PAUSED입니다. Quartz `rescheduleJob`은 이를 해제하므로 운영자의 기대에 맞추기 위한 **의도된 차이**입니다(§13 제안 5, PRD FR-CTL-00d).
 - **캘린더 연결 트리거**: CALENDAR_NAME이 있는 트리거는 수정할 수 없습니다. 캘린더는 Java 직렬화 BLOB이라 제외 시간을 계산할 수 없기 때문입니다(§13 제안 2).
 - **식과 타임존 저장**: 식은 Quartz `CronExpression`처럼 대문자로 바꿔 저장합니다(`0 0 12 ? * mon-fri` → `MON-FRI`). 타임존은 Java ID로 받고, Java가 모르는 ID는 거부합니다. Quartz는 `TimeZone.getTimeZone`이 모르는 ID를 GMT로 바꿔 조용히 저장하는데, 오타를 막기 위한 **의도된 차이**입니다.
@@ -1039,7 +1042,7 @@ B-17~B-21의 통합 테스트와 차등 테스트가 이 목록을 씁니다. �
 | C-02 | CRON T1 `P` | updateCron T1 | 상태 `P` 유지 (Δ: Quartz는 `W`) | 도구 |
 | C-03 | CRON T1(JN) `PB`, JN 실행 중 / 실행 아님 | updateCron T1 | 각각 `PB` / `P` (Δ) | 도구 |
 | C-04 | CRON T1(JN) `B`, JN 실행 중 | updateCron T1 | 상태 `B` | 차등 |
-| C-05 | CRON T1 `A` (발화 10초 전에 획득됨) | updateCron T1 (첫 실행이 1분 뒤인 식) | 상태 `W`. 옛 시각에 발화하지 않음. 이후 새 식의 시각에 발화하고 NFT가 옛 식으로 되돌아가지 않음 | 차등 + 통합 |
+| C-05 | CRON T1 `A` (발화 10초 전에 획득됨) | updateCron T1 (옛 발화 뒤 첫 실행이 35초 이후인 식, 예: 매분 0초 → 45초) | 상태 `W`. 옛 시각에 발화하지 않음. 이후 새 식의 시각에 발화하고 NFT가 옛 식으로 되돌아가지 않음 | 차등 + 통합 |
 | C-06 | CRON T1 `E` | updateCron T1 | 상태 `W` (Quartz와 같음, 미리보기 경고) | 차등 |
 | C-07 | CRON T1 `W`인데 그룹 G가 `PTG`에 있음(개별 재개 후) | updateCron T1 | 상태 `P` | 차등 |
 | C-08 | CRON T1 `W`, `PTG`에 `ALL`만 | updateCron T1 | 상태 `P`, `PTG`에 G 행 INSERT | 차등 |
@@ -1054,7 +1057,9 @@ B-17~B-21의 통합 테스트와 차등 테스트가 이 목록을 씁니다. �
 | S-04 | SIMPLE T1 | 횟수 3, 간격 0 | 400, 변화 없음 (Quartz `validate`도 거부) | 차등 |
 | S-05 | SIMPLE T1, END_TIME = dbNow + 1분 | startAt = dbNow + 2분 | 400, 변화 없음 | 차등 |
 | S-06 | SIMPLE T1 `P` | updateSimple T1 | 상태 `P` 유지 (Δ) | 도구 |
-| S-07 | SIMPLE T1 `A` | updateSimple T1 | 상태 `W` (C-05와 같은 이유) | 차등 + 통합 |
+| S-07 | SIMPLE T1 `A` | updateSimple T1 (시작이 옛 발화 35초 이후) | 상태 `W` (C-05와 같은 이유). 옛 시각에 발화하지 않고 새 시작 시각에 발화 | 차등 + 통합 |
+| C-14 | CRON T1 `A` | updateCron T1 (옛 발화 뒤 35초 안에 실행이 있는 식, 예: 매초) | 409 `TRIGGER_ACQUIRED`, 변화 없음 (Δ: Quartz는 받아들이고 경합이 생김) | 도구 + 통합 |
+| S-08 | SIMPLE T1 `A` | updateSimple T1 (시작이 옛 발화 15초 뒤, 또는 옛 발화 직후에 반복 실행이 걸리는 간격) | 409 `TRIGGER_ACQUIRED`, 변화 없음 (Δ) | 도구 + 통합 |
 
 ### A.7 삭제 (`deleteTrigger`, `deleteJob`) — 근거 `JSS.removeTrigger`, `JSS.removeJob`, `QS.deleteJob`, `JSS.triggeredJobComplete`
 

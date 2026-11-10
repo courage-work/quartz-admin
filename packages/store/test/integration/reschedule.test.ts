@@ -506,7 +506,7 @@ describe(`스케줄 수정 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
     const runsOf = async (group: string) =>
       listExecutions(conn, { schedName: sched(), triggerGroup: group, triggerName: 't' });
 
-    it('C-05 ACQUIRED를 수정하면 WAITING이 되고 옛 시각에 발화하지 않으며, 새 식의 시각에 발화한다 (통합)', async () => {
+    it('C-05·C-14 집힌 트리거: 옛 발화 직후로 고치면 거부, 그 밖이면 WAITING이 되고 옛 시각에 발화하지 않으며 새 식의 시각에 발화한다 (통합)', async () => {
       await node().addJob({ name: 'job-c05', group: 'c05', type: 'RecordingJob', durable: true });
       // 매분 0초. 노드는 발화 최대 30초 전에 집는다
       await node().scheduleJob({
@@ -520,15 +520,27 @@ describe(`스케줄 수정 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
         },
       });
       const { nft: oldFire } = await waitAcquired('c05', 5_000);
+
+      // C-14: 매초 실행으로 고치면 옛 발화 직후에 새 실행이 있어 다른 노드가 먼저 집을 수 있다 → 거부, 행은 그대로
+      const err = await toolError(sched(), {
+        type: 'updateCronSchedule',
+        trigger: { group: 'c05', name: 't' },
+        cronExpression: '* * * * * ?',
+        timeZone: 'UTC',
+      });
+      expect(err).toMatchObject({ code: 'TRIGGER_ACQUIRED' });
+      expect((await row(sched(), 'c05', 't'))?.state).toBe('ACQUIRED');
+
+      // C-05: 매분 45초는 옛 발화(0초) 뒤 첫 실행이 45초 뒤라 경합 구간(35초) 밖이다
       const out = await toolRun(sched(), {
         type: 'updateCronSchedule',
         trigger: { group: 'c05', name: 't' },
-        cronExpression: '30 * * * * ?',
+        cronExpression: '45 * * * * ?',
         timeZone: 'UTC',
       });
       expect(out.changes).toEqual([{ group: 'c05', name: 't', from: 'ACQUIRED', to: 'WAITING' }]);
       const newFire = out.scheduleChanges[0]!.to.nextFireTime!;
-      expect(new Date(newFire).getUTCSeconds()).toBe(30);
+      expect(new Date(newFire).getUTCSeconds()).toBe(45);
 
       // 옛 시각이 지나도 발화하지 않는다
       await waitFor(async () => (await dbNow()) > oldFire + 3_000, { timeoutMs: 40_000 });
@@ -536,31 +548,13 @@ describe(`스케줄 수정 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
       // 새 시각에 발화하고 다음 실행 시각이 옛 식(0초)으로 돌아가지 않는다
       await waitFor(
         async () => (await runsOf('c05')).some((r) => r.scheduledFireTime === newFire),
-        {
-          timeoutMs: 60_000,
-          message: '새 식의 시각에 발화',
-        },
-      ).catch(async (err: unknown) => {
-        // 진단: 실패하면 트리거 행, 실행 기록, FIRED_TRIGGERS를 남긴다
-        const fired = await conn.execute(
-          `SELECT * FROM ${T('FIRED_TRIGGERS')} WHERE SCHED_NAME = :1 AND TRIGGER_GROUP = 'c05'`,
-          [sched()],
-        );
-        console.log('C-05 진단', {
-          oldFire,
-          newFire,
-          dbNow: await dbNow(),
-          row: await row(sched(), 'c05', 't'),
-          runs: (await runsOf('c05')).map((r) => [r.scheduledFireTime, r.fireTime, r.instanceId]),
-          fired: fired.rows,
-        });
-        throw err;
-      });
+        { timeoutMs: 120_000, message: '새 식의 시각에 발화' },
+      );
       const after = await row(sched(), 'c05', 't');
-      expect(new Date(after!.nft!).getUTCSeconds()).toBe(30);
-    }, 180_000);
+      expect(new Date(after!.nft!).getUTCSeconds()).toBe(45);
+    }, 240_000);
 
-    it('S-07 SIMPLE도 ACQUIRED를 수정하면 WAITING이 되고 옛 시각에 발화하지 않는다 (통합)', async () => {
+    it('S-07·S-08 SIMPLE 집힌 트리거: 옛 발화 직후 시작은 거부, 35초 밖이면 WAITING이 되고 옛 시각에 발화하지 않는다 (통합)', async () => {
       await node().addJob({ name: 'job-s07', group: 's07', type: 'RecordingJob', durable: true });
       await node().scheduleJob({
         trigger: {
@@ -572,24 +566,30 @@ describe(`스케줄 수정 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
         },
       });
       const { nft: oldFire } = await waitAcquired('s07', 4_000);
-      const startAt = oldFire + 15_000;
-      const out = await toolRun(sched(), {
+      const update = (startAt: number): QuartzCommand => ({
         type: 'updateSimpleSchedule',
         trigger: { group: 's07', name: 't' },
         repeatIntervalMs: 60_000,
         repeatCount: -1,
         startAt,
       });
+
+      // S-08: 옛 발화 15초 뒤 시작 → 거부, 행은 그대로
+      expect(await toolError(sched(), update(oldFire + 15_000))).toMatchObject({
+        code: 'TRIGGER_ACQUIRED',
+      });
+      expect((await row(sched(), 's07', 't'))?.state).toBe('ACQUIRED');
+
+      // S-07: 옛 발화 40초 뒤 시작 → 실행
+      const startAt = oldFire + 40_000;
+      const out = await toolRun(sched(), update(startAt));
       expect(out.changes[0]).toMatchObject({ from: 'ACQUIRED', to: 'WAITING' });
       await waitFor(
         async () => (await runsOf('s07')).some((r) => r.scheduledFireTime === startAt),
-        {
-          timeoutMs: 60_000,
-          message: '새 시작 시각에 발화',
-        },
+        { timeoutMs: 90_000, message: '새 시작 시각에 발화' },
       );
       expect((await runsOf('s07')).filter((r) => r.scheduledFireTime === oldFire)).toEqual([]);
-    }, 180_000);
+    }, 240_000);
 
     it('C-13 실제 발화 시각이 미리보기 5개와 같다 (통합)', async () => {
       await node().addJob({ name: 'job-c13', group: 'c13', type: 'RecordingJob', durable: true });
