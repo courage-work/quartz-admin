@@ -37,6 +37,7 @@ import { api, isApiError } from '@/lib/api';
 import { CONNECTIONS_KEY } from '@/lib/connections';
 import { applyApiError } from '@/lib/form-errors';
 import { parseId } from '@/lib/navigation';
+import { usePageTitle } from '@/lib/page-title';
 import { schedulerKey } from '@/lib/schedulers';
 
 type FormInput = z.input<typeof schedulerSettingsSchema>;
@@ -50,10 +51,16 @@ const FIELDS: (keyof SchedulerSettings)[] = [
   'pollIntervalSec',
 ];
 
-function SettingsForm({ scheduler }: { scheduler: SchedulerDetailDto }) {
+function SettingsForm({
+  scheduler,
+  back,
+}: {
+  scheduler: SchedulerDetailDto;
+  /** 저장·취소 뒤 돌아갈 화면(들어온 곳) */
+  back: string;
+}) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const back = `/connection?id=${scheduler.connectionId}`;
   const form = useForm<FormInput, unknown, SchedulerSettings>({
     mode: 'onSubmit',
     resolver: zodResolver(schedulerSettingsSchema),
@@ -184,36 +191,55 @@ export function SchedulerSettingsView() {
     enabled: id !== null,
   });
 
-  if (id === null || isApiError(detail.error, 'NOT_FOUND')) {
+  // 스케줄러 상세에서 들어왔으면(`from=scheduler`) 경로와 돌아갈 곳을 그 화면으로 둔다. 기본은 접속 상세다
+  const fromScheduler = params.get('from') === 'scheduler';
+  usePageTitle(detail.data ? `${detail.data.displayName} 설정` : undefined);
+
+  // 아직 못 읽었거나 읽지 못했어도 화면 머리(경로, 돌아가기)는 남긴다
+  if (detail.isError || detail.isPending) {
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <SearchXIcon aria-hidden />
-          </EmptyMedia>
-          <EmptyTitle>스케줄러를 찾을 수 없습니다</EmptyTitle>
-          <EmptyDescription>주소가 잘못됐거나 등록을 해제한 스케줄러입니다.</EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button asChild variant="outline">
-            <Link href="/connections">접속 목록으로 가기</Link>
-          </Button>
-        </EmptyContent>
-      </Empty>
+      <>
+        <PageHeader trail={[{ label: '접속', href: '/connections' }]} title="스케줄러 설정" />
+        {id === null || isApiError(detail.error, 'NOT_FOUND') ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <SearchXIcon aria-hidden />
+              </EmptyMedia>
+              <EmptyTitle>스케줄러를 찾을 수 없습니다</EmptyTitle>
+              <EmptyDescription>주소가 잘못됐거나 등록을 해제한 스케줄러입니다.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button asChild variant="outline">
+                <Link href="/connections">접속 목록으로 가기</Link>
+              </Button>
+            </EmptyContent>
+          </Empty>
+        ) : detail.isError ? (
+          <FormAlert error={detail.error} />
+        ) : (
+          <Skeleton className="h-64 w-full" />
+        )}
+      </>
     );
   }
-  if (detail.isError) return <FormAlert error={detail.error} />;
-  if (detail.isPending) return <Skeleton className="h-64 w-full" />;
   const s = detail.data;
 
   return (
     <>
       <ProdStripe environment={s.connection.envLabel} name={s.displayName} />
       <PageHeader
-        trail={[
-          { label: '접속', href: '/connections' },
-          { label: s.connection.name, href: `/connection?id=${s.connectionId}` },
-        ]}
+        trail={
+          fromScheduler
+            ? [
+                { label: '대시보드', href: '/' },
+                { label: s.displayName, href: `/scheduler?id=${s.id}` },
+              ]
+            : [
+                { label: '접속', href: '/connections' },
+                { label: s.connection.name, href: `/connection?id=${s.connectionId}` },
+              ]
+        }
         title={`${s.displayName} 설정`}
         description={
           <span className="flex flex-wrap items-center gap-2">
@@ -222,7 +248,11 @@ export function SchedulerSettingsView() {
           </span>
         }
       />
-      <SettingsForm key={s.id} scheduler={s} />
+      <SettingsForm
+        key={s.id}
+        scheduler={s}
+        back={fromScheduler ? `/scheduler?id=${s.id}` : `/connection?id=${s.connectionId}`}
+      />
     </>
   );
 }

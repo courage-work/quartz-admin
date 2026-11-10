@@ -2,6 +2,8 @@
 
 import {
   type ExecutingResponse,
+  type GroupOptions,
+  type GroupsResponse,
   type JobDto,
   type JobListQuery,
   type NodesResponse,
@@ -19,39 +21,34 @@ import {
   BriefcaseIcon,
   CircleCheckIcon,
   HistoryIcon,
+  ListFilterIcon,
   PauseIcon,
-  SearchIcon,
   SearchXIcon,
   ServerIcon,
   TimerIcon,
   UnplugIcon,
 } from 'lucide-react';
-import { type FormEvent, type ReactNode, useId, useRef, useState } from 'react';
+import { type FormEvent, useId, useState } from 'react';
 
 import { useCommandDialog } from '@/components/commands/use-command-dialog';
 import { FormAlert } from '@/components/form/form-alert';
 import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
+import { type FilterChip, FilterChips } from '@/components/list/filter-chips';
+import { ServerSearch } from '@/components/list/server-search';
 import { TableEmpty } from '@/components/table-empty';
 import { TableFrame } from '@/components/table-frame';
+import { GroupField } from '@/components/schedulers/group-field';
 import { PaginationBar } from '@/components/schedulers/pagination-bar';
 import { TimeCell } from '@/components/schedulers/time-cell';
 import { TriggerActions } from '@/components/schedulers/trigger-actions';
 import { JobLink, jobHref, TriggerTable } from '@/components/schedulers/trigger-table';
 import { TriggerStateBadge } from '@/components/status/status-badge';
-import { TRIGGER_STATE_META } from '@/components/status/tones';
+import { type StatusMeta, TRIGGER_STATE_META } from '@/components/status/tones';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Field, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { FieldGroup } from '@/components/ui/field';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -62,10 +59,15 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { useSlashFocus } from '@/hooks/use-slash-focus';
 import { api, type Query } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
-import { formatAgo, formatInterval, schedulerViewKey, TRIGGER_TYPE_LABELS } from '@/lib/schedulers';
+import {
+  formatAgo,
+  formatInterval,
+  schedulerViewKey,
+  TRIGGER_TYPE_LABELS,
+  triggerTypeLabel,
+} from '@/lib/schedulers';
 import { parsePage, setParam, type UrlCodec, useUrlState } from '@/lib/use-url-state';
 
 interface TabProps {
@@ -192,87 +194,41 @@ export function PausedGroupsTab({ schedulerId, refreshMs }: TabProps) {
           </AlertDescription>
         </Alert>
       ) : null}
-      {res.data.groups.length === 0 ? (
-        <p className="text-sm text-muted-foreground">일시정지된 트리거 그룹이 없습니다.</p>
-      ) : (
-        <TableFrame>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>일시정지된 트리거 그룹 ({res.data.groups.length})</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {res.data.groups.map((g) => (
+      <TableFrame>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>일시정지된 트리거 그룹 ({res.data.groups.length})</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {res.data.groups.length === 0 ? (
+              <TableEmpty colSpan={1} icon={PauseIcon} title="일시정지된 트리거 그룹이 없습니다" />
+            ) : (
+              res.data.groups.map((g) => (
                 <TableRow key={g}>
                   <TableCell>
                     <span className="font-mono">{g}</span>
                   </TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableFrame>
-      )}
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableFrame>
     </div>
   );
 }
 
 // ── 잡 ────────────────────────────────────────────────
 
-/** 목록 위 필터 묶음. 표와 구분되도록 한 면에 모은다 */
-function FilterPanel({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-xs">
-      {children}
-    </div>
-  );
-}
-
-function SearchForm({
-  group,
-  q,
-  onSubmit,
-  qScope,
-}: {
-  group: string;
-  q: string;
-  onSubmit: (group: string, q: string) => void;
-  /** 검색어가 걸리는 컬럼. 라벨에 함께 쓴다(placeholder는 형식 예시에만 쓴다) */
-  qScope: string;
-}) {
-  const [g, setG] = useState(group);
-  const [text, setText] = useState(q);
-  const id = useId();
-  const qRef = useRef<HTMLInputElement>(null);
-  useSlashFocus(qRef);
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    onSubmit(g, text);
-  };
-  return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
-      <Field className="w-56">
-        <FieldLabel htmlFor={`${id}-group`}>그룹(정확히 일치)</FieldLabel>
-        <Input id={`${id}-group`} value={g} onChange={(e) => setG(e.target.value)} />
-      </Field>
-      <Field className="w-64">
-        <FieldLabel htmlFor={`${id}-q`}>검색어({qScope})</FieldLabel>
-        <Input
-          ref={qRef}
-          id={`${id}-q`}
-          type="search"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          aria-keyshortcuts="/"
-        />
-      </Field>
-      <Button type="submit" variant="outline">
-        <SearchIcon data-icon="inline-start" aria-hidden />
-        검색하기
-      </Button>
-    </form>
-  );
+/** 그룹 필터 선택지. 자주 바뀌지 않아 주기적으로 다시 읽지 않는다(새로고침 버튼으로는 다시 읽는다) */
+function useGroups(schedulerId: number) {
+  return useQuery({
+    queryKey: schedulerViewKey(schedulerId, 'groups'),
+    queryFn: ({ signal }) => api<GroupsResponse>(`/schedulers/${schedulerId}/groups`, { signal }),
+    staleTime: 60_000,
+  });
 }
 
 const PAGE_SIZE = 50;
@@ -307,22 +263,26 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
   const setPage = (p: number) => setView((v) => ({ ...v, page: p }));
   const query: Query = { ...filter, page, size: PAGE_SIZE };
   const res = useView<Page<JobDto>>(schedulerId, 'jobs', 'jobs', refreshMs, query);
+  const groups = useGroups(schedulerId);
+  const groupId = useId();
   const yesNo = (v: boolean | null) => (v === null ? '-' : v ? '예' : '아니요');
 
   return (
     <div className="flex flex-col gap-3">
-      <FilterPanel>
-        <SearchForm
-          key={JSON.stringify(filter)}
-          group={filter.group ?? ''}
-          q={filter.q ?? ''}
-          qScope="이름·그룹·클래스"
-          onSubmit={(group, q) => {
-            setFilter({ group: group || undefined, q: q.trim() || undefined });
-            setPage(1);
-          }}
+      <div className="flex flex-wrap items-end gap-2">
+        <ServerSearch
+          label="검색(이름·그룹·클래스)"
+          value={filter.q ?? ''}
+          onApply={(q) => setView((v) => ({ ...v, q: q || undefined, page: 1 }))}
         />
-      </FilterPanel>
+        <GroupField
+          id={groupId}
+          className="w-full md:w-56"
+          value={filter.group}
+          options={groups.data?.jobGroups}
+          onChange={(group) => setView((v) => ({ ...v, group, page: 1 }))}
+        />
+      </div>
       {res.isError ? <FormAlert error={res.error} /> : null}
       <DbTime dbNow={res.data?.dbNow} />
       <TableFrame>
@@ -428,7 +388,118 @@ const TRIGGERS_CODEC: UrlCodec<TriggersView> = {
   },
 };
 
-/** 트리거 목록 (FR-VIEW-04). 상태·타입은 여러 개, 그룹은 정확히 일치, 검색어는 부분 일치 */
+interface TriggerFilter {
+  states: string[];
+  types: string[];
+  group?: string;
+}
+
+/**
+ * 트리거 필터. "필터" 버튼 하나에 상태·타입·그룹을 모아 표가 첫 화면에 보이게 한다.
+ * 감사 로그와 같은 방식이다: 팝오버 안에서 고르고 적용하면, 적용한 값이 툴바 아래 칩으로 보인다.
+ */
+function TriggerFilterPopover({
+  value,
+  groups,
+  onApply,
+}: {
+  value: TriggerFilter;
+  groups: GroupOptions | undefined;
+  onApply: (filter: TriggerFilter) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const id = useId();
+  const active = value.states.length + value.types.length + (value.group ? 1 : 0);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    onApply(draft);
+    setOpen(false);
+  };
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setDraft(value);
+        setOpen(next);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button variant="outline">
+          <ListFilterIcon data-icon="inline-start" aria-hidden />
+          필터{active > 0 ? ` (${active})` : ''}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 md:w-96">
+        <form onSubmit={submit}>
+          <FieldGroup>
+            <div className="flex flex-col gap-2">
+              <span id={`${id}-state`} className="text-sm font-medium">
+                상태
+              </span>
+              <ToggleGroup
+                type="multiple"
+                variant="outline"
+                value={draft.states}
+                onValueChange={(v) => setDraft((d) => ({ ...d, states: v }))}
+                aria-labelledby={`${id}-state`}
+                className="flex-wrap"
+              >
+                {TRIGGER_STATES.filter((s) => s !== 'DELETED').map((s) => {
+                  const meta = TRIGGER_STATE_META[s];
+                  return (
+                    <ToggleGroupItem key={s} value={s}>
+                      <meta.icon data-icon="inline-start" aria-hidden />
+                      {meta.label}
+                    </ToggleGroupItem>
+                  );
+                })}
+              </ToggleGroup>
+            </div>
+            <div className="flex flex-col gap-2">
+              <span id={`${id}-type`} className="text-sm font-medium">
+                타입
+              </span>
+              <ToggleGroup
+                type="multiple"
+                variant="outline"
+                value={draft.types}
+                onValueChange={(v) => setDraft((d) => ({ ...d, types: v }))}
+                aria-labelledby={`${id}-type`}
+                className="flex-wrap"
+              >
+                {TRIGGER_TYPES.map((t) => (
+                  <ToggleGroupItem key={t} value={t}>
+                    {TRIGGER_TYPE_LABELS[t]}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+            <GroupField
+              id={`${id}-group`}
+              value={draft.group}
+              options={groups}
+              onChange={(group) => setDraft((d) => ({ ...d, group }))}
+              live
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setDraft({ states: [], types: [], group: undefined })}
+              >
+                초기화하기
+              </Button>
+              <Button type="submit">필터 적용하기</Button>
+            </div>
+          </FieldGroup>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** 트리거 목록 (FR-VIEW-04). 상태·타입은 여러 개, 그룹은 목록에서 골라 정확히 일치, 검색어는 부분 일치 */
 export function TriggersTab({
   schedulerId,
   refreshMs,
@@ -442,9 +513,6 @@ export function TriggersTab({
   const { states, types, sort, page } = view;
   const text = { group: view.group, q: view.q };
   const update = (patch: Partial<TriggersView>) => setView((v) => ({ ...v, ...patch }));
-  const setStates = (v: string[]) => update({ states: v });
-  const setTypes = (v: string[]) => update({ types: v });
-  const setText = (v: { group?: string; q?: string }) => update({ group: v.group, q: v.q });
   const setSort = (v: TriggerSort) => update({ sort: v });
   const setPage = (v: number) => update({ page: v });
   const query: Query & Partial<Record<keyof TriggerListQuery, unknown>> = {
@@ -459,88 +527,44 @@ export function TriggersTab({
   const filtered = states.length > 0 || types.length > 0 || !!text.group || !!text.q;
   const clearFilters = () =>
     update({ states: [], types: [], group: undefined, q: undefined, page: 1 });
+  const groups = useGroups(schedulerId);
+  const chips: FilterChip[] = [
+    ...states.map((s) => ({
+      key: `state-${s}`,
+      label: `상태: ${(TRIGGER_STATE_META as Record<string, StatusMeta>)[s]?.label ?? s}`,
+      onClear: () => update({ states: states.filter((v) => v !== s), page: 1 }),
+    })),
+    ...types.map((t) => ({
+      key: `type-${t}`,
+      label: `타입: ${triggerTypeLabel(t)}`,
+      onClear: () => update({ types: types.filter((v) => v !== t), page: 1 }),
+    })),
+    ...(view.group
+      ? [
+          {
+            key: 'group',
+            label: `그룹: ${view.group}`,
+            onClear: () => update({ group: undefined, page: 1 }),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="flex flex-col gap-3">
-      <FilterPanel>
-        <div className="flex flex-wrap gap-x-8 gap-y-4">
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">상태</span>
-            <ToggleGroup
-              type="multiple"
-              variant="outline"
-              value={states}
-              onValueChange={(v) => {
-                setStates(v);
-                setPage(1);
-              }}
-              aria-label="상태 필터"
-              className="flex-wrap"
-            >
-              {TRIGGER_STATES.filter((s) => s !== 'DELETED').map((s) => {
-                const meta = TRIGGER_STATE_META[s];
-                return (
-                  <ToggleGroupItem key={s} value={s}>
-                    <meta.icon data-icon="inline-start" aria-hidden />
-                    {meta.label}
-                  </ToggleGroupItem>
-                );
-              })}
-            </ToggleGroup>
-          </div>
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">타입</span>
-            <ToggleGroup
-              type="multiple"
-              variant="outline"
-              value={types}
-              onValueChange={(v) => {
-                setTypes(v);
-                setPage(1);
-              }}
-              aria-label="타입 필터"
-              className="flex-wrap"
-            >
-              {TRIGGER_TYPES.map((t) => (
-                <ToggleGroupItem key={t} value={t}>
-                  {TRIGGER_TYPE_LABELS[t]}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <SearchForm
-            key={JSON.stringify(text)}
-            group={text.group ?? ''}
-            q={text.q ?? ''}
-            qScope="이름·그룹·잡"
-            onSubmit={(group, q) => {
-              setText({ group: group || undefined, q: q.trim() || undefined });
-              setPage(1);
-            }}
-          />
-          <Field className="w-44">
-            <FieldLabel htmlFor="view-sort">정렬</FieldLabel>
-            <Select value={sort} onValueChange={(v) => setSort(v as TriggerSort)}>
-              <SelectTrigger id="view-sort">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="key">그룹·이름 순</SelectItem>
-                  <SelectItem value="nextFireTime">다음 실행 시각 순</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </Field>
-          {filtered ? (
-            <Button variant="ghost" onClick={clearFilters}>
-              필터 모두 지우기
-            </Button>
-          ) : null}
-        </div>
-      </FilterPanel>
+      <div className="flex flex-wrap items-end gap-2">
+        <ServerSearch
+          label="검색(이름·그룹·잡)"
+          value={view.q ?? ''}
+          onApply={(q) => update({ q: q || undefined, page: 1 })}
+        />
+        <TriggerFilterPopover
+          value={{ states, types, group: view.group }}
+          groups={groups.data?.triggerGroups}
+          onApply={(f) => update({ ...f, page: 1 })}
+        />
+      </div>
+      <FilterChips chips={chips} onClearAll={clearFilters} />
       {res.isError ? <FormAlert error={res.error} /> : null}
       <DbTime dbNow={res.data?.dbNow} />
       <TableFrame>
@@ -548,6 +572,7 @@ export function TriggersTab({
           schedulerId={schedulerId}
           triggers={res.data?.items}
           loading={res.isFetching}
+          sort={{ value: sort, onChange: setSort }}
           empty={
             filtered
               ? {

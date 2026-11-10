@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/empty';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api, isApiError } from '@/lib/api';
-import { describeActor, describeTarget } from '@/lib/audit';
+import { describeActor, describeTarget, isCodeTarget } from '@/lib/audit';
 import { formatDateTime } from '@/lib/format';
 import { parseId } from '@/lib/navigation';
 import { auditActionLabel } from '@/lib/labels';
@@ -83,7 +83,7 @@ function Detail({ log }: { log: AuditLogDto }) {
           <dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-4">
             <Row label="시각">{formatDateTime(log.at)}</Row>
             <Row label="사용자">
-              <span className="font-mono">{describeActor(log)}</span>
+              <span className={log.username ? 'font-mono' : undefined}>{describeActor(log)}</span>
             </Row>
             <Row label="IP">
               <span className="font-mono">{log.ip ?? '-'}</span>
@@ -93,7 +93,9 @@ function Detail({ log }: { log: AuditLogDto }) {
               {auditActionLabel(log.action)} <Code>{log.action}</Code>
             </Row>
             <Row label="대상">
-              <span className="font-mono">{describeTarget(log)}</span>
+              <span className={isCodeTarget(log) ? 'font-mono' : undefined}>
+                {describeTarget(log)}
+              </span>
               {log.targetType ? (
                 <span className="ml-2 text-muted-foreground">({log.targetType})</span>
               ) : null}

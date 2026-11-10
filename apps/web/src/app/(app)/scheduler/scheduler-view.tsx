@@ -2,7 +2,7 @@
 
 import type { SchedulerDetailDto } from '@qa/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { SearchXIcon } from 'lucide-react';
+import { SearchXIcon, Settings2Icon, UnplugIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
@@ -13,6 +13,7 @@ import { SchedulerStats } from '@/components/schedulers/scheduler-stats';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge, ProdStripe } from '@/components/status/environment';
 import { SchedulerHealthBadge } from '@/components/status/status-badge';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,9 +26,12 @@ import {
 } from '@/components/ui/empty';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { api, isApiError } from '@/lib/api';
 import { controlBlockedReason } from '@/lib/commands';
+import { formatDateTime } from '@/lib/format';
 import { parseId } from '@/lib/navigation';
+import { usePageTitle } from '@/lib/page-title';
 import { schedulerKey } from '@/lib/schedulers';
 
 import { ExecutingTab, JobsTab, NodesTab, PausedGroupsTab, TriggersTab } from './tabs';
@@ -72,11 +76,6 @@ function Summary({ s }: { s: SchedulerDetailDto }) {
         {' · '}
         {s.schedName}
       </span>
-      {snap?.status === 'unreachable' ? (
-        <span>
-          {snap.errorMessage} (연속 {snap.consecutiveFailures}회)
-        </span>
-      ) : null}
       {snap ? null : <span>아직 감시하지 않았습니다</span>}
       {s.connection.readOnly || s.connection.writeCapable === false ? (
         <Badge variant="neutral">읽기 전용</Badge>
@@ -105,10 +104,25 @@ export function SchedulerView() {
     refetchInterval: refreshMs || false,
   });
 
-  if (id === null || isApiError(detail.error, 'NOT_FOUND')) return <NotFound />;
-  if (detail.isError) return <FormAlert error={detail.error} />;
-  if (detail.isPending) return <Skeleton className="h-64 w-full" />;
+  usePageTitle(detail.data?.displayName);
+
+  // 아직 못 읽었거나 읽지 못했어도 화면 머리(경로, 돌아가기)는 남긴다
+  if (id === null || detail.isError || detail.isPending) {
+    return (
+      <>
+        <PageHeader trail={[{ label: '대시보드', href: '/' }]} title="스케줄러" />
+        {id === null || isApiError(detail.error, 'NOT_FOUND') ? (
+          <NotFound />
+        ) : detail.isError ? (
+          <FormAlert error={detail.error} />
+        ) : (
+          <Skeleton className="h-64 w-full" />
+        )}
+      </>
+    );
+  }
   const s = detail.data;
+  const unreachable = s.snapshot?.status === 'unreachable';
 
   const setTab = (value: string) => {
     // 탭마다 필터·쪽을 주소에 남기므로(B-40) 탭을 바꾸면 이전 탭의 값은 버린다
@@ -143,10 +157,44 @@ export function SchedulerView() {
             onRefreshMsChange={setRefreshMs}
             onRefresh={() => void queryClient.invalidateQueries({ queryKey: ['schedulers', id] })}
             refreshing={queryClient.isFetching({ queryKey: ['schedulers', id] }) > 0}
-          />
+          >
+            {/* 설정은 접속 상세의 줄 메뉴에도 있다. 여기서 들어가면 저장·취소 뒤 이 화면으로 돌아온다 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button asChild variant="outline" size="icon">
+                  <Link
+                    href={`/scheduler/settings?id=${id}&from=scheduler`}
+                    aria-label="스케줄러 설정"
+                  >
+                    <Settings2Icon aria-hidden />
+                  </Link>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>스케줄러 설정</TooltipContent>
+            </Tooltip>
+          </RefreshControls>
         }
       />
-      <SchedulerStats s={s} />
+      {/* 연결하지 못하면 머리글의 회색 글이 아니라 알림으로 먼저 알리고, 지표는 지난 값임을 밝힌다 */}
+      {unreachable ? (
+        <Alert variant="warning">
+          <UnplugIcon aria-hidden />
+          <AlertTitle>
+            대상 DB에 연결하지 못했습니다 (연속 {s.snapshot?.consecutiveFailures}회)
+          </AlertTitle>
+          <AlertDescription>
+            {/* 서버 메시지는 마침표 없이 끝나기도 해서 다음 안내는 줄을 바꿔 쓴다 */}
+            <span className="block">{s.snapshot?.errorMessage}</span>
+            <span className="block">
+              {s.snapshot?.dbNow != null
+                ? `아래 지표는 마지막으로 읽은 ${formatDateTime(s.snapshot.dbNow)} 기준입니다. `
+                : ''}
+              목록은 연결이 돌아와야 읽을 수 있습니다.
+            </span>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      <SchedulerStats s={s} stale={unreachable} />
       <Tabs value={tab} onValueChange={setTab}>
         <div className="overflow-x-auto overflow-y-hidden border-b border-border pb-0.5">
           <TabsList variant="line">

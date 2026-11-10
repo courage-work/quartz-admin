@@ -185,6 +185,24 @@ export function DetectionPanel({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pickHint, setPickHint] = useState(false);
 
+  // 새 감지 결과를 받았을 때, 이 접속에 등록한 스케줄러가 아직 없으면 찾은 후보를 모두 골라 둔다.
+  // 처음 등록하는 흐름에서 체크를 한 번 더 누르지 않게 하기 위해서다. 이미 등록한 것이 있으면
+  // 남은 후보는 일부러 빼 둔 것일 수 있어 고르지 않는다
+  const [seenDetection, setSeenDetection] = useState(detection);
+  if (seenDetection !== detection) {
+    setSeenDetection(detection);
+    const candidates = (detection?.tableSets ?? []).flatMap((set) =>
+      set.schedulers.map((c) => ({ key: keyOf(set.prefix, c.schedName), c })),
+    );
+    if (
+      selected.size === 0 &&
+      candidates.length > 0 &&
+      candidates.every(({ c }) => c.registeredSchedulerId === null)
+    ) {
+      setSelected(new Set(candidates.map(({ key }) => key)));
+    }
+  }
+
   const register = useMutation({
     mutationFn: (body: RegisterSchedulersRequest) =>
       api<SchedulerDto[]>(`/connections/${connectionId}/schedulers`, { method: 'POST', body }),

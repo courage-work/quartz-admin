@@ -10,6 +10,7 @@ import {
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
+  BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
@@ -73,8 +74,11 @@ function TrailLink({ item }: { item: TrailItem }) {
   );
 }
 
-/** 제목 위의 경로(상위 화면만, 지금 화면은 제목이 보인다) */
-export function PageTrail({ items }: { items: TrailItem[] }) {
+/**
+ * 경로. 상위 화면은 링크이고, `current`를 주면 지금 화면을 마지막에 글자로 붙인다.
+ * 좁은 화면에서는 제목 위에 상위 화면만, 넓은 화면에서는 상단 바에 지금 화면까지 그린다(`PageHeader`).
+ */
+export function PageTrail({ items, current }: { items: TrailItem[]; current?: string }) {
   return (
     <Breadcrumb>
       <BreadcrumbList>
@@ -86,6 +90,19 @@ export function PageTrail({ items }: { items: TrailItem[] }) {
             </BreadcrumbItem>
           </Fragment>
         ))}
+        {current === undefined ? null : (
+          <>
+            {items.length > 0 ? <BreadcrumbSeparator /> : null}
+            <BreadcrumbItem>
+              <BreadcrumbPage>
+                {/* 이름이 길면 상단 바의 다른 버튼을 밀어내지 않게 자른다 */}
+                <span className="block max-w-64 truncate" title={current}>
+                  {current}
+                </span>
+              </BreadcrumbPage>
+            </BreadcrumbItem>
+          </>
+        )}
       </BreadcrumbList>
     </Breadcrumb>
   );

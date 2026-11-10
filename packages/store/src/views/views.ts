@@ -90,6 +90,33 @@ export async function listPausedGroups(
   return rows.map((r) => str(r, 'G'));
 }
 
+/**
+ * 잡·트리거 그룹 이름 (그룹 필터 선택지). 이름순으로 `limit`개까지 읽고, 더 있으면 `truncated`로 알린다.
+ * `IDX_QRTZ_J_GRP`, `IDX_QRTZ_T_G`(SCHED_NAME, 그룹)를 쓴다
+ */
+export async function listGroups(
+  conn: TargetConn,
+  ctx: SchedulerViewContext,
+  kind: 'job' | 'trigger',
+  limit: number,
+): Promise<{ items: string[]; truncated: boolean }> {
+  const { dialect: d, tables } = ctx;
+  const [table, column] =
+    kind === 'job'
+      ? ([tables.table('JOB_DETAILS'), 'JOB_GROUP'] as const)
+      : ([tables.table('TRIGGERS'), 'TRIGGER_GROUP'] as const);
+  const b = new Binds(d);
+  const base =
+    `SELECT DISTINCT ${column} AS ${d.quote('G')} FROM ${table} ` +
+    `WHERE SCHED_NAME = ${b.add(ctx.schedName)} ORDER BY ${column}`;
+  const sql = d.paginate(base, b.next, b.next + 1);
+  // 하나 더 읽어 잘렸는지 안다
+  b.add(limit + 1);
+  b.add(0);
+  const groups = (await conn.query(sql, b.values)).map((r) => str(r, 'G'));
+  return { items: groups.slice(0, limit), truncated: groups.length > limit };
+}
+
 // ── 잡 ────────────────────────────────────────────────────
 
 function jobSelect(ctx: SchedulerViewContext, withData: boolean): string {

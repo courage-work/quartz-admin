@@ -9,7 +9,8 @@ import {
   UsersIcon,
 } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 
 import { BrandMark } from '@/components/shell/brand-mark';
 import {
@@ -49,12 +50,22 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/users', label: '사용자', icon: UsersIcon, match: ['/users/new'] },
 ];
 
-function isActive(pathname: string, item: NavItem): boolean {
+function isActive(pathname: string, from: string | null, item: NavItem): boolean {
   const path = pathname.replace(/\.html$/, '').replace(/\/+$/, '') || '/';
+  // 스케줄러 상세에서 들어온 설정 화면(`from=scheduler`)은 경로처럼 대시보드 아래로 본다
+  if (path === '/scheduler/settings' && from === 'scheduler') return item.href === '/';
   return path === item.href || (item.match ?? []).includes(path);
 }
 
-function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
+function NavGroup({
+  label,
+  items,
+  from,
+}: {
+  label: string;
+  items: NavItem[];
+  from: string | null;
+}) {
   const pathname = usePathname();
   return (
     <SidebarGroup>
@@ -63,7 +74,11 @@ function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
         <SidebarMenu>
           {items.map((item) => (
             <SidebarMenuItem key={item.href}>
-              <SidebarMenuButton asChild isActive={isActive(pathname, item)} tooltip={item.label}>
+              <SidebarMenuButton
+                asChild
+                isActive={isActive(pathname, from, item)}
+                tooltip={item.label}
+              >
                 <Link href={item.href}>
                   <item.icon aria-hidden />
                   <span>{item.label}</span>
@@ -77,9 +92,23 @@ function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
   );
 }
 
+function NavGroups({ from }: { from: string | null }) {
+  const user = useCurrentUser();
+  return (
+    <>
+      <NavGroup label="운영" items={MAIN_NAV} from={from} />
+      {user.isAdmin ? <NavGroup label="관리" items={ADMIN_NAV} from={from} /> : null}
+    </>
+  );
+}
+
+/** 주소의 `from`을 읽는다. 정적 export에서 `useSearchParams`를 쓰려면 Suspense 경계가 필요하다 */
+function NavGroupsFromUrl() {
+  return <NavGroups from={useSearchParams().get('from')} />;
+}
+
 /** 왼쪽 내비게이션. 관리 메뉴는 관리자에게만 보인다(접근 통제는 API가 한다) */
 export function AppSidebar() {
-  const user = useCurrentUser();
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -101,8 +130,9 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavGroup label="운영" items={MAIN_NAV} />
-        {user.isAdmin ? <NavGroup label="관리" items={ADMIN_NAV} /> : null}
+        <Suspense fallback={<NavGroups from={null} />}>
+          <NavGroupsFromUrl />
+        </Suspense>
       </SidebarContent>
       <SidebarRail />
     </Sidebar>

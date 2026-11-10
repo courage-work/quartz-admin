@@ -97,6 +97,23 @@ export interface PausedGroupsResponse {
   allPaused: boolean;
 }
 
+/** 그룹 선택지에 담는 최대 개수. 넘으면 화면은 선택 상자 대신 직접 입력을 받는다 */
+export const GROUP_OPTIONS_MAX = 200;
+
+export interface GroupOptions {
+  /** 이름순. 최대 `GROUP_OPTIONS_MAX`개 */
+  items: string[];
+  /** 그룹이 더 있어 잘랐다 */
+  truncated: boolean;
+}
+
+/** 잡·트리거 목록의 그룹 필터 선택지 (`GET /schedulers/:id/groups`) */
+export interface GroupsResponse {
+  dbNow: number;
+  jobGroups: GroupOptions;
+  triggerGroups: GroupOptions;
+}
+
 /** 잡 (FR-VIEW-03) */
 export interface JobDto {
   group: string;

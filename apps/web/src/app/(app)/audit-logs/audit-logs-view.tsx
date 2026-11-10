@@ -2,12 +2,13 @@
 
 import { AUDIT_ACTIONS, AUDIT_RESULTS, type AuditLogPage } from '@qa/shared';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { ListFilterIcon, ScrollTextIcon, SearchXIcon, XIcon } from 'lucide-react';
+import { ListFilterIcon, ScrollTextIcon, SearchXIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 
 import { FormAlert } from '@/components/form/form-alert';
 import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
-import { ListSearch } from '@/components/list/list-search';
+import { type FilterChip, FilterChips } from '@/components/list/filter-chips';
+import { ServerSearch } from '@/components/list/server-search';
 import { PageHeader } from '@/components/shell/page-header';
 import { TableEmpty } from '@/components/table-empty';
 import { TableFrame } from '@/components/table-frame';
@@ -42,10 +43,18 @@ import {
   describeActor,
   describeTarget,
   EMPTY_AUDIT_FILTER,
+  isCodeTarget,
+  recentDays,
 } from '@/lib/audit';
 import { formatDateTime } from '@/lib/format';
 import { AUDIT_ACTION_LABELS, auditActionLabel } from '@/lib/labels';
 import { setParam, type UrlCodec, useUrlState } from '@/lib/use-url-state';
+
+const QUICK_RANGES = [
+  { days: 1, label: '오늘' },
+  { days: 7, label: '최근 7일' },
+  { days: 30, label: '최근 30일' },
+] as const;
 
 /** 필터 하나에 기간·작업 종류·결과를 모은다 (VectorLab list 패턴: Filters 컨트롤은 하나) */
 function FilterPopover({
@@ -84,6 +93,25 @@ function FilterPopover({
       <PopoverContent align="start" className="w-80">
         <form onSubmit={submit}>
           <FieldGroup>
+            {/* 날짜를 두 번 고르지 않도록 자주 쓰는 기간을 한 번에 채운다 */}
+            <div className="flex flex-col gap-2">
+              <span id="audit-quick" className="text-sm font-medium">
+                빠른 기간
+              </span>
+              <div role="group" aria-labelledby="audit-quick" className="flex flex-wrap gap-2">
+                {QUICK_RANGES.map((r) => (
+                  <Button
+                    key={r.days}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDraft((d) => ({ ...d, ...recentDays(r.days) }))}
+                  >
+                    {r.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
             <Field>
               <FieldLabel htmlFor="audit-from">시작일</FieldLabel>
               <Input
@@ -144,7 +172,7 @@ function FilterPopover({
                 variant="ghost"
                 onClick={() => setDraft({ ...EMPTY_AUDIT_FILTER, username: draft.username })}
               >
-                초기화
+                초기화하기
               </Button>
               <Button type="submit">필터 적용하기</Button>
             </div>
@@ -168,45 +196,35 @@ function ActiveFilters({
   value: AuditFilter;
   onChange: (filter: AuditFilter) => void;
 }) {
-  const chips: { key: string; label: string; clear: Partial<AuditFilter> }[] = [];
+  const chips: FilterChip[] = [];
+  const clear = (patch: Partial<AuditFilter>) => () => onChange({ ...value, ...patch });
   if (value.username)
-    chips.push({ key: 'user', label: `사용자: ${value.username}`, clear: { username: '' } });
+    chips.push({
+      key: 'user',
+      label: `사용자: ${value.username}`,
+      onClear: clear({ username: '' }),
+    });
   if (value.fromDate)
-    chips.push({ key: 'from', label: `시작일: ${value.fromDate}`, clear: { fromDate: '' } });
+    chips.push({
+      key: 'from',
+      label: `시작일: ${value.fromDate}`,
+      onClear: clear({ fromDate: '' }),
+    });
   if (value.toDate)
-    chips.push({ key: 'to', label: `종료일: ${value.toDate}`, clear: { toDate: '' } });
+    chips.push({ key: 'to', label: `종료일: ${value.toDate}`, onClear: clear({ toDate: '' }) });
   if (value.action !== 'all')
     chips.push({
       key: 'action',
       label: `작업: ${auditActionLabel(value.action)}`,
-      clear: { action: 'all' },
+      onClear: clear({ action: 'all' }),
     });
   if (value.result !== 'all')
     chips.push({
       key: 'result',
       label: `결과: ${AUDIT_RESULT_META[value.result as keyof typeof AUDIT_RESULT_META]?.label ?? value.result}`,
-      clear: { result: 'all' },
+      onClear: clear({ result: 'all' }),
     });
-  if (chips.length === 0) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-2" aria-label="적용 중인 필터">
-      {chips.map((c) => (
-        <Button
-          key={c.key}
-          variant="secondary"
-          size="sm"
-          onClick={() => onChange({ ...value, ...c.clear })}
-          aria-label={`${c.label} 필터 지우기`}
-        >
-          {c.label}
-          <XIcon data-icon="inline-end" aria-hidden />
-        </Button>
-      ))}
-      <Button variant="link" size="sm" onClick={() => onChange(EMPTY_AUDIT_FILTER)}>
-        모두 지우기
-      </Button>
-    </div>
-  );
+  return <FilterChips chips={chips} onClearAll={() => onChange(EMPTY_AUDIT_FILTER)} />;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -243,7 +261,6 @@ const AUDIT_CODEC: UrlCodec<AuditFilter> = {
 /** 감사 로그 목록 (PRD FR-AUD-03). 최신 기록부터 50건씩 불러온다(기본 정렬: 최신순) */
 export function AuditLogsView() {
   const [filter, setFilter] = useUrlState(AUDIT_CODEC);
-  const [q, setQ] = useState(filter.username);
   const logs = useInfiniteQuery({
     queryKey: ['audit-logs', filter],
     queryFn: ({ pageParam, signal }) =>
@@ -255,10 +272,7 @@ export function AuditLogsView() {
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const items = logs.data?.pages.flatMap((p) => p.items) ?? [];
-  const apply = (next: AuditFilter) => {
-    setFilter(next);
-    setQ(next.username);
-  };
+  const apply = (next: AuditFilter) => setFilter(next);
   const filtered = activeFilterCount(filter) > 0 || filter.username !== '';
 
   return (
@@ -269,15 +283,10 @@ export function AuditLogsView() {
       />
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-end gap-2">
-          <ListSearch
-            label="검색(사용자 아이디, 정확히 일치)"
-            value={q}
-            onChange={(v) => {
-              setQ(v);
-              if (v === '' && filter.username !== '') setFilter({ ...filter, username: '' });
-            }}
-            onSubmit={() => setFilter({ ...filter, username: q.trim().toLowerCase() })}
-            className="w-full max-w-md"
+          <ServerSearch
+            label="검색(사용자 아이디)"
+            value={filter.username}
+            onApply={(q) => setFilter({ ...filter, username: q.toLowerCase() })}
           />
           <FilterPopover value={filter} onApply={apply} />
         </div>
@@ -338,11 +347,15 @@ export function AuditLogsView() {
                     </RowLink>
                   </TableCell>
                   <TableCell>
-                    <span className="font-mono">{describeActor(log)}</span>
+                    <span className={log.username ? 'font-mono' : undefined}>
+                      {describeActor(log)}
+                    </span>
                   </TableCell>
                   <TableCell>{auditActionLabel(log.action)}</TableCell>
                   <TableCell>
-                    <span className="font-mono">{describeTarget(log)}</span>
+                    <span className={isCodeTarget(log) ? 'font-mono' : undefined}>
+                      {describeTarget(log)}
+                    </span>
                   </TableCell>
                   <TableCell>
                     <AuditResultBadge result={log.result} errorCode={log.errorCode} />

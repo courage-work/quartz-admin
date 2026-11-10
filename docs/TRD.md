@@ -643,6 +643,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 | GET | `/schedulers/:id` | 상세. 설정·감지 정보에 접속 요약(이름, 환경, 태그, 읽기 전용, 쓰기 가능), 마지막 스냅샷, 열린 알림 수를 붙인다 |
 | GET | `/schedulers/:id/nodes` | 실시간 노드 목록 |
 | GET | `/schedulers/:id/paused-groups` | 일시정지된 트리거 그룹 |
+| GET | `/schedulers/:id/groups` | 그룹 필터 선택지. 잡 그룹과 트리거 그룹 이름(각각 이름순, 최대 200개) |
 | GET | `/schedulers/:id/jobs` | `group`, `q`, `page`, `size`(최대 200), `sort` |
 | GET | `/schedulers/:id/jobs/detail?group=&name=` | 잡 상세, 트리거 목록, JobDataMap(가능한 경우) |
 | GET | `/schedulers/:id/triggers` | `state[]`, `type[]`, `group`, `q`, `page`, `size`, `sort`(`key`/`nextFireTime`) |
@@ -659,6 +660,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 | --- | --- |
 | `nodes` | 인스턴스명, 마지막 체크인 시각, 체크인 간격, 활성 여부(§9.2, 스케줄러의 `checkin_multiplier`), 마지막 체크인 후 경과 시간 |
 | `paused-groups` | 일시정지된 그룹 목록. `pauseAll` 표시 행(`_$_ALL_GROUPS_PAUSED_$_`)은 목록에서 빼고 `allPaused`로 알립니다 |
+| `groups` | `jobGroups`, `triggerGroups`: 각각 `{ items, truncated }`. 그룹이 200개(`GROUP_OPTIONS_MAX`)를 넘으면 앞 200개만 주고 `truncated: true`로 알리며, 화면은 선택 상자 대신 직접 입력을 받습니다 |
 | `jobs` | 그룹, 이름, 잡 클래스, 설명, durable, 동시 실행 금지, 데이터 갱신, 복구 요청, 트리거 수. 정렬은 그룹·이름 |
 | `jobs/detail` | 잡, 연결된 트리거 전체(목록과 같은 형식), JobDataMap 판정(§8.3). 없는 잡은 404 |
 | `triggers` | 그룹, 이름, 대상 잡, 설명, 타입, 상태, 다음·이전 실행 시각, 시작·종료 시각, 우선순위, `MISFIRE_INSTR` 원래 값, 캘린더, 일정(CRON: 표현식·타임존, SIMPLE: 반복 횟수·간격·실행 횟수, CAL_INT·DAILY_I: `SIMPROP_TRIGGERS` 원래 값) |
@@ -798,7 +800,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
   - 문자열 안의 URL 자격증명(`scheme://user:pass@host`)의 비밀번호 부분도 가립니다.
 - 앱 코드에는 `audit_logs`를 수정하는 경로가 없습니다(INSERT와 `pending` 결과 갱신만 존재). 정리는 보존 정책 작업(`audit_logs`, §3.3)만 합니다. 테스트가 소스 전체에서 `audit_logs`를 바꾸는 코드가 `AuditService` 밖에 없는지 확인합니다.
 - `GET /audit-logs`: 로그인한 사용자 누구나 조회합니다(PRD 권한 모델).
-  - 필터: `from`(포함)·`to`(제외, epoch ms), `userId`, `username`, `schedulerId`, `action`, `result`
+  - 필터: `from`(포함)·`to`(제외, epoch ms), `userId`, `username`(부분 일치, 대소문자 무시), `schedulerId`, `action`, `result`
   - 페이지: 최신순(id 내림차순). `limit`(기본 50, 최대 200)과 이전 응답의 `nextCursor`를 `cursor`로 넘기는 키셋 방식입니다. 응답은 `{ items, nextCursor }`이고 `nextCursor`가 null이면 마지막 페이지입니다.
 - `GET /audit-logs/:id`: 기록 하나(상세 화면 `/audit-log?id=N`용). 없으면 404 `NOT_FOUND`
 - `GET /audit-logs/export.csv`(P1, 스트리밍, B-34)

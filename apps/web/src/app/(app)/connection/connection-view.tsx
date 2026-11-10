@@ -53,6 +53,7 @@ import {
 } from '@/lib/connections';
 import { formatDateTime } from '@/lib/format';
 import { parseId } from '@/lib/navigation';
+import { usePageTitle } from '@/lib/page-title';
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -133,6 +134,7 @@ function SchedulersCard({
         {schedulers === undefined ? (
           <Skeleton className="h-16 w-full" />
         ) : schedulers.length === 0 ? (
+          // 다음 할 일(감지한 후보 등록)이 바로 아래 카드에 있어, 큰 빈 표시 대신 한 줄로 알린다
           <p className="text-sm text-muted-foreground">
             아직 등록한 스케줄러가 없습니다. 아래에서 감지한 후보를 골라 등록하세요.
           </p>
@@ -278,9 +280,23 @@ export function ConnectionView() {
     onError: (err) => toast.error(err.message),
   });
 
-  if (id === null || isApiError(connection.error, 'NOT_FOUND')) return <ConnectionNotFound />;
-  if (connection.isError) return <FormAlert error={connection.error} />;
-  if (connection.isPending) return <Skeleton className="h-64 w-full" />;
+  usePageTitle(connection.data?.name);
+
+  // 아직 못 읽었거나 읽지 못했어도 화면 머리(경로, 돌아가기)는 남긴다
+  if (connection.isError || connection.isPending) {
+    return (
+      <>
+        <PageHeader trail={[{ label: '접속', href: '/connections' }]} title="접속" />
+        {id === null || isApiError(connection.error, 'NOT_FOUND') ? (
+          <ConnectionNotFound />
+        ) : connection.isError ? (
+          <FormAlert error={connection.error} />
+        ) : (
+          <Skeleton className="h-64 w-full" />
+        )}
+      </>
+    );
+  }
   const conn = connection.data;
 
   const detectError = isApiError(detect.error)
@@ -301,12 +317,13 @@ export function ConnectionView() {
             <Button asChild variant="outline">
               <Link href={`/connection/edit?id=${conn.id}`}>
                 <PencilIcon data-icon="inline-start" aria-hidden />
-                수정
+                수정하기
               </Link>
             </Button>
-            <Button variant="outline" data-delete-connection onClick={() => setDeleting(true)}>
+            {/* 삭제는 메뉴의 "등록 해제", 확인 대화상자의 버튼과 같은 destructive 모양으로 구분한다 */}
+            <Button variant="destructive" data-delete-connection onClick={() => setDeleting(true)}>
               <Trash2Icon data-icon="inline-start" aria-hidden />
-              삭제
+              삭제하기
             </Button>
           </>
         }
