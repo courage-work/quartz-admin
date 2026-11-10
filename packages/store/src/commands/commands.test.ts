@@ -61,9 +61,16 @@ interface FakeDb {
   triggers: FakeTrigger[];
   pausedGroups: string[];
   /** FIRED_TRIGGERS 행. `jobName`이 null이면 획득만 된 행이다 */
-  fired: { jobGroup: string | null; jobName: string | null; nonConcurrent: boolean }[];
+  fired: {
+    jobGroup: string | null;
+    jobName: string | null;
+    nonConcurrent: boolean;
+    trigger?: { group: string; name: string };
+  }[];
   /** JOB_DETAILS 행 (`그룹/이름`) */
   jobs: string[];
+  /** durable이 아닌 잡(`그룹/이름`). 나머지는 durable이다 */
+  nonDurable: string[];
   /** SCHEDULER_STATE 행 */
   nodes: { name: string; lastCheckin: number; interval: number }[];
   /** 즉시 실행으로 넣은 트리거의 INSERT 값(컬럼 → 값) */
@@ -91,9 +98,40 @@ const clone = (db: FakeDb): FakeDb => ({
   pausedGroups: [...db.pausedGroups],
   fired: db.fired.map((f) => ({ ...f })),
   jobs: [...db.jobs],
+  nonDurable: [...db.nonDurable],
   nodes: db.nodes.map((n) => ({ ...n })),
   inserted: db.inserted.map((r) => ({ ...r })),
 });
+
+/** 트리거 상세 조회(LEFT JOIN) 한 행 */
+function detailRow(t: FakeTrigger): Row {
+  const type = t.type ?? 'SIMPLE';
+  const simple =
+    type === 'SIMPLE'
+      ? (t.simple ?? { repeatCount: -1, repeatInterval: 60_000, timesTriggered: 3 })
+      : null;
+  return {
+    G: t.group,
+    N: t.name,
+    JG: t.jobGroup,
+    JN: t.jobName,
+    D: null,
+    TY: type,
+    ST: t.state,
+    NFT: t.nft ?? -1,
+    PFT: -1,
+    STT: t.startTime ?? DB_NOW - 86_400_000,
+    ET: t.endTime ?? 0,
+    PR: 5,
+    MI: 0,
+    CAL: t.calendar ?? null,
+    CE: type === 'CRON' ? (t.cron?.expression ?? '0 0 12 * * ?') : null,
+    TZ: type === 'CRON' ? (t.cron?.timeZone ?? 'UTC') : null,
+    RC: simple?.repeatCount ?? null,
+    RI: simple?.repeatInterval ?? null,
+    TT: simple?.timesTriggered ?? null,
+  };
+}
 
 /**
  * SQL 모양에 따라 답하는 가짜 커넥션. 트리거, 그룹 일시정지, 실행 기록, 잡 행을 메모리에 두고
@@ -124,6 +162,7 @@ class FakeConn implements TargetConn {
       pausedGroups: db.pausedGroups ?? [],
       fired: db.fired ?? [],
       jobs: db.jobs ?? [...new Set((db.triggers ?? []).map((t) => `${t.jobGroup}/${t.jobName}`))],
+      nonDurable: db.nonDurable ?? [],
       nodes: db.nodes ?? [{ name: 'node-1', lastCheckin: DB_NOW - 1_000, interval: 7_500 }],
       inserted: db.inserted ?? [],
     };
@@ -154,12 +193,38 @@ class FakeConn implements TargetConn {
     if (sql.includes('QRTZ_SCHEDULER_STATE')) {
       return db.nodes.map((n) => ({ N: n.name, L: n.lastCheckin, I: n.interval }));
     }
+    // 잡 상세(getJobDetail). 트리거 수 하위 질의에 QRTZ_TRIGGERS가 있어 먼저 본다
+    if (sql.includes('JOB_CLASS_NAME')) {
+      const key = `${String(binds[1])}/${String(binds[2])}`;
+      if (!db.jobs.includes(key)) return [];
+      const [g, n] = key.split('/');
+      return [
+        {
+          G: g,
+          N: n,
+          C: 'x.Job',
+          D: null,
+          DU: db.nonDurable.includes(key) ? '0' : '1',
+          NC: '0',
+          UD: '0',
+          RR: '0',
+          TC: db.triggers.filter((t) => t.jobGroup === g && t.jobName === n).length,
+          DATA: Buffer.from('k=v'),
+        },
+      ];
+    }
     if (sql.includes('COUNT(*)') && sql.includes('QRTZ_TRIGGERS')) {
       const [, group, name] = binds;
       const taken =
         db.triggers.some((t) => t.group === group && t.name === name) ||
         this.opts.takenNames?.includes(name as string);
       return [{ C: taken ? 1 : 0 }];
+    }
+    // 삭제의 실행 중 조회: 잡의 FIRED_TRIGGERS 행(트리거 키)
+    if (sql.includes('QRTZ_FIRED_TRIGGERS') && sql.includes('TRIGGER_GROUP AS')) {
+      return db.fired
+        .filter((f) => f.jobGroup === binds[1] && f.jobName === binds[2] && f.trigger)
+        .map((f) => ({ G: f.trigger!.group, N: f.trigger!.name }));
     }
     if (sql.includes('QRTZ_FIRED_TRIGGERS')) {
       return db.fired
@@ -175,36 +240,13 @@ class FakeConn implements TargetConn {
     }
     if (sql.includes('LEFT JOIN') && sql.includes('QRTZ_TRIGGERS')) {
       const [, group, name] = binds;
-      const t = db.triggers.find((x) => x.group === group && x.name === name);
-      if (!t) return [];
-      const type = t.type ?? 'SIMPLE';
-      const simple =
-        type === 'SIMPLE'
-          ? (t.simple ?? { repeatCount: -1, repeatInterval: 60_000, timesTriggered: 3 })
-          : null;
-      return [
-        {
-          G: t.group,
-          N: t.name,
-          JG: t.jobGroup,
-          JN: t.jobName,
-          D: null,
-          TY: type,
-          ST: t.state,
-          NFT: t.nft ?? -1,
-          PFT: -1,
-          STT: t.startTime ?? DB_NOW - 86_400_000,
-          ET: t.endTime ?? 0,
-          PR: 5,
-          MI: 0,
-          CAL: t.calendar ?? null,
-          CE: type === 'CRON' ? (t.cron?.expression ?? '0 0 12 * * ?') : null,
-          TZ: type === 'CRON' ? (t.cron?.timeZone ?? 'UTC') : null,
-          RC: simple?.repeatCount ?? null,
-          RI: simple?.repeatInterval ?? null,
-          TT: simple?.timesTriggered ?? null,
-        },
-      ];
+      // 잡의 트리거 전체(getJobDetail) 또는 트리거 하나(getTriggerDetail)
+      const byJob = sql.includes('t.JOB_NAME = ');
+      return db.triggers
+        .filter((x) =>
+          byJob ? x.jobGroup === group && x.jobName === name : x.group === group && x.name === name,
+        )
+        .map((t) => detailRow(t));
     }
     if (sql.includes('QRTZ_TRIGGERS')) {
       const where = sql.slice(sql.indexOf(' WHERE '), sql.indexOf(' ORDER BY '));
@@ -233,6 +275,33 @@ class FakeConn implements TargetConn {
   execute(sql: string, binds: readonly BindValue[] = []): Promise<number> {
     this.calls.push({ kind: 'execute', sql, binds });
     this.inTransaction = true;
+    return Promise.resolve().then(() => this.write(sql, binds));
+  }
+
+  private write(sql: string, binds: readonly BindValue[]): number | Promise<number> {
+    const db = this.pending;
+    if (/^DELETE FROM "Q"\."QRTZ_(SIMPLE|CRON|SIMPROP|BLOB)_TRIGGERS"/.test(sql)) {
+      const [, group, name] = binds;
+      const t = db.triggers.find((x) => x.group === group && x.name === name);
+      const kind = /QRTZ_(\w+)_TRIGGERS/.exec(sql)?.[1];
+      return t && (t.type ?? 'SIMPLE') === kind ? 1 : 0;
+    }
+    if (sql.startsWith('DELETE FROM "Q"."QRTZ_TRIGGERS"')) {
+      const [, group, name] = binds;
+      const before = db.triggers.length;
+      db.triggers = db.triggers.filter((x) => !(x.group === group && x.name === name));
+      return before - db.triggers.length;
+    }
+    if (sql.startsWith('DELETE FROM "Q"."QRTZ_JOB_DETAILS"')) {
+      const key = `${String(binds[1])}/${String(binds[2])}`;
+      const before = db.jobs.length;
+      db.jobs = db.jobs.filter((k) => k !== key);
+      return before - db.jobs.length;
+    }
+    return this.writeOther(sql, binds);
+  }
+
+  private writeOther(sql: string, binds: readonly BindValue[]): Promise<number> {
     const db = this.pending;
     if (sql.startsWith('INSERT INTO "Q"."QRTZ_LOCKS"')) {
       if (this.opts.insertDuplicate) {
@@ -1148,6 +1217,130 @@ describe('스케줄 수정 (부록 A.6)', () => {
     const acquired = new FakeConn({ triggers: [trig('t', 'ACQUIRED')] });
     await previewThenRun(acquired, simpleCmd({}));
     expect(acquired.state('t')).toBe('WAITING');
+  });
+});
+
+describe('삭제 (부록 A.7)', () => {
+  const DEL: QuartzCommand = { type: 'deleteTrigger', trigger: { group: 'g', name: 't' } };
+  const DEL_JOB: QuartzCommand = { type: 'deleteJob', job: { group: 'jg', name: 'j' } };
+  const childDeletes = (conn: FakeConn) =>
+    conn
+      .writes()
+      .filter((q) => /DELETE FROM "Q"\."QRTZ_(SIMPLE|CRON|SIMPROP|BLOB)_TRIGGERS"/.test(q));
+
+  it('D-01 durable 잡의 유일한 트리거: 트리거와 하위 행만 지우고 잡은 남긴다', async () => {
+    const conn = new FakeConn({ triggers: [trig('t', 'WAITING', { type: 'CRON' })] });
+    const out = await previewThenRun(conn, DEL);
+    expect(out.deletions).toEqual({ triggers: [{ group: 'g', name: 't' }], jobs: [] });
+    expect(conn.committed.triggers).toEqual([]);
+    expect(conn.committed.jobs).toEqual(['jg/j']);
+    // 하위 테이블은 모두 지워 본다(트리거 하나에 하위 행은 하나)
+    expect(childDeletes(conn)).toHaveLength(3);
+    expect(out.after.triggers).toEqual([]);
+    expect(out.snapshot).toMatchObject({ trigger: { group: 'g', name: 't', type: 'CRON' } });
+    expect(out.snapshot).not.toHaveProperty('job');
+  });
+
+  it('D-02·D-03 durable이 아닌 잡은 마지막 트리거를 지울 때만 잡도 지우고 미리 알린다', async () => {
+    const last = new FakeConn({ triggers: [trig('t', 'WAITING')], nonDurable: ['jg/j'] });
+    const preview = await previewCommand(last, ctx, DEL);
+    expect(preview.plan.warnings.map((w) => w.code)).toEqual(['JOB_ALSO_DELETED']);
+    const out = await executeCommand(last, ctx, DEL, expectedOf(preview.subject));
+    expect(out.deletions.jobs).toEqual([{ group: 'jg', name: 'j' }]);
+    expect(last.committed.jobs).toEqual([]);
+    expect(out.snapshot).toMatchObject({
+      trigger: { name: 't' },
+      job: { group: 'jg', name: 'j', durable: false },
+      jobData: Buffer.from('k=v').toString('base64'),
+      jobDataBytes: 3,
+    });
+
+    const notLast = new FakeConn({
+      triggers: [trig('t', 'WAITING'), trig('t2', 'WAITING')],
+      nonDurable: ['jg/j'],
+    });
+    const out2 = await previewThenRun(notLast, DEL);
+    expect(out2.deletions.jobs).toEqual([]);
+    expect(notLast.committed.jobs).toEqual(['jg/j']);
+    expect(notLast.committed.triggers.map((t) => t.name)).toEqual(['t2']);
+  });
+
+  it('D-06 실행 중인 트리거는 지우되 경고하고 FIRED_TRIGGERS는 건드리지 않는다', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('t', 'BLOCKED')],
+      fired: [
+        { jobGroup: 'jg', jobName: 'j', nonConcurrent: true, trigger: { group: 'g', name: 't' } },
+      ],
+    });
+    const out = await previewThenRun(conn, DEL);
+    expect(out.warnings.map((w) => w.code)).toEqual(['DELETING_EXECUTING']);
+    expect(conn.writes().some((q) => q.includes('QRTZ_FIRED_TRIGGERS'))).toBe(false);
+    expect(conn.committed.fired).toHaveLength(1);
+  });
+
+  it('D-07 그룹의 마지막 트리거를 지워도 그룹 일시정지 행은 남는다', async () => {
+    const conn = new FakeConn({ triggers: [trig('t', 'PAUSED')], pausedGroups: ['g'] });
+    await previewThenRun(conn, DEL);
+    expect(conn.committed.pausedGroups).toEqual(['g']);
+    expect(conn.writes().some((q) => q.includes('PAUSED_TRIGGER_GRPS'))).toBe(false);
+  });
+
+  it('DJ-01·DJ-03 잡 삭제: 모든 트리거와 하위 행, 잡을 지운다. 트리거 없는 잡도 지운다', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('t1', 'WAITING', { type: 'CRON' }), trig('t2', 'PAUSED')],
+    });
+    const out = await previewThenRun(conn, DEL_JOB);
+    expect(out.deletions).toEqual({
+      triggers: [
+        { group: 'g', name: 't1' },
+        { group: 'g', name: 't2' },
+      ],
+      jobs: [{ group: 'jg', name: 'j' }],
+    });
+    expect(conn.committed.triggers).toEqual([]);
+    expect(conn.committed.jobs).toEqual([]);
+    expect(out.snapshot).toMatchObject({
+      job: { name: 'j' },
+      triggers: [{ name: 't1' }, { name: 't2' }],
+    });
+
+    const empty = new FakeConn({ jobs: ['jg/j'] });
+    await previewThenRun(empty, DEL_JOB);
+    expect(empty.committed.jobs).toEqual([]);
+  });
+
+  it('DJ-02 실행 중인 잡은 경고한다. 없는 트리거·잡은 NOT_FOUND', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('t', 'BLOCKED')],
+      fired: [
+        {
+          jobGroup: 'jg',
+          jobName: 'j',
+          nonConcurrent: true,
+          trigger: { group: 'g', name: 'other' },
+        },
+      ],
+    });
+    const out = await previewThenRun(conn, DEL_JOB);
+    expect(out.warnings.map((w) => w.code)).toEqual(['DELETING_EXECUTING']);
+
+    const missing = new FakeConn({});
+    await expect(previewCommand(missing, ctx, DEL)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(previewCommand(missing, ctx, DEL_JOB)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('미리보기 뒤 잡에 트리거가 늘면 STATE_CONFLICT로 지우지 않는다', async () => {
+    const conn = new FakeConn({ triggers: [trig('t1', 'WAITING'), trig('t2', 'WAITING')] });
+    const err = await rejected(
+      executeCommand(conn, ctx, DEL_JOB, {
+        triggers: [{ group: 'g', name: 't1', state: 'WAITING' }],
+        pausedGroups: [],
+      }),
+    );
+    expect(err).toMatchObject({ code: 'STATE_CONFLICT' });
+    expect(conn.writes()).toEqual([]);
   });
 });
 

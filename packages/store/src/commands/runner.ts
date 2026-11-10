@@ -1,6 +1,7 @@
 import {
   triggerStateClass,
   type CommandChangeDto,
+  type CommandDeletionDto,
   type CommandExpected,
   type CommandGroupChangeDto,
   type CommandInsertDto,
@@ -24,6 +25,7 @@ import {
   resumeTriggerHandler,
 } from './pause-resume.js';
 import { updateCronScheduleHandler, updateSimpleScheduleHandler } from './reschedule.js';
+import { deleteJobHandler, deleteTriggerHandler } from './delete.js';
 import { triggerJobHandler } from './trigger-job.js';
 import { applyPlan, plannedRows } from './triggers.js';
 import {
@@ -52,6 +54,8 @@ const HANDLERS: HandlerMap = {
   triggerJob: triggerJobHandler,
   updateCronSchedule: updateCronScheduleHandler,
   updateSimpleSchedule: updateSimpleScheduleHandler,
+  deleteTrigger: deleteTriggerHandler,
+  deleteJob: deleteJobHandler,
 };
 
 function handlerFor(command: QuartzCommand): CommandHandler {
@@ -134,6 +138,9 @@ export interface CommandOutcome {
   /** 실제로 넣은 트리거(이름 포함) */
   inserts: CommandInsertDto[];
   scheduleChanges: CommandScheduleChangeDto[];
+  deletions: CommandDeletionDto;
+  /** 삭제 전 정의. 삭제 명령만 채운다 */
+  snapshot?: Record<string, unknown>;
   warnings: CommandNoticeDto[];
 }
 
@@ -194,7 +201,10 @@ export async function executeCommand(
       const applied = await applyPlan(conn, ctx, plan);
       const changed = applied.changed;
       inserts = applied.inserts;
-      after = await handler.readSubject(conn, ctx, command);
+      // 지운 대상은 다시 읽을 수 없다. 삭제 뒤 남은 대상 트리거는 없다
+      after = plan.deletions
+        ? { triggers: [], pausedGroups: before.pausedGroups, blockingJobs: new Set() }
+        : await handler.readSubject(conn, ctx, command);
       if (changed !== planned) {
         // 잠근 행이 그 사이 바뀌었다. 잠금을 거치지 않은 쓰기가 있다는 뜻이므로 되돌린다
         throw new CommandRejection(
@@ -220,6 +230,8 @@ export async function executeCommand(
         to,
         upcoming,
       })),
+      deletions: plan.deletions ?? { triggers: [], jobs: [] },
+      ...(plan.snapshot ? { snapshot: plan.snapshot } : {}),
       warnings: plan.warnings,
     };
   } catch (err) {

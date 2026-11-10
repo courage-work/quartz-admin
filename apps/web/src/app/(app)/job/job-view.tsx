@@ -11,7 +11,7 @@ import {
   TimerIcon,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { type ReactNode, useState } from 'react';
 
 import { Code } from '@/components/code';
@@ -184,7 +184,13 @@ export function JobView() {
     enabled: valid,
     refetchInterval: refreshMs || false,
   });
-  const { openCommand, dialog } = useCommandDialog(schedulerId ?? 0);
+  const router = useRouter();
+  // 이 잡을 지웠으면(잡 삭제, 또는 durable이 아닌 잡의 마지막 트리거 삭제) 상세가 없으니 잡 탭으로 돌아간다
+  const { openCommand, dialog } = useCommandDialog(schedulerId ?? 0, (result) => {
+    if (result.deletions.jobs.some((j) => j.group === group && j.name === name)) {
+      router.push(`/scheduler?id=${schedulerId}&tab=jobs`);
+    }
+  });
   usePageTitle(valid ? name : undefined);
 
   let body: ReactNode;

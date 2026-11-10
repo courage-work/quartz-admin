@@ -118,6 +118,26 @@ class FakeTarget {
           return groups().map((g) => ({ G: g })) as Row[] as R[];
         }
         if (sql.includes('QRTZ_FIRED_TRIGGERS')) return [];
+        // 잡 상세(getJobDetail). 트리거 수 하위 질의에 QRTZ_TRIGGERS가 있어 먼저 본다
+        if (sql.includes('JOB_CLASS_NAME')) {
+          const rows: Row[] = this.jobExists
+            ? [
+                {
+                  G: 'jg',
+                  N: 'j',
+                  C: 'x.Job',
+                  D: null,
+                  DU: '1',
+                  NC: '0',
+                  UD: '0',
+                  RR: '0',
+                  TC: current() === null ? 0 : 1,
+                  DATA: null,
+                },
+              ]
+            : [];
+          return rows as R[];
+        }
         if (sql.includes('QRTZ_JOB_DETAILS')) {
           return [{ C: this.jobExists ? 1 : 0 }] as Row[] as R[];
         }
@@ -167,6 +187,15 @@ class FakeTarget {
       },
       execute: (sql: string, binds: readonly BindValue[] = []) => {
         this.writes++;
+        if (/^DELETE FROM "QUARTZ"\."QRTZ_(SIMPLE|CRON|SIMPROP|BLOB)_TRIGGERS"/.test(sql)) {
+          return Promise.resolve(sql.includes('SIMPLE') && current() !== null ? 1 : 0);
+        }
+        if (sql.startsWith('DELETE FROM "QUARTZ"."QRTZ_TRIGGERS"')) {
+          if (current() === null) return Promise.resolve(0);
+          touch().state = null;
+          return Promise.resolve(1);
+        }
+        if (sql.startsWith('DELETE FROM "QUARTZ"."QRTZ_JOB_DETAILS"')) return Promise.resolve(1);
         if (sql.startsWith('INSERT INTO "QUARTZ"."QRTZ_TRIGGERS"')) {
           this.inserted.push([...binds]);
           return Promise.resolve(1);
@@ -344,6 +373,7 @@ describe('제어 명령 API (TRD §7.1)', () => {
       groupChanges: [],
       inserts: [],
       scheduleChanges: [],
+      deletions: { triggers: [], jobs: [] },
       warnings: [],
       blocked: null,
     } satisfies CommandPreviewResponse);
@@ -693,6 +723,35 @@ describe('제어 명령 API (TRD §7.1)', () => {
     });
     fake.committed = null;
     await t.get(`/schedulers/${id}/triggers/detail?group=g&name=t`, cookie).expect(404);
+  });
+
+  it('트리거 삭제는 지우고 삭제 전 정의를 trigger.delete 기록의 before에 남긴다 (FR-CTL-09)', async () => {
+    const id = await register('c');
+    const command: QuartzCommand = { type: 'deleteTrigger', trigger: { group: 'g', name: 't' } };
+    const preview = (
+      await t.send('post', `/schedulers/${id}/commands/preview`, { command }, cookie).expect(200)
+    ).body as CommandPreviewResponse;
+    expect(preview.deletions).toEqual({ triggers: [{ group: 'g', name: 't' }], jobs: [] });
+
+    const result = (
+      await t
+        .send('post', `/schedulers/${id}/commands`, { command, expected: preview.expected }, cookie)
+        .expect(200)
+    ).body as CommandResultDto;
+    expect(result).toMatchObject({ changed: true, after: { triggers: [], pausedGroups: [] } });
+    expect(fake.committed).toBeNull();
+    const logs = (await t.get('/audit-logs?action=trigger.delete', cookie).expect(200))
+      .body as AuditLogPage;
+    expect(logs.items[0]).toMatchObject({
+      result: 'success',
+      targetType: 'trigger',
+      before: {
+        command,
+        expected: preview.expected,
+        snapshot: { trigger: { group: 'g', name: 't', type: 'SIMPLE' } },
+      },
+      after: { deletions: result.deletions },
+    });
   });
 });
 

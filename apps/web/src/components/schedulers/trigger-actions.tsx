@@ -1,7 +1,7 @@
 'use client';
 
 import type { QuartzCommand, TriggerDto } from '@qa/shared';
-import { CalendarClockIcon, PauseIcon, PlayIcon, ZapIcon } from 'lucide-react';
+import { CalendarClockIcon, PauseIcon, PlayIcon, Trash2Icon, ZapIcon } from 'lucide-react';
 
 import { ControlMenu } from '@/components/commands/control-menu';
 import {
@@ -61,6 +61,12 @@ export function TriggerActions({
           ),
           disabled: rescheduleBlockedReason(trigger) !== null,
         },
+        {
+          label: '삭제',
+          icon: Trash2Icon,
+          command: { type: 'deleteTrigger', trigger: key },
+          destructive: true,
+        },
       ]}
     />
   );
@@ -93,6 +99,12 @@ export function JobActions({
         { label: '잡 일시정지', icon: PauseIcon, command: { type: 'pauseJob', job: key } },
         { label: '잡 재개', icon: PlayIcon, command: { type: 'resumeJob', job: key } },
         { label: '즉시 실행', icon: ZapIcon, command: { type: 'triggerJob', job: key } },
+        {
+          label: '잡 삭제',
+          icon: Trash2Icon,
+          command: { type: 'deleteJob', job: key },
+          destructive: true,
+        },
       ]}
     />
   );

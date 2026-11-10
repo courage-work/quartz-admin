@@ -33,6 +33,8 @@ export const AUDIT_ACTIONS = [
   'job_group.resume',
   'job.trigger',
   'trigger.reschedule',
+  'trigger.delete',
+  'job.delete',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
