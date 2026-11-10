@@ -23,6 +23,7 @@ import {
   HistoryIcon,
   ListFilterIcon,
   PauseIcon,
+  PlayIcon,
   SearchXIcon,
   ServerIcon,
   TimerIcon,
@@ -40,7 +41,7 @@ import { TableFrame } from '@/components/table-frame';
 import { GroupField } from '@/components/schedulers/group-field';
 import { PaginationBar } from '@/components/schedulers/pagination-bar';
 import { TimeCell } from '@/components/schedulers/time-cell';
-import { TriggerActions } from '@/components/schedulers/trigger-actions';
+import { GroupActions, JobActions, TriggerActions } from '@/components/schedulers/trigger-actions';
 import { JobLink, jobHref, TriggerTable } from '@/components/schedulers/trigger-table';
 import { TriggerStateBadge } from '@/components/status/status-badge';
 import { type StatusMeta, TRIGGER_STATE_META } from '@/components/status/tones';
@@ -73,6 +74,11 @@ import { parsePage, setParam, type UrlCodec, useUrlState } from '@/lib/use-url-s
 interface TabProps {
   schedulerId: number;
   refreshMs: number;
+}
+
+interface ControlProps {
+  /** 제어할 수 없는 이유(읽기 전용 접속 등). 있으면 제어 항목을 끈다 */
+  blockedReason: string | null;
 }
 
 /** 표 위의 데이터 기준 시각 (FR-VIEW-06). 대상 DB에서 읽은 시각이다 */
@@ -177,9 +183,14 @@ export function NodesTab({ schedulerId, refreshMs }: TabProps) {
 
 // ── 일시정지 그룹 ────────────────────────────────────────
 
-/** 일시정지된 트리거 그룹 (FR-VIEW-02) */
-export function PausedGroupsTab({ schedulerId, refreshMs }: TabProps) {
+/** 일시정지된 트리거 그룹 (FR-VIEW-02). 줄마다 그룹을 재개하는 버튼을 둔다(FR-CTL-03) */
+export function PausedGroupsTab({
+  schedulerId,
+  refreshMs,
+  blockedReason,
+}: TabProps & ControlProps) {
   const res = useView<PausedGroupsResponse>(schedulerId, 'paused', 'paused-groups', refreshMs);
+  const { openCommand, dialog } = useCommandDialog(schedulerId);
   if (res.isError) return <FormAlert error={res.error} />;
   if (!res.data) return <Skeleton className="h-16 w-full" />;
   return (
@@ -199,16 +210,34 @@ export function PausedGroupsTab({ schedulerId, refreshMs }: TabProps) {
           <TableHeader>
             <TableRow>
               <TableHead>일시정지된 트리거 그룹 ({res.data.groups.length})</TableHead>
+              <TableHead pinned className="w-0">
+                <span className="sr-only">제어</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {res.data.groups.length === 0 ? (
-              <TableEmpty colSpan={1} icon={PauseIcon} title="일시정지된 트리거 그룹이 없습니다" />
+              <TableEmpty colSpan={2} icon={PauseIcon} title="일시정지된 트리거 그룹이 없습니다" />
             ) : (
               res.data.groups.map((g) => (
                 <TableRow key={g}>
                   <TableCell>
                     <span className="font-mono">{g}</span>
+                  </TableCell>
+                  <TableCell pinned className="text-right">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!!blockedReason}
+                      title={blockedReason ?? undefined}
+                      aria-label={`${g} 트리거 그룹 재개`}
+                      onClick={(e) =>
+                        openCommand({ type: 'resumeTriggerGroup', group: g }, e.currentTarget)
+                      }
+                    >
+                      <PlayIcon data-icon="inline-start" aria-hidden />
+                      재개
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))
@@ -216,6 +245,7 @@ export function PausedGroupsTab({ schedulerId, refreshMs }: TabProps) {
           </TableBody>
         </Table>
       </TableFrame>
+      {dialog}
     </div>
   );
 }
@@ -253,8 +283,9 @@ const JOBS_CODEC: UrlCodec<JobsView> = {
   },
 };
 
-/** 잡 목록 (FR-VIEW-03) */
-export function JobsTab({ schedulerId, refreshMs }: TabProps) {
+/** 잡 목록 (FR-VIEW-03). 줄마다 잡 제어 메뉴, 그룹을 고르면 잡 그룹 제어 메뉴를 둔다(FR-CTL-02, 03) */
+export function JobsTab({ schedulerId, refreshMs, blockedReason }: TabProps & ControlProps) {
+  const { openCommand, dialog } = useCommandDialog(schedulerId);
   const [view, setView] = useUrlState(JOBS_CODEC);
   const filter: Partial<JobListQuery> = { group: view.group, q: view.q };
   const page = view.page;
@@ -282,6 +313,14 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
           options={groups.data?.jobGroups}
           onChange={(group) => setView((v) => ({ ...v, group, page: 1 }))}
         />
+        {filter.group ? (
+          <GroupActions
+            kind="job"
+            group={filter.group}
+            blockedReason={blockedReason}
+            onCommand={openCommand}
+          />
+        ) : null}
       </div>
       {res.isError ? <FormAlert error={res.error} /> : null}
       <DbTime dbNow={res.data?.dbNow} />
@@ -297,15 +336,18 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
               <TableHead>복구 요청</TableHead>
               <TableHead className="text-right">트리거</TableHead>
               <RowChevronHead />
+              <TableHead pinned className="w-0">
+                <span className="sr-only">제어</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {!res.data ? (
-              <LoadingRows columns={8} />
+              <LoadingRows columns={9} />
             ) : res.data.items.length === 0 ? (
               filter.group || filter.q ? (
                 <TableEmpty
-                  colSpan={8}
+                  colSpan={9}
                   icon={SearchXIcon}
                   title="조건에 맞는 잡이 없습니다"
                   action={
@@ -315,7 +357,7 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
                   }
                 />
               ) : (
-                <TableEmpty colSpan={8} icon={BriefcaseIcon} title="등록된 잡이 없습니다" />
+                <TableEmpty colSpan={9} icon={BriefcaseIcon} title="등록된 잡이 없습니다" />
               )
             ) : (
               res.data.items.map((j) => (
@@ -339,6 +381,9 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
                     <span className="tabular-nums">{j.triggerCount}</span>
                   </TableCell>
                   <RowChevronCell />
+                  <TableCell pinned className="text-right">
+                    <JobActions job={j} blockedReason={blockedReason} onCommand={openCommand} />
+                  </TableCell>
                 </LinkRow>
               ))
             )}
@@ -348,6 +393,7 @@ export function JobsTab({ schedulerId, refreshMs }: TabProps) {
       {res.data ? (
         <PaginationBar page={page} size={PAGE_SIZE} total={res.data.total} onPageChange={setPage} />
       ) : null}
+      {dialog}
     </div>
   );
 }
@@ -500,14 +546,7 @@ function TriggerFilterPopover({
 }
 
 /** 트리거 목록 (FR-VIEW-04). 상태·타입은 여러 개, 그룹은 목록에서 골라 정확히 일치, 검색어는 부분 일치 */
-export function TriggersTab({
-  schedulerId,
-  refreshMs,
-  blockedReason,
-}: TabProps & {
-  /** 제어할 수 없는 이유(읽기 전용 접속 등). 있으면 줄 메뉴의 제어 항목을 끈다 */
-  blockedReason: string | null;
-}) {
+export function TriggersTab({ schedulerId, refreshMs, blockedReason }: TabProps & ControlProps) {
   const { openCommand, dialog } = useCommandDialog(schedulerId);
   const [view, setView] = useUrlState(TRIGGERS_CODEC);
   const { states, types, sort, page } = view;
@@ -563,6 +602,14 @@ export function TriggersTab({
           groups={groups.data?.triggerGroups}
           onApply={(f) => update({ ...f, page: 1 })}
         />
+        {view.group ? (
+          <GroupActions
+            kind="trigger"
+            group={view.group}
+            blockedReason={blockedReason}
+            onCommand={openCommand}
+          />
+        ) : null}
       </div>
       <FilterChips chips={chips} onClearAll={clearFilters} />
       {res.isError ? <FormAlert error={res.error} /> : null}

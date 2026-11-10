@@ -6,7 +6,9 @@ export {
 } from './lock.js';
 export {
   executeCommand,
+  expectedOf,
   previewCommand,
+  sameExpected,
   sameTargets,
   stateRefs,
   type CommandOutcome,
@@ -19,6 +21,7 @@ export {
   type CommandHandler,
   type CommandPlan,
   type CommandRejectionCode,
+  type CommandSubject,
   type CommandTarget,
   type PlanEnv,
   type SchedulerCommandContext,

@@ -55,12 +55,16 @@ export function describeTarget(log: Pick<AuditLogDto, 'targetType' | 'target'>):
     connection: ['name'],
     scheduler: ['displayName', 'schedName'],
   };
-  // 제어 명령은 SCHED_NAME과 트리거 키를 남긴다
-  if (log.targetType === 'trigger') {
-    const trigger = field(log.target, 'trigger');
-    const group = field(trigger, 'group');
-    const name = field(trigger, 'name');
+  // 제어 명령은 SCHED_NAME과 대상 키(트리거·잡은 그룹과 이름, 그룹은 이름)를 남긴다
+  if (log.targetType === 'trigger' || log.targetType === 'job') {
+    const key = field(log.target, log.targetType);
+    const group = field(key, 'group');
+    const name = field(key, 'name');
     if (typeof group === 'string' && typeof name === 'string') return `${group} / ${name}`;
+  }
+  if (log.targetType === 'trigger_group' || log.targetType === 'job_group') {
+    const group = field(log.target, 'group');
+    if (typeof group === 'string') return group;
   }
   const keys = log.targetType ? nameKey[log.targetType] : undefined;
   if (!keys) return '-';
@@ -83,11 +87,19 @@ export function describeTarget(log: Pick<AuditLogDto, 'targetType' | 'target'>):
 }
 
 /**
- * 대상이 식별자(사용자 아이디, 트리거 키)인지. 식별자는 고정폭으로, 사람이 붙인 이름(접속, 스케줄러)은
+ * 대상이 식별자(사용자 아이디, 트리거·잡 키, 그룹 이름)인지. 식별자는 고정폭으로, 사람이 붙인 이름(접속, 스케줄러)은
  * 다른 목록처럼 본문 글꼴로 보인다
  */
+const CODE_TARGETS: ReadonlySet<string> = new Set([
+  'user',
+  'trigger',
+  'job',
+  'trigger_group',
+  'job_group',
+]);
+
 export function isCodeTarget(log: Pick<AuditLogDto, 'targetType'>): boolean {
-  return log.targetType === 'user' || log.targetType === 'trigger';
+  return log.targetType !== null && CODE_TARGETS.has(log.targetType);
 }
 
 /** 사용자를 시스템 작업과 구분해 보여 준다 */

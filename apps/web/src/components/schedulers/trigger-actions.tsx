@@ -1,24 +1,14 @@
 'use client';
 
 import type { QuartzCommand, TriggerDto } from '@qa/shared';
-import { MoreHorizontalIcon, PauseIcon } from 'lucide-react';
-import { useRef } from 'react';
+import { PauseIcon, PlayIcon } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { canPauseTrigger } from '@/lib/commands';
+import { ControlMenu } from '@/components/commands/control-menu';
+import { canPauseTrigger, canResumeTrigger } from '@/lib/commands';
 
-/**
- * 트리거 한 줄의 제어 메뉴. 고르면 확인 대화상자를 연다(FR-CTL-00b).
- * 읽기 전용 접속이면 항목을 끄고 이유를 메뉴 위에 적는다(FR-CTL-00a).
- */
+type OnCommand = (command: QuartzCommand, returnTo: HTMLElement | null) => void;
+
+/** 트리거 한 줄의 제어 메뉴. 지금 상태에서 바뀌는 것이 없는 항목은 끈다 */
 export function TriggerActions({
   trigger,
   blockedReason,
@@ -27,38 +17,105 @@ export function TriggerActions({
   trigger: TriggerDto;
   /** 제어할 수 없는 이유. 있으면 모든 항목을 끈다 */
   blockedReason: string | null;
-  onCommand: (command: QuartzCommand, returnTo: HTMLElement | null) => void;
+  onCommand: OnCommand;
 }) {
-  const button = useRef<HTMLButtonElement>(null);
-  const label = `${trigger.name} 트리거 제어`;
   const key = { group: trigger.group, name: trigger.name };
   return (
-    <DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button ref={button} variant="ghost" size="icon" aria-label={label}>
-              <MoreHorizontalIcon aria-hidden />
-            </Button>
-          </DropdownMenuTrigger>
-        </TooltipTrigger>
-        <TooltipContent>{label}</TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent align="end">
-        {blockedReason ? (
-          <>
-            <p className="max-w-64 px-2 py-1.5 text-xs text-muted-foreground">{blockedReason}</p>
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
-        <DropdownMenuItem
-          disabled={!!blockedReason || !canPauseTrigger(trigger.state)}
-          onSelect={() => onCommand({ type: 'pauseTrigger', trigger: key }, button.current)}
-        >
-          <PauseIcon aria-hidden />
-          일시정지
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <ControlMenu
+      label={`${trigger.name} 트리거 제어`}
+      blockedReason={blockedReason}
+      onCommand={onCommand}
+      items={[
+        {
+          label: '일시정지',
+          icon: PauseIcon,
+          command: { type: 'pauseTrigger', trigger: key },
+          disabled: !canPauseTrigger(trigger.state),
+        },
+        {
+          label: '재개',
+          icon: PlayIcon,
+          command: { type: 'resumeTrigger', trigger: key },
+          disabled: !canResumeTrigger(trigger.state),
+        },
+      ]}
+    />
+  );
+}
+
+/**
+ * 잡의 제어 메뉴(잡의 모든 트리거). 잡 목록에는 트리거 상태가 없어 항목을 미리 끄지 않고,
+ * 바뀌는 것이 없으면 확인 대화상자가 알려 준다
+ */
+export function JobActions({
+  job,
+  blockedReason,
+  onCommand,
+  buttonLabel,
+}: {
+  job: { group: string; name: string };
+  blockedReason: string | null;
+  onCommand: OnCommand;
+  /** 있으면 글자 버튼으로 둔다(잡 상세 머리) */
+  buttonLabel?: string;
+}) {
+  const key = { group: job.group, name: job.name };
+  return (
+    <ControlMenu
+      label={`${job.name} 잡 제어`}
+      buttonLabel={buttonLabel}
+      blockedReason={blockedReason}
+      onCommand={onCommand}
+      items={[
+        { label: '잡 일시정지', icon: PauseIcon, command: { type: 'pauseJob', job: key } },
+        { label: '잡 재개', icon: PlayIcon, command: { type: 'resumeJob', job: key } },
+      ]}
+    />
+  );
+}
+
+/** 필터로 고른 그룹 하나의 제어 메뉴. 트리거 그룹(트리거 탭)과 잡 그룹(잡 탭)에 쓴다 */
+export function GroupActions({
+  kind,
+  group,
+  blockedReason,
+  onCommand,
+}: {
+  kind: 'trigger' | 'job';
+  group: string;
+  blockedReason: string | null;
+  onCommand: OnCommand;
+}) {
+  const noun = kind === 'trigger' ? '트리거 그룹' : '잡 그룹';
+  return (
+    <ControlMenu
+      label={`${group} ${noun} 제어`}
+      buttonLabel="그룹 제어"
+      blockedReason={blockedReason}
+      onCommand={onCommand}
+      items={
+        kind === 'trigger'
+          ? [
+              {
+                label: `${noun} 일시정지`,
+                icon: PauseIcon,
+                command: { type: 'pauseTriggerGroup', group },
+              },
+              {
+                label: `${noun} 재개`,
+                icon: PlayIcon,
+                command: { type: 'resumeTriggerGroup', group },
+              },
+            ]
+          : [
+              {
+                label: `${noun} 일시정지`,
+                icon: PauseIcon,
+                command: { type: 'pauseJobGroup', group },
+              },
+              { label: `${noun} 재개`, icon: PlayIcon, command: { type: 'resumeJobGroup', group } },
+            ]
+      }
+    />
   );
 }

@@ -1,11 +1,19 @@
-import type { QuartzCommand } from '@qa/shared';
+import type { CommandExpected, QuartzCommand } from '@qa/shared';
 import { describe, expect, it } from 'vitest';
 import type { BindValue, Row, TargetConn } from '../adapter.js';
 import { TargetError } from '../errors.js';
 import { oracleDialect } from '../oracle/dialect.js';
 import { QUARTZ_REQUIRED_TABLES } from '../quartz-tables.js';
 import { createTableSet } from '../table-set.js';
-import { CommandRejection, executeCommand, previewCommand, sameTargets } from './index.js';
+import { ALL_GROUPS_PAUSED } from '../views/views.js';
+import {
+  CommandRejection,
+  executeCommand,
+  expectedOf,
+  previewCommand,
+  sameExpected,
+  sameTargets,
+} from './index.js';
 import type { SchedulerCommandContext } from './types.js';
 
 const ctx: SchedulerCommandContext = {
@@ -27,7 +35,28 @@ const ctx: SchedulerCommandContext = {
 };
 
 const DB_NOW = 1_762_400_000_000;
+const FUTURE = DB_NOW + 60_000;
+const PAST = DB_NOW - 5 * 60_000;
 const PAUSE: QuartzCommand = { type: 'pauseTrigger', trigger: { group: 'g', name: 't' } };
+const RESUME: QuartzCommand = { type: 'resumeTrigger', trigger: { group: 'g', name: 't' } };
+
+interface FakeTrigger {
+  group: string;
+  name: string;
+  jobGroup: string;
+  jobName: string;
+  state: string;
+  nft: number | null;
+}
+
+interface FakeDb {
+  triggers: FakeTrigger[];
+  pausedGroups: string[];
+  /** FIRED_TRIGGERS 행. `jobName`이 null이면 획득만 된 행이다 */
+  fired: { jobGroup: string | null; jobName: string | null; nonConcurrent: boolean }[];
+  /** JOB_DETAILS 행 (`그룹/이름`) */
+  jobs: string[];
+}
 
 interface Call {
   kind: 'query' | 'execute' | 'commit' | 'rollback';
@@ -35,45 +64,107 @@ interface Call {
   binds?: readonly BindValue[];
 }
 
+const trig = (name: string, state: string, more: Partial<FakeTrigger> = {}): FakeTrigger => ({
+  group: 'g',
+  name,
+  jobGroup: 'jg',
+  jobName: 'j',
+  state,
+  nft: FUTURE,
+  ...more,
+});
+
+const clone = (db: FakeDb): FakeDb => ({
+  triggers: db.triggers.map((t) => ({ ...t })),
+  pausedGroups: [...db.pausedGroups],
+  fired: db.fired.map((f) => ({ ...f })),
+  jobs: [...db.jobs],
+});
+
 /**
- * SQL 모양에 따라 답하는 가짜 커넥션. `state`는 TRIGGERS 행의 현재 상태이고 UPDATE가 바꾼다.
- * 커밋하지 않고 되돌리면 처음 상태로 돌아간다.
+ * SQL 모양에 따라 답하는 가짜 커넥션. 트리거, 그룹 일시정지, 실행 기록, 잡 행을 메모리에 두고
+ * UPDATE·INSERT·DELETE가 바꾼다. 커밋하지 않고 되돌리면 마지막 커밋 상태로 돌아간다.
  */
 class FakeConn implements TargetConn {
   readonly kind = 'oracle' as const;
   readonly calls: Call[] = [];
   inTransaction = false;
-  committed: string | null;
-  private pending: string | null;
+  committed: FakeDb;
+  private pending: FakeDb;
 
   constructor(
-    state: string | null,
+    db: Partial<FakeDb>,
     private readonly opts: {
       lockRow?: boolean;
       lockError?: TargetError;
       /** 첫 INSERT가 키 중복으로 실패한 뒤에는 행이 생긴다 */
       insertDuplicate?: boolean;
-      /** UPDATE가 0행을 돌려준다(잠금을 거치지 않은 쓰기를 흉내 낸다) */
+      /** 트리거 UPDATE가 0행을 돌려준다(잠금을 거치지 않은 쓰기를 흉내 낸다) */
       updateMisses?: boolean;
     } = {},
   ) {
-    this.committed = state;
-    this.pending = state;
+    const full: FakeDb = {
+      triggers: db.triggers ?? [],
+      pausedGroups: db.pausedGroups ?? [],
+      fired: db.fired ?? [],
+      jobs: db.jobs ?? [...new Set((db.triggers ?? []).map((t) => `${t.jobGroup}/${t.jobName}`))],
+    };
+    this.committed = clone(full);
+    this.pending = clone(full);
+  }
+
+  /** 지금 트랜잭션에서 보이는 트리거 하나의 상태 */
+  state(name: string, db: FakeDb = this.committed): string | undefined {
+    return db.triggers.find((t) => t.name === name)?.state;
   }
 
   query<R extends Row = Row>(sql: string, binds: readonly BindValue[] = []): Promise<R[]> {
     this.calls.push({ kind: 'query', sql, binds });
     if (this.opts.lockError && sql.includes('QRTZ_LOCKS'))
       return Promise.reject(this.opts.lockError);
-    return Promise.resolve(this.answer(sql) as R[]);
+    return Promise.resolve(this.answer(sql, binds) as R[]);
   }
 
-  private answer(sql: string): Row[] {
+  private answer(sql: string, binds: readonly BindValue[]): Row[] {
+    const db = this.pending;
     if (sql.includes('SYSTIMESTAMP')) return [{ NOW_MS: DB_NOW }];
     if (sql.includes('QRTZ_LOCKS'))
       return this.opts.lockRow === false ? [] : [{ L: 'TRIGGER_ACCESS' }];
+    if (sql.includes('QRTZ_PAUSED_TRIGGER_GRPS')) {
+      return [...db.pausedGroups].sort().map((g) => ({ G: g }));
+    }
+    if (sql.includes('QRTZ_FIRED_TRIGGERS')) {
+      return db.fired
+        .filter((f) => f.jobName !== null)
+        .map((f) => ({ JG: f.jobGroup, JN: f.jobName, NC: f.nonConcurrent ? '1' : '0' }));
+    }
+    if (sql.includes('QRTZ_JOB_DETAILS')) {
+      const keys = db.jobs.filter((k) => {
+        const [g, n] = k.split('/');
+        return sql.includes('j.JOB_NAME') ? g === binds[1] && n === binds[2] : g === binds[1];
+      });
+      return [{ C: keys.length }];
+    }
     if (sql.includes('QRTZ_TRIGGERS')) {
-      return this.pending === null ? [] : [{ G: 'g', N: 't', JG: 'jg', JN: 'j', ST: this.pending }];
+      const where = sql.slice(sql.indexOf(' WHERE '), sql.indexOf(' ORDER BY '));
+      const match = (t: FakeTrigger): boolean => {
+        if (where.includes('t.TRIGGER_NAME')) return t.group === binds[1] && t.name === binds[2];
+        if (where.includes('t.JOB_NAME')) return t.jobGroup === binds[1] && t.jobName === binds[2];
+        if (where.includes('t.TRIGGER_GROUP = ')) return t.group === binds[1];
+        if (where.includes('t.JOB_GROUP = ')) return t.jobGroup === binds[1];
+        throw new Error(`예상하지 못한 조건: ${sql}`);
+      };
+      return db.triggers
+        .filter(match)
+        .sort((a, b) => (a.group + a.name < b.group + b.name ? -1 : 1))
+        .map((t) => ({
+          G: t.group,
+          N: t.name,
+          JG: t.jobGroup,
+          JN: t.jobName,
+          ST: t.state,
+          NFT: t.nft ?? -1,
+        }));
     }
     throw new Error(`예상하지 못한 SQL: ${sql}`);
   }
@@ -81,6 +172,7 @@ class FakeConn implements TargetConn {
   execute(sql: string, binds: readonly BindValue[] = []): Promise<number> {
     this.calls.push({ kind: 'execute', sql, binds });
     this.inTransaction = true;
+    const db = this.pending;
     if (sql.startsWith('INSERT INTO "Q"."QRTZ_LOCKS"')) {
       if (this.opts.insertDuplicate) {
         this.opts.insertDuplicate = false;
@@ -91,24 +183,42 @@ class FakeConn implements TargetConn {
     }
     if (sql.startsWith('UPDATE "Q"."QRTZ_TRIGGERS"')) {
       if (this.opts.updateMisses) return Promise.resolve(0);
-      const [to, , , , from] = binds;
-      if (this.pending !== from) return Promise.resolve(0);
-      this.pending = to as string;
+      const [to, , group, from, ...names] = binds;
+      let n = 0;
+      for (const t of db.triggers) {
+        if (t.group === group && t.state === from && names.includes(t.name)) {
+          t.state = to as string;
+          n++;
+        }
+      }
+      return Promise.resolve(n);
+    }
+    if (sql.startsWith('INSERT INTO "Q"."QRTZ_PAUSED_TRIGGER_GRPS"')) {
+      const group = binds[1] as string;
+      if (db.pausedGroups.includes(group)) {
+        return Promise.reject(new TargetError('TARGET_ERROR', { driverCode: 'ORA-00001' }));
+      }
+      db.pausedGroups.push(group);
       return Promise.resolve(1);
+    }
+    if (sql.startsWith('DELETE FROM "Q"."QRTZ_PAUSED_TRIGGER_GRPS"')) {
+      const before = db.pausedGroups.length;
+      db.pausedGroups = db.pausedGroups.filter((g) => g !== binds[1]);
+      return Promise.resolve(before - db.pausedGroups.length);
     }
     return Promise.reject(new Error(`예상하지 못한 SQL: ${sql}`));
   }
 
   commit(): Promise<void> {
     this.calls.push({ kind: 'commit' });
-    this.committed = this.pending;
+    this.committed = clone(this.pending);
     this.inTransaction = false;
     return Promise.resolve();
   }
 
   rollback(): Promise<void> {
     this.calls.push({ kind: 'rollback' });
-    this.pending = this.committed;
+    this.pending = clone(this.committed);
     this.inTransaction = false;
     return Promise.resolve();
   }
@@ -120,16 +230,36 @@ class FakeConn implements TargetConn {
   sqls(kind: Call['kind']): string[] {
     return this.calls.filter((c) => c.kind === kind).map((c) => c.sql ?? '');
   }
+
+  writes(): string[] {
+    return this.sqls('execute').filter((s) => !s.includes('QRTZ_LOCKS'));
+  }
 }
 
-const expectedOf = (state: string) => [{ group: 'g', name: 't', state }];
+const one = (state: string, more: Partial<FakeTrigger> = {}) =>
+  new FakeConn({ triggers: [trig('t', state, more)] });
 
-describe('sameTargets (FR-CTL-00e)', () => {
+const expectedOf1 = (state: string, pausedGroups: string[] = []): CommandExpected => ({
+  triggers: [{ group: 'g', name: 't', state }],
+  pausedGroups,
+});
+
+/** 미리보기 값 그대로 실행한다. 화면이 하는 순서와 같다 */
+async function previewThenRun(conn: FakeConn, command: QuartzCommand) {
+  const preview = await previewCommand(conn, ctx, command);
+  return executeCommand(conn, ctx, command, expectedOf(preview.subject));
+}
+
+const rejected = (p: Promise<unknown>) => p.then(() => null).catch((e: unknown) => e);
+
+describe('sameTargets·sameExpected (FR-CTL-00e)', () => {
+  const refs = (state: string) => [{ group: 'g', name: 't', state }];
+
   it('Quartz getTriggerState 분류로 비교한다. WAITING과 ACQUIRED, PAUSED와 PAUSED_BLOCKED는 같다', () => {
-    expect(sameTargets(expectedOf('WAITING'), expectedOf('ACQUIRED'))).toBe(true);
-    expect(sameTargets(expectedOf('PAUSED'), expectedOf('PAUSED_BLOCKED'))).toBe(true);
-    expect(sameTargets(expectedOf('WAITING'), expectedOf('PAUSED'))).toBe(false);
-    expect(sameTargets(expectedOf('WAITING'), expectedOf('BLOCKED'))).toBe(false);
+    expect(sameTargets(refs('WAITING'), refs('ACQUIRED'))).toBe(true);
+    expect(sameTargets(refs('PAUSED'), refs('PAUSED_BLOCKED'))).toBe(true);
+    expect(sameTargets(refs('WAITING'), refs('PAUSED'))).toBe(false);
+    expect(sameTargets(refs('WAITING'), refs('BLOCKED'))).toBe(false);
   });
 
   it('대상 집합이 다르면 다르다. 순서는 보지 않는다', () => {
@@ -140,22 +270,31 @@ describe('sameTargets (FR-CTL-00e)', () => {
     expect(sameTargets([a, a], [a, b])).toBe(false);
     expect(sameTargets([a], [{ ...a, group: 'h' }])).toBe(false);
   });
+
+  it('관련 그룹의 일시정지 여부도 같아야 한다', () => {
+    expect(sameExpected(expectedOf1('PAUSED', ['g']), expectedOf1('PAUSED', ['g']))).toBe(true);
+    expect(sameExpected(expectedOf1('PAUSED', ['a', 'g']), expectedOf1('PAUSED', ['g', 'a']))).toBe(
+      true,
+    );
+    expect(sameExpected(expectedOf1('PAUSED', ['g']), expectedOf1('PAUSED'))).toBe(false);
+  });
 });
 
 describe('executeCommand (TRD §7.1)', () => {
   it('잠금 행 → 대상 행 순서로 잠그고, 조건부 UPDATE 뒤 다시 읽어 커밋한다', async () => {
-    const conn = new FakeConn('WAITING');
-    const out = await executeCommand(conn, ctx, PAUSE, expectedOf('WAITING'));
+    const conn = one('WAITING');
+    const out = await executeCommand(conn, ctx, PAUSE, expectedOf1('WAITING'));
 
     expect(out).toMatchObject({
       dbNow: DB_NOW,
       lock: 'locked',
       changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
+      groupChanges: [],
       warnings: [],
     });
-    expect(out.before[0]?.state).toBe('WAITING');
-    expect(out.after[0]?.state).toBe('PAUSED');
-    expect(conn.committed).toBe('PAUSED');
+    expect(out.before.triggers[0]?.state).toBe('WAITING');
+    expect(out.after.triggers[0]?.state).toBe('PAUSED');
+    expect(conn.state('t')).toBe('PAUSED');
 
     const queries = conn.sqls('query');
     expect(queries[0]).toMatch(/FROM "Q"\."QRTZ_LOCKS" .*LOCK_NAME = :p2 FOR UPDATE WAIT 5$/);
@@ -164,45 +303,48 @@ describe('executeCommand (TRD §7.1)', () => {
     // 변경 후 조회는 이미 잠근 행이라 다시 잠그지 않는다
     expect(queries[3]).not.toContain('FOR UPDATE');
     const [update] = conn.calls.filter((c) => c.kind === 'execute');
-    expect(update?.sql).toContain('AND TRIGGER_STATE = :p5');
-    expect(update?.binds).toEqual(['PAUSED', 'S', 'g', 't', 'WAITING']);
+    expect(update?.sql).toContain('AND TRIGGER_STATE = :p4 AND TRIGGER_NAME IN (:p5)');
+    expect(update?.binds).toEqual(['PAUSED', 'S', 'g', 'WAITING', 't']);
     expect(conn.calls.at(-1)?.kind).toBe('commit');
   });
 
   it('BLOCKED는 PAUSED_BLOCKED로, 화면에서 본 WAITING이 ACQUIRED가 됐어도 실행한다', async () => {
-    const blocked = new FakeConn('BLOCKED');
-    const out = await executeCommand(blocked, ctx, PAUSE, expectedOf('BLOCKED'));
+    const blocked = one('BLOCKED');
+    const out = await executeCommand(blocked, ctx, PAUSE, expectedOf1('BLOCKED'));
     expect(out.changes).toEqual([{ group: 'g', name: 't', from: 'BLOCKED', to: 'PAUSED_BLOCKED' }]);
 
-    const acquired = new FakeConn('ACQUIRED');
-    await executeCommand(acquired, ctx, PAUSE, expectedOf('WAITING'));
-    expect(acquired.committed).toBe('PAUSED');
+    const acquired = one('ACQUIRED');
+    await executeCommand(acquired, ctx, PAUSE, expectedOf1('WAITING'));
+    expect(acquired.state('t')).toBe('PAUSED');
   });
 
   it('바뀌는 것이 없으면 UPDATE 없이 커밋하고 NO_CHANGE를 알린다 (P-04)', async () => {
     for (const state of ['PAUSED', 'PAUSED_BLOCKED', 'ERROR', 'COMPLETE']) {
-      const conn = new FakeConn(state);
-      const out = await executeCommand(conn, ctx, PAUSE, expectedOf(state));
+      const conn = one(state);
+      const out = await executeCommand(conn, ctx, PAUSE, expectedOf1(state));
       expect(out.changes).toEqual([]);
       expect(out.warnings.map((w) => w.code)).toEqual(['NO_CHANGE']);
-      expect(conn.sqls('execute')).toEqual([]);
-      expect(conn.committed).toBe(state);
+      expect(conn.writes()).toEqual([]);
+      expect(conn.state('t')).toBe(state);
     }
   });
 
   it('잠금 행이 없으면 넣고 그 트랜잭션에서 계속한다 (X-02)', async () => {
-    const conn = new FakeConn('WAITING', { lockRow: false });
-    const out = await executeCommand(conn, ctx, PAUSE, expectedOf('WAITING'));
+    const conn = new FakeConn({ triggers: [trig('t', 'WAITING')] }, { lockRow: false });
+    const out = await executeCommand(conn, ctx, PAUSE, expectedOf1('WAITING'));
     expect(out.lock).toBe('inserted');
     expect(conn.sqls('execute')[0]).toBe(
       'INSERT INTO "Q"."QRTZ_LOCKS" (SCHED_NAME, LOCK_NAME) VALUES (:p1, :p2)',
     );
-    expect(conn.committed).toBe('PAUSED');
+    expect(conn.state('t')).toBe('PAUSED');
   });
 
   it('잠금 행 INSERT가 키 중복이면 되돌리고 한 번 다시 잠근다', async () => {
-    const conn = new FakeConn('WAITING', { lockRow: false, insertDuplicate: true });
-    const out = await executeCommand(conn, ctx, PAUSE, expectedOf('WAITING'));
+    const conn = new FakeConn(
+      { triggers: [trig('t', 'WAITING')] },
+      { lockRow: false, insertDuplicate: true },
+    );
+    const out = await executeCommand(conn, ctx, PAUSE, expectedOf1('WAITING'));
     expect(out.lock).toBe('locked');
     expect(conn.calls.map((c) => c.kind).slice(0, 4)).toEqual([
       'query',
@@ -210,34 +352,33 @@ describe('executeCommand (TRD §7.1)', () => {
       'rollback',
       'query',
     ]);
-    expect(conn.committed).toBe('PAUSED');
+    expect(conn.state('t')).toBe('PAUSED');
   });
 
   it('기대 상태와 다르면 바꾸지 않고 되돌리며 최신 상태를 돌려준다 (X-04)', async () => {
-    const conn = new FakeConn('PAUSED');
-    const err: unknown = await executeCommand(conn, ctx, PAUSE, expectedOf('WAITING')).catch(
-      (e: unknown) => e,
-    );
+    const conn = one('PAUSED');
+    const err = await rejected(executeCommand(conn, ctx, PAUSE, expectedOf1('WAITING')));
     expect(err).toBeInstanceOf(CommandRejection);
-    expect(err).toMatchObject({ code: 'STATE_CONFLICT', current: expectedOf('PAUSED') });
-    expect(conn.sqls('execute')).toEqual([]);
+    expect(err).toMatchObject({ code: 'STATE_CONFLICT', current: expectedOf1('PAUSED') });
+    expect(conn.writes()).toEqual([]);
     expect(conn.calls.at(-1)?.kind).toBe('rollback');
   });
 
   it('잠금 대기 초과는 LOCK_TIMEOUT 그대로 던지고 되돌린다 (X-01)', async () => {
-    const conn = new FakeConn('WAITING', {
-      lockError: new TargetError('LOCK_TIMEOUT', { driverCode: 'ORA-30006' }),
-    });
-    await expect(executeCommand(conn, ctx, PAUSE, expectedOf('WAITING'))).rejects.toMatchObject({
+    const conn = new FakeConn(
+      { triggers: [trig('t', 'WAITING')] },
+      { lockError: new TargetError('LOCK_TIMEOUT', { driverCode: 'ORA-30006' }) },
+    );
+    await expect(executeCommand(conn, ctx, PAUSE, expectedOf1('WAITING'))).rejects.toMatchObject({
       code: 'LOCK_TIMEOUT',
     });
     expect(conn.calls.map((c) => c.kind)).toEqual(['query', 'rollback']);
-    expect(conn.committed).toBe('WAITING');
+    expect(conn.state('t')).toBe('WAITING');
   });
 
   it('조건부 UPDATE가 계획보다 적게 바뀌면 되돌린다', async () => {
-    const conn = new FakeConn('WAITING', { updateMisses: true });
-    await expect(executeCommand(conn, ctx, PAUSE, expectedOf('WAITING'))).rejects.toMatchObject({
+    const conn = new FakeConn({ triggers: [trig('t', 'WAITING')] }, { updateMisses: true });
+    await expect(executeCommand(conn, ctx, PAUSE, expectedOf1('WAITING'))).rejects.toMatchObject({
       code: 'STATE_CONFLICT',
     });
     expect(conn.sqls('commit')).toEqual([]);
@@ -245,23 +386,332 @@ describe('executeCommand (TRD §7.1)', () => {
   });
 
   it('대상이 없으면 NOT_FOUND', async () => {
-    const conn = new FakeConn(null);
-    await expect(executeCommand(conn, ctx, PAUSE, expectedOf('WAITING'))).rejects.toMatchObject({
+    const conn = new FakeConn({});
+    await expect(executeCommand(conn, ctx, PAUSE, expectedOf1('WAITING'))).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
     expect(conn.calls.at(-1)?.kind).toBe('rollback');
+  });
+
+  it('같은 그룹·상태의 트리거는 500개씩 묶어 UPDATE한다', async () => {
+    const triggers = Array.from({ length: 1200 }, (_, i) =>
+      trig(`t${String(i).padStart(4, '0')}`, 'WAITING'),
+    );
+    const conn = new FakeConn({ triggers });
+    const out = await previewThenRun(conn, { type: 'pauseTriggerGroup', group: 'g' });
+    expect(out.changes).toHaveLength(1200);
+    const updates = conn.writes().filter((s) => s.startsWith('UPDATE'));
+    expect(updates).toHaveLength(3);
+    expect(conn.committed.triggers.every((t) => t.state === 'PAUSED')).toBe(true);
+  });
+});
+
+describe('resumeTrigger (부록 A.3)', () => {
+  it('PAUSED는 WAITING으로, NEXT_FIRE_TIME은 그대로 (R-01)', async () => {
+    const conn = one('PAUSED');
+    const out = await previewThenRun(conn, RESUME);
+    expect(out.changes).toEqual([{ group: 'g', name: 't', from: 'PAUSED', to: 'WAITING' }]);
+    expect(out.warnings).toEqual([]);
+    expect(conn.committed.triggers[0]?.nft).toBe(FUTURE);
+  });
+
+  it('같은 잡이 동시 실행 금지로 실행 중이면 BLOCKED (R-02, R-03)', async () => {
+    for (const state of ['PAUSED', 'PAUSED_BLOCKED']) {
+      const conn = new FakeConn({
+        triggers: [trig('t', state)],
+        fired: [{ jobGroup: 'jg', jobName: 'j', nonConcurrent: true }],
+      });
+      await previewThenRun(conn, RESUME);
+      expect(conn.state('t')).toBe('BLOCKED');
+    }
+  });
+
+  it('실행 기록이 없거나 동시 실행 허용이거나 획득만 된 행이면 WAITING (R-04, R-05, R-06)', async () => {
+    const cases: FakeDb['fired'][] = [
+      [],
+      [{ jobGroup: 'jg', jobName: 'j', nonConcurrent: false }],
+      [{ jobGroup: null, jobName: null, nonConcurrent: false }],
+      [{ jobGroup: 'jg', jobName: 'other', nonConcurrent: true }],
+    ];
+    for (const fired of cases) {
+      const conn = new FakeConn({ triggers: [trig('t', 'PAUSED_BLOCKED')], fired });
+      await previewThenRun(conn, RESUME);
+      expect(conn.state('t')).toBe('WAITING');
+    }
+  });
+
+  it('일시정지 상태가 아니면 바꾸지 않는다 (R-07)', async () => {
+    for (const state of ['WAITING', 'BLOCKED', 'ERROR', 'COMPLETE']) {
+      const conn = one(state);
+      const out = await previewThenRun(conn, RESUME);
+      expect(out.changes).toEqual([]);
+      expect(out.warnings.map((w) => w.code)).toEqual(['NO_CHANGE']);
+      expect(conn.writes()).toEqual([]);
+    }
+  });
+
+  it('NEXT_FIRE_TIME이 없으면 바꾸지 않는다 (R-08)', async () => {
+    const conn = one('PAUSED', { nft: null });
+    const out = await previewThenRun(conn, RESUME);
+    expect(out.changes).toEqual([]);
+    expect(out.warnings.map((w) => w.code)).toEqual(['NO_CHANGE', 'NO_NEXT_FIRE_TIME']);
+    expect(conn.state('t')).toBe('PAUSED');
+  });
+
+  it('그룹이 일시정지돼 있어도 실행 시각이 남았으면 재개하고 그룹 행은 그대로 둔다 (R-09)', async () => {
+    const conn = new FakeConn({ triggers: [trig('t', 'PAUSED')], pausedGroups: ['g'] });
+    const preview = await previewCommand(conn, ctx, RESUME);
+    expect(preview.subject.pausedGroups).toEqual(['g']);
+    await executeCommand(conn, ctx, RESUME, expectedOf(preview.subject));
+    expect(conn.state('t')).toBe('WAITING');
+    expect(conn.committed.pausedGroups).toEqual(['g']);
+  });
+
+  it('실행 시각이 지났으면 재개하고 misfire 처리를 노드에 맡긴다고 알린다 (R-11, R-21)', async () => {
+    const conn = one('PAUSED', { nft: PAST });
+    const out = await previewThenRun(conn, RESUME);
+    expect(conn.state('t')).toBe('WAITING');
+    expect(conn.committed.triggers[0]?.nft).toBe(PAST);
+    expect(out.warnings).toMatchObject([
+      { code: 'MISFIRE_DELEGATED', triggers: [{ group: 'g', name: 't' }] },
+    ]);
+  });
+
+  it('일시정지된 그룹 안의 지난 트리거는 거부한다 (R-31, R-32)', async () => {
+    for (const pausedGroups of [['g'], [ALL_GROUPS_PAUSED]]) {
+      const conn = new FakeConn({ triggers: [trig('t', 'PAUSED', { nft: PAST })], pausedGroups });
+      const preview = await previewCommand(conn, ctx, RESUME);
+      expect(preview.plan.rejection).toMatchObject({
+        code: 'RESUME_IN_PAUSED_GROUP',
+        triggers: [{ group: 'g', name: 't' }],
+      });
+      expect(preview.plan.changes).toEqual([]);
+
+      const err = await rejected(executeCommand(conn, ctx, RESUME, expectedOf(preview.subject)));
+      expect(err).toMatchObject({
+        code: 'RESUME_IN_PAUSED_GROUP',
+        current: [{ group: 'g', name: 't' }],
+      });
+      expect(conn.writes()).toEqual([]);
+      expect(conn.calls.at(-1)?.kind).toBe('rollback');
+    }
+  });
+
+  it('미리보기 뒤 그룹 일시정지가 바뀌면 STATE_CONFLICT', async () => {
+    const conn = new FakeConn({ triggers: [trig('t', 'PAUSED')] });
+    const err = await rejected(executeCommand(conn, ctx, RESUME, expectedOf1('PAUSED', ['g'])));
+    expect(err).toMatchObject({ code: 'STATE_CONFLICT', current: expectedOf1('PAUSED') });
+  });
+});
+
+describe('잡 단위 (부록 A.2 P-05, A.3 R-10·R-33)', () => {
+  const job = { group: 'jg', name: 'j' };
+
+  it('pauseJob: 잡의 트리거마다 일시정지 규칙을 적용한다 (P-05)', async () => {
+    const conn = new FakeConn({
+      triggers: [
+        trig('t1', 'WAITING'),
+        trig('t2', 'BLOCKED'),
+        trig('t3', 'PAUSED'),
+        trig('t4', 'ERROR'),
+      ],
+    });
+    const out = await previewThenRun(conn, { type: 'pauseJob', job });
+    expect(out.changes.map((c) => `${c.name}:${c.to}`)).toEqual(['t1:PAUSED', 't2:PAUSED_BLOCKED']);
+    expect(conn.committed.triggers.map((t) => t.state)).toEqual([
+      'PAUSED',
+      'PAUSED_BLOCKED',
+      'PAUSED',
+      'ERROR',
+    ]);
+  });
+
+  it('resumeJob: P는 W(실행 중인 동시 실행 금지 잡이면 B), PB는 B, E는 그대로 (R-10)', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('t1', 'PAUSED'), trig('t2', 'PAUSED_BLOCKED'), trig('t3', 'ERROR')],
+      fired: [{ jobGroup: 'jg', jobName: 'j', nonConcurrent: true }],
+    });
+    await previewThenRun(conn, { type: 'resumeJob', job });
+    expect(conn.committed.triggers.map((t) => t.state)).toEqual(['BLOCKED', 'BLOCKED', 'ERROR']);
+  });
+
+  it('resumeJob: 하나라도 거부 대상이면 전체를 거부한다 (R-33)', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('t1', 'PAUSED', { nft: PAST, group: 'pg' }), trig('t2', 'PAUSED')],
+      pausedGroups: ['pg'],
+    });
+    const preview = await previewCommand(conn, ctx, { type: 'resumeJob', job });
+    expect(preview.plan.rejection?.triggers).toEqual([{ group: 'pg', name: 't1' }]);
+    const err = await rejected(
+      executeCommand(conn, ctx, { type: 'resumeJob', job }, expectedOf(preview.subject)),
+    );
+    expect(err).toMatchObject({ code: 'RESUME_IN_PAUSED_GROUP' });
+    expect(conn.committed.triggers.map((t) => t.state)).toEqual(['PAUSED', 'PAUSED']);
+  });
+
+  it('트리거가 없는 잡은 NO_CHANGE, 없는 잡은 NOT_FOUND', async () => {
+    const empty = new FakeConn({ jobs: ['jg/j'] });
+    const out = await previewThenRun(empty, { type: 'pauseJob', job });
+    expect(out.warnings.map((w) => w.code)).toEqual(['NO_CHANGE']);
+
+    const missing = new FakeConn({});
+    await expect(previewCommand(missing, ctx, { type: 'pauseJob', job })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+});
+
+describe('트리거 그룹 (부록 A.4)', () => {
+  const STATES = [
+    'WAITING',
+    'ACQUIRED',
+    'BLOCKED',
+    'PAUSED',
+    'PAUSED_BLOCKED',
+    'ERROR',
+    'COMPLETE',
+  ];
+
+  it('pauseTriggerGroup: 그룹의 트리거를 일시정지하고 그룹 행을 넣는다 (G-01)', async () => {
+    const conn = new FakeConn({
+      triggers: [
+        ...STATES.map((s, i) => trig(`t${i}`, s)),
+        trig('other', 'WAITING', { group: 'h' }),
+      ],
+    });
+    const out = await previewThenRun(conn, { type: 'pauseTriggerGroup', group: 'g' });
+    expect(out.groupChanges).toEqual([{ group: 'g', paused: true }]);
+    expect(conn.committed.triggers.map((t) => t.state)).toEqual([
+      'PAUSED',
+      'PAUSED',
+      'PAUSED_BLOCKED',
+      'PAUSED',
+      'PAUSED_BLOCKED',
+      'ERROR',
+      'COMPLETE',
+      'WAITING',
+    ]);
+    expect(conn.committed.pausedGroups).toEqual(['g']);
+    expect(out.after.pausedGroups).toEqual(['g']);
+  });
+
+  it('트리거가 없는 그룹도 그룹 행을 넣고, 이미 있으면 다시 넣지 않는다 (G-02, G-03)', async () => {
+    const empty = new FakeConn({});
+    await previewThenRun(empty, { type: 'pauseTriggerGroup', group: 'g' });
+    expect(empty.committed.pausedGroups).toEqual(['g']);
+
+    const already = new FakeConn({ pausedGroups: ['g'] });
+    const out = await previewThenRun(already, { type: 'pauseTriggerGroup', group: 'g' });
+    expect(out.groupChanges).toEqual([]);
+    expect(out.warnings.map((w) => w.code)).toEqual(['NO_CHANGE']);
+    expect(already.writes()).toEqual([]);
+  });
+
+  it('그룹 이름은 =로 비교한다 (G-07)', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('a', 'WAITING', { group: 'A_B' }), trig('x', 'WAITING', { group: 'AXB' })],
+    });
+    await previewThenRun(conn, { type: 'pauseTriggerGroup', group: 'A_B' });
+    expect(conn.committed.triggers.map((t) => t.state)).toEqual(['PAUSED', 'WAITING']);
+    expect(conn.committed.pausedGroups).toEqual(['A_B']);
+    const select = conn.sqls('query').find((s) => s.includes('QRTZ_TRIGGERS'));
+    expect(select).toContain('t.TRIGGER_GROUP = :p2');
+    expect(select).not.toContain('LIKE');
+  });
+
+  it('resumeTriggerGroup: 그룹 행을 지우고 그룹의 트리거를 모두 재개한다 (G-05, G-06)', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('t1', 'PAUSED'), trig('t2', 'PAUSED_BLOCKED'), trig('t3', 'ERROR')],
+      pausedGroups: ['g'],
+    });
+    const out = await previewThenRun(conn, { type: 'resumeTriggerGroup', group: 'g' });
+    expect(out.groupChanges).toEqual([{ group: 'g', paused: false }]);
+    expect(conn.committed.triggers.map((t) => t.state)).toEqual(['WAITING', 'WAITING', 'ERROR']);
+    expect(conn.committed.pausedGroups).toEqual([]);
+
+    const individual = new FakeConn({ triggers: [trig('t1', 'PAUSED')] });
+    await previewThenRun(individual, { type: 'resumeTriggerGroup', group: 'g' });
+    expect(individual.state('t1')).toBe('WAITING');
+  });
+
+  it('resumeTriggerGroup: 그룹 행을 지우므로 지난 트리거도 재개한다', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('t1', 'PAUSED', { nft: PAST })],
+      pausedGroups: ['g'],
+    });
+    const out = await previewThenRun(conn, { type: 'resumeTriggerGroup', group: 'g' });
+    expect(conn.state('t1')).toBe('WAITING');
+    expect(out.warnings.map((w) => w.code)).toEqual(['MISFIRE_DELEGATED']);
+  });
+
+  it('resumeTriggerGroup: 전체 일시정지가 남아 있으면 지난 트리거가 있을 때 거부한다', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('t1', 'PAUSED', { nft: PAST })],
+      pausedGroups: ['g', ALL_GROUPS_PAUSED],
+    });
+    const preview = await previewCommand(conn, ctx, { type: 'resumeTriggerGroup', group: 'g' });
+    expect(preview.plan.rejection?.code).toBe('RESUME_IN_PAUSED_GROUP');
+    expect(preview.plan.groupChanges).toEqual([]);
+  });
+});
+
+describe('잡 그룹 (부록 A.4 G-08, G-10)', () => {
+  it('pauseJobGroup: 그룹의 모든 잡 트리거를 일시정지하고 그룹 행은 넣지 않는다', async () => {
+    const conn = new FakeConn({
+      triggers: [
+        trig('t1', 'WAITING', { jobName: 'j1' }),
+        trig('t2', 'WAITING', { jobName: 'j2' }),
+        trig('t3', 'WAITING', { jobGroup: 'other' }),
+      ],
+    });
+    const out = await previewThenRun(conn, { type: 'pauseJobGroup', group: 'jg' });
+    expect(conn.committed.triggers.map((t) => t.state)).toEqual(['PAUSED', 'PAUSED', 'WAITING']);
+    expect(conn.committed.pausedGroups).toEqual([]);
+    expect(out.warnings.map((w) => w.code)).toEqual(['JOB_GROUP_NOT_STORED']);
+  });
+
+  it('resumeJobGroup: 모든 트리거를 재개한다', async () => {
+    const conn = new FakeConn({
+      triggers: [trig('t1', 'PAUSED', { jobName: 'j1' }), trig('t2', 'PAUSED', { jobName: 'j2' })],
+    });
+    await previewThenRun(conn, { type: 'resumeJobGroup', group: 'jg' });
+    expect(conn.committed.triggers.map((t) => t.state)).toEqual(['WAITING', 'WAITING']);
+  });
+
+  it('잡이 하나도 없는 그룹은 NOT_FOUND', async () => {
+    const conn = new FakeConn({});
+    await expect(
+      previewCommand(conn, ctx, { type: 'pauseJobGroup', group: 'jg' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
 
 describe('previewCommand', () => {
   it('잠금 없이 읽고 바뀔 상태를 계산한다', async () => {
-    const conn = new FakeConn('WAITING');
+    const conn = one('WAITING');
     const preview = await previewCommand(conn, ctx, PAUSE);
     expect(preview).toEqual({
       dbNow: DB_NOW,
-      targets: [{ group: 'g', name: 't', jobGroup: 'jg', jobName: 'j', state: 'WAITING' }],
-      changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
-      warnings: [],
+      subject: {
+        triggers: [
+          {
+            group: 'g',
+            name: 't',
+            jobGroup: 'jg',
+            jobName: 'j',
+            state: 'WAITING',
+            nextFireTime: FUTURE,
+          },
+        ],
+        pausedGroups: [],
+        blockingJobs: new Set(),
+      },
+      plan: {
+        changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
+        groupChanges: [],
+        warnings: [],
+        rejection: null,
+      },
     });
     expect(conn.sqls('query').some((s) => s.includes('FOR UPDATE') || s.includes('LOCKS'))).toBe(
       false,

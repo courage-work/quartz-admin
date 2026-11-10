@@ -1,10 +1,13 @@
 'use client';
 
-import type {
-  CommandPreviewResponse,
-  CommandResultDto,
-  QuartzCommand,
-  TriggerStateRef,
+import {
+  COMMAND_TARGETS_LISTED,
+  commandScope,
+  type CommandExpected,
+  type CommandNoticeDto,
+  type CommandPreviewResponse,
+  type CommandResultDto,
+  type QuartzCommand,
 } from '@qa/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRightIcon, CircleAlertIcon, InfoIcon, RefreshCwIcon } from 'lucide-react';
@@ -28,12 +31,58 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { api, isApiError } from '@/lib/api';
-import { commandConfirmLabel, commandResultMessage, commandTitle } from '@/lib/commands';
+import {
+  commandConfirmLabel,
+  commandResultMessage,
+  commandTitle,
+  summarizeChanges,
+} from '@/lib/commands';
 import { formatDateTime } from '@/lib/format';
 import { schedulerKey } from '@/lib/schedulers';
 
+/** 그룹·잡 명령이 무엇을 대상으로 하는지 (FR-CTL-00b) */
+function ScopeLine({ command }: { command: QuartzCommand }) {
+  switch (commandScope(command)) {
+    case 'job':
+      return 'job' in command ? (
+        <span className="flex flex-col items-start gap-1">
+          <span className="text-xs text-muted-foreground">잡 {command.job.group}</span>
+          <span className="font-mono font-medium break-all">{command.job.name}</span>
+        </span>
+      ) : null;
+    case 'triggerGroup':
+    case 'jobGroup':
+      return 'group' in command ? (
+        <span className="flex flex-col items-start gap-1">
+          <span className="text-xs text-muted-foreground">
+            {commandScope(command) === 'triggerGroup' ? '트리거 그룹' : '잡 그룹'}
+          </span>
+          <span className="font-mono font-medium break-all">{command.group}</span>
+        </span>
+      ) : null;
+    default:
+      return null;
+  }
+}
+
+/** 사유에 해당하는 트리거 키. 서버가 앞쪽 몇 개만 보낸다 */
+function NoticeTriggers({ notice }: { notice: CommandNoticeDto }) {
+  if (!notice.triggers?.length) return null;
+  return (
+    <ul className="mt-1 flex flex-col gap-0.5">
+      {notice.triggers.map((t) => (
+        <li key={`${t.group}\u0000${t.name}`} className="font-mono text-xs break-all">
+          {`${t.group} / ${t.name}`}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Summary({ data }: { data: CommandPreviewResponse }) {
-  const { scheduler, targets, changes } = data;
+  const { scheduler, targets, changes, groupChanges, command } = data;
+  const single = commandScope(command) === 'trigger';
+  const listed = targets.slice(0, COMMAND_TARGETS_LISTED);
   return (
     <dl className="grid grid-cols-4 gap-x-4 gap-y-3 text-sm">
       <dt className="text-muted-foreground">스케줄러</dt>
@@ -48,18 +97,27 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
       </dd>
       <dt className="text-muted-foreground">대상</dt>
       <dd className="col-span-3 flex flex-col gap-2">
-        {targets.map((t) => (
+        <ScopeLine command={command} />
+        {single ? null : <span>트리거 {targets.length}개</span>}
+        {listed.map((t) => (
           <span key={`${t.group}\u0000${t.name}`} className="flex flex-col items-start gap-1">
             <span className="text-xs text-muted-foreground">{t.group}</span>
             <span className="flex flex-wrap items-center gap-2">
               <span className="font-mono break-all">{t.name}</span>
               <TriggerStateBadge state={t.state} />
             </span>
-            <span className="text-xs text-muted-foreground">
-              잡 <span className="font-mono break-all">{`${t.jobGroup} / ${t.jobName}`}</span>
-            </span>
+            {single ? (
+              <span className="text-xs text-muted-foreground">
+                잡 <span className="font-mono break-all">{`${t.jobGroup} / ${t.jobName}`}</span>
+              </span>
+            ) : null}
           </span>
         ))}
+        {targets.length > listed.length ? (
+          <span className="text-xs text-muted-foreground">
+            외 {targets.length - listed.length}개
+          </span>
+        ) : null}
       </dd>
       <dt className="text-muted-foreground">영향 범위</dt>
       <dd className="col-span-3 flex flex-col gap-2">
@@ -68,11 +126,21 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
             ? `트리거 ${changes.length}개의 상태가 바뀝니다`
             : '상태가 바뀌는 트리거가 없습니다'}
         </span>
-        {changes.map((c) => (
-          <span key={`${c.group}\u0000${c.name}`} className="flex flex-wrap items-center gap-2">
+        {summarizeChanges(changes).map((c) => (
+          <span key={`${c.from}\u0000${c.to}`} className="flex flex-wrap items-center gap-2">
             <TriggerStateBadge state={c.from} />
             <ArrowRightIcon className="size-4 text-muted-foreground" aria-label="에서" />
             <TriggerStateBadge state={c.to} />
+            {single ? null : (
+              <span className="text-muted-foreground tabular-nums">{c.count}개</span>
+            )}
+          </span>
+        ))}
+        {groupChanges.map((g) => (
+          <span key={g.group}>
+            {g.paused
+              ? '그룹을 일시정지 상태로 기록합니다. 나중에 이 그룹에 추가되는 트리거도 일시정지됩니다'
+              : '그룹의 일시정지 기록을 지웁니다'}
           </span>
         ))}
       </dd>
@@ -124,7 +192,7 @@ export function CommandDialog({
     void queryClient.invalidateQueries({ queryKey: schedulerKey(schedulerId) });
 
   const run = useMutation({
-    mutationFn: (expected: TriggerStateRef[]) =>
+    mutationFn: (expected: CommandExpected) =>
       api<CommandResultDto>(`/schedulers/${schedulerId}/commands`, {
         method: 'POST',
         body: { command, expected },
@@ -186,13 +254,19 @@ export function CommandDialog({
               <Alert variant="destructive">
                 <CircleAlertIcon aria-hidden />
                 <AlertTitle>실행할 수 없습니다</AlertTitle>
-                <AlertDescription>{blocked.message}</AlertDescription>
+                <AlertDescription>
+                  {blocked.message}
+                  <NoticeTriggers notice={blocked} />
+                </AlertDescription>
               </Alert>
             ) : null}
             {data.warnings.map((w) => (
               <Alert key={w.code}>
                 <InfoIcon aria-hidden />
-                <AlertDescription>{w.message}</AlertDescription>
+                <AlertDescription>
+                  {w.message}
+                  <NoticeTriggers notice={w} />
+                </AlertDescription>
               </Alert>
             ))}
           </div>

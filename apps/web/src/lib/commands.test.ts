@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canPauseTrigger,
+  canResumeTrigger,
   commandConfirmLabel,
   commandResultMessage,
   commandTitle,
   controlBlockedReason,
+  summarizeChanges,
 } from './commands';
 
 const PAUSE: QuartzCommand = { type: 'pauseTrigger', trigger: { group: 'g', name: 'nightly' } };
@@ -22,6 +24,51 @@ describe('제어 명령 문구', () => {
       'nightly 트리거를 일시정지했습니다',
     );
     expect(commandResultMessage({ command: PAUSE, changed: false })).toMatch(/바뀐 것이 없습니다/);
+  });
+});
+
+describe('재개·잡·그룹 문구', () => {
+  const RESUME_JOB: QuartzCommand = { type: 'resumeJob', job: { group: 'jg', name: 'report' } };
+
+  it('대상에 맞는 조사를 붙인다', () => {
+    expect(commandResultMessage({ command: RESUME_JOB, changed: true })).toBe(
+      'report 잡을 재개했습니다',
+    );
+    expect(
+      commandResultMessage({ command: { type: 'pauseTriggerGroup', group: 'g' }, changed: false }),
+    ).toMatch(/^g 트리거 그룹은 바뀐 것이 없습니다/);
+    expect(commandTitle({ type: 'resumeJobGroup', group: 'jg' })).toBe('잡 그룹 재개');
+    expect(commandConfirmLabel(RESUME_JOB)).toBe('재개하기');
+  });
+
+  it('지난 실행이 있으면 misfire 처리 안내를 붙인다 (TRD §7.4)', () => {
+    expect(
+      commandResultMessage({
+        command: RESUME_JOB,
+        changed: true,
+        warnings: [{ code: 'MISFIRE_DELEGATED', message: '' }],
+      }),
+    ).toMatch(/misfire 정책에 따라 최대 1분/);
+  });
+
+  it('상태 변경을 전·후 상태로 묶어 센다', () => {
+    expect(
+      summarizeChanges([
+        { group: 'g', name: 'a', from: 'WAITING', to: 'PAUSED' },
+        { group: 'g', name: 'b', from: 'BLOCKED', to: 'PAUSED_BLOCKED' },
+        { group: 'g', name: 'c', from: 'WAITING', to: 'PAUSED' },
+      ]),
+    ).toEqual([
+      { from: 'WAITING', to: 'PAUSED', count: 2 },
+      { from: 'BLOCKED', to: 'PAUSED_BLOCKED', count: 1 },
+    ]);
+  });
+});
+
+describe('canResumeTrigger', () => {
+  it('PAUSED, PAUSED_BLOCKED만 재개할 수 있다', () => {
+    expect(['PAUSED', 'PAUSED_BLOCKED'].every(canResumeTrigger)).toBe(true);
+    expect(['WAITING', 'BLOCKED', 'ERROR', 'COMPLETE'].some(canResumeTrigger)).toBe(false);
   });
 });
 
