@@ -201,7 +201,7 @@ export function ConnectionsView() {
           <Button asChild>
             <Link href="/connections/new">
               <PlusIcon data-icon="inline-start" aria-hidden />
-              접속 추가
+              접속 추가하기
             </Link>
           </Button>
         }

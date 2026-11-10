@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import { TriggerDistribution } from '@/components/dashboard/trigger-distribution';
+import { TriggerDistribution, TriggerLegend } from '@/components/dashboard/trigger-distribution';
 import { type Tone, TONE_CLASSES } from '@/components/status/tones';
 
 function StatTile({
@@ -18,6 +18,7 @@ function StatTile({
   icon: Icon,
   tone,
   stale,
+  aside,
   children,
 }: {
   label: string;
@@ -28,6 +29,8 @@ function StatTile({
   tone: Tone;
   /** 지금 값이 아니라 마지막으로 읽은 값이다. 옅게 보인다 */
   stale?: boolean;
+  /** 숫자 옆에 두는 것(분포 범례). 좁으면 숫자 아래로 내려간다 */
+  aside?: ReactNode;
   children?: ReactNode;
 }) {
   return (
@@ -40,13 +43,16 @@ function StatTile({
           <Icon className="size-4" aria-hidden />
         </span>
       </div>
-      <div className="flex items-baseline gap-2">
-        <span
-          className={`text-2xl leading-none font-semibold tabular-nums ${stale ? 'text-muted-foreground' : ''}`}
-        >
-          {value}
-        </span>
-        {sub ? <span className="text-xs text-muted-foreground">{sub}</span> : null}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex items-baseline gap-2">
+          <span
+            className={`text-2xl leading-none font-semibold tabular-nums ${stale ? 'text-muted-foreground' : ''}`}
+          >
+            {value}
+          </span>
+          {sub ? <span className="text-xs text-muted-foreground">{sub}</span> : null}
+        </div>
+        {aside}
       </div>
       {children}
     </div>
@@ -89,6 +95,7 @@ export function SchedulerStats({ s, stale = false }: { s: SchedulerStatsInput; s
         icon={ListChecksIcon}
         tone="neutral"
         stale={stale}
+        aside={counts ? <TriggerLegend counts={counts} /> : null}
       >
         {counts ? (
           <div className={stale ? 'opacity-50' : undefined}>

@@ -71,6 +71,14 @@ export function describeTarget(log: Pick<AuditLogDto, 'targetType' | 'target'>):
   return typeof id === 'number' ? `#${id}` : '-';
 }
 
+/**
+ * 대상이 식별자(사용자 아이디, 트리거 키)인지. 식별자는 고정폭으로, 사람이 붙인 이름(접속, 스케줄러)은
+ * 다른 목록처럼 본문 글꼴로 보인다
+ */
+export function isCodeTarget(log: Pick<AuditLogDto, 'targetType'>): boolean {
+  return log.targetType === 'user' || log.targetType === 'trigger';
+}
+
 /** 사용자를 시스템 작업과 구분해 보여 준다 */
 export function describeActor(log: Pick<AuditLogDto, 'username' | 'userId'>): string {
   if (log.username) return log.username;

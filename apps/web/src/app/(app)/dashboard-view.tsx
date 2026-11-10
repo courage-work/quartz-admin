@@ -14,25 +14,20 @@ import {
   ClockAlertIcon,
   DatabaseIcon,
   LayoutDashboardIcon,
-  SearchIcon,
+  SearchXIcon,
   UnplugIcon,
 } from 'lucide-react';
 import Link from 'next/link';
-import { type FormEvent, useRef, useState } from 'react';
 
 import { countByHealth, HealthSummary } from '@/components/dashboard/health-summary';
-import { TriggerDistribution } from '@/components/dashboard/trigger-distribution';
+import { TriggerDistribution, TriggerLegend } from '@/components/dashboard/trigger-distribution';
 import { FormAlert } from '@/components/form/form-alert';
+import { ServerSearch } from '@/components/list/server-search';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
 import { PageHeader } from '@/components/shell/page-header';
 import { EnvBadge } from '@/components/status/environment';
 import { SchedulerHealthBadge } from '@/components/status/status-badge';
-import {
-  HEALTH_ORDER,
-  SCHEDULER_HEALTH_META,
-  TONE_CLASSES,
-  TRIGGER_STATE_META,
-} from '@/components/status/tones';
+import { HEALTH_ORDER, SCHEDULER_HEALTH_META, TONE_CLASSES } from '@/components/status/tones';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -46,7 +41,6 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty';
 import { Field, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -56,16 +50,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useSlashFocus } from '@/hooks/use-slash-focus';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { DASHBOARD_KEY, formatAgo } from '@/lib/schedulers';
 import { setParam, type UrlCodec, useUrlState } from '@/lib/use-url-state';
 
 const ALL = 'all';
-
-/** 카드에 보여 줄 트리거 상태와 순서 */
-const CARD_STATES = ['WAITING', 'EXECUTING', 'ACQUIRED', 'PAUSED', 'BLOCKED', 'ERROR'] as const;
 
 function Stat({
   label,
@@ -181,17 +171,7 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
               <div className={unreachable ? 'opacity-50' : undefined}>
                 <TriggerDistribution counts={counts} />
               </div>
-              <div className="flex flex-wrap gap-1">
-                {CARD_STATES.filter((s) => (counts[s] ?? 0) > 0).map((s) => {
-                  const meta = TRIGGER_STATE_META[s];
-                  return (
-                    <Badge key={s} variant={meta.tone} title={s}>
-                      <meta.icon data-icon="inline-start" aria-hidden />
-                      {meta.label} {counts[s]}
-                    </Badge>
-                  );
-                })}
-              </div>
+              <TriggerLegend counts={counts} />
             </div>
           ) : null}
           {skewWarn ? (
@@ -231,22 +211,21 @@ function Filters({
   value: DashboardQuery;
   onChange: (next: DashboardQuery) => void;
 }) {
-  const [q, setQ] = useState(value.q ?? '');
-  const qRef = useRef<HTMLInputElement>(null);
-  useSlashFocus(qRef);
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    onChange({ ...value, q: q.trim() || undefined });
-  };
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
-      <Field className="w-40">
+    <div className="flex flex-wrap items-end gap-2">
+      <ServerSearch
+        label="검색(스케줄러·접속 이름)"
+        value={value.q ?? ''}
+        onApply={(q) => onChange({ ...value, q: q || undefined })}
+      />
+      {/* 좁은 화면에서는 두 선택 상자가 한 줄을 나눠 쓴다 */}
+      <Field className="w-auto min-w-32 flex-1 md:w-40 md:flex-none">
         <FieldLabel htmlFor="dash-env">환경</FieldLabel>
         <Select
           value={value.env ?? ALL}
           onValueChange={(v) => onChange({ ...value, env: v === ALL ? undefined : v })}
         >
-          <SelectTrigger id="dash-env">
+          <SelectTrigger id="dash-env" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -261,13 +240,13 @@ function Filters({
           </SelectContent>
         </Select>
       </Field>
-      <Field className="w-40">
+      <Field className="w-auto min-w-32 flex-1 md:w-40 md:flex-none">
         <FieldLabel htmlFor="dash-tag">태그</FieldLabel>
         <Select
           value={value.tag ?? ALL}
           onValueChange={(v) => onChange({ ...value, tag: v === ALL ? undefined : v })}
         >
-          <SelectTrigger id="dash-tag">
+          <SelectTrigger id="dash-tag" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -282,22 +261,7 @@ function Filters({
           </SelectContent>
         </Select>
       </Field>
-      <Field className="w-64">
-        <FieldLabel htmlFor="dash-q">검색(스케줄러·접속 이름)</FieldLabel>
-        <Input
-          ref={qRef}
-          id="dash-q"
-          type="search"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-keyshortcuts="/"
-        />
-      </Field>
-      <Button type="submit" variant="outline">
-        <SearchIcon data-icon="inline-start" aria-hidden />
-        검색하기
-      </Button>
-    </form>
+    </div>
   );
 }
 
@@ -380,6 +344,9 @@ export function DashboardView() {
     body = (
       <Empty>
         <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <SearchXIcon aria-hidden />
+          </EmptyMedia>
           <EmptyTitle>조건에 맞는 스케줄러가 없습니다</EmptyTitle>
           <EmptyDescription>환경, 태그, 이름 조건을 바꾸거나 모두 지우세요.</EmptyDescription>
         </EmptyHeader>
@@ -399,6 +366,9 @@ export function DashboardView() {
         {items.length === 0 ? (
           <Empty>
             <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <SearchXIcon aria-hidden />
+              </EmptyMedia>
               <EmptyTitle>이 상태인 스케줄러가 없습니다</EmptyTitle>
               <EmptyDescription>위 요약에서 다른 상태를 고르거나 전체를 보세요.</EmptyDescription>
             </EmptyHeader>
@@ -435,7 +405,8 @@ export function DashboardView() {
           />
         }
       />
-      {dashboard.data && dashboard.data.items.length > 0 ? (
+      {/* 검색 결과가 없어도 요약 띠는 남겨 화면이 튀지 않게 한다 */}
+      {dashboard.data && (dashboard.data.items.length > 0 || filtered) ? (
         <HealthSummary
           total={dashboard.data.items.length}
           counts={countByHealth(dashboard.data.items)}
@@ -443,13 +414,10 @@ export function DashboardView() {
           onChange={setHealth}
         />
       ) : null}
-      {/* 필터를 지우면 입력칸도 비우도록 다시 만든다 */}
-      <Filters
-        key={JSON.stringify(filter)}
-        data={dashboard.data}
-        value={filter}
-        onChange={setFilter}
-      />
+      {/* 등록한 스케줄러가 하나도 없으면 거를 것이 없으므로 필터를 두지 않는다 */}
+      {dashboard.data && dashboard.data.items.length === 0 && !filtered ? null : (
+        <Filters data={dashboard.data} value={filter} onChange={setFilter} />
+      )}
       {body}
     </>
   );

@@ -28,13 +28,13 @@ import {
   TimerIcon,
   UnplugIcon,
 } from 'lucide-react';
-import { type FormEvent, useEffect, useId, useState } from 'react';
+import { type FormEvent, useId, useState } from 'react';
 
 import { useCommandDialog } from '@/components/commands/use-command-dialog';
 import { FormAlert } from '@/components/form/form-alert';
 import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
 import { type FilterChip, FilterChips } from '@/components/list/filter-chips';
-import { ListSearch } from '@/components/list/list-search';
+import { ServerSearch } from '@/components/list/server-search';
 import { TableEmpty } from '@/components/table-empty';
 import { TableFrame } from '@/components/table-frame';
 import { GroupField } from '@/components/schedulers/group-field';
@@ -202,28 +202,28 @@ export function PausedGroupsTab({ schedulerId, refreshMs }: TabProps) {
           </AlertDescription>
         </Alert>
       ) : null}
-      {res.data.groups.length === 0 ? (
-        <p className="text-sm text-muted-foreground">일시정지된 트리거 그룹이 없습니다.</p>
-      ) : (
-        <TableFrame>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>일시정지된 트리거 그룹 ({res.data.groups.length})</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {res.data.groups.map((g) => (
+      <TableFrame>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>일시정지된 트리거 그룹 ({res.data.groups.length})</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {res.data.groups.length === 0 ? (
+              <TableEmpty colSpan={1} icon={PauseIcon} title="일시정지된 트리거 그룹이 없습니다" />
+            ) : (
+              res.data.groups.map((g) => (
                 <TableRow key={g}>
                   <TableCell>
                     <span className="font-mono">{g}</span>
                   </TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableFrame>
-      )}
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableFrame>
     </div>
   );
 }
@@ -237,46 +237,6 @@ function useGroups(schedulerId: number) {
     queryFn: ({ signal }) => api<GroupsResponse>(`/schedulers/${schedulerId}/groups`, { signal }),
     staleTime: 60_000,
   });
-}
-
-const SEARCH_DELAY_MS = 300;
-
-/**
- * 서버에 묻는 검색칸. 입력을 멈추면 잠시 뒤 적용하고 Enter는 바로 적용한다.
- * 접속·사용자 목록의 검색칸처럼 버튼 없이 입력만으로 걸러진다.
- */
-function ServerSearch({
-  label,
-  value,
-  onApply,
-}: {
-  /** 검색 범위를 함께 쓴다. 예: `검색(이름·그룹·잡)` */
-  label: string;
-  value: string;
-  onApply: (q: string) => void;
-}) {
-  const [text, setText] = useState(value);
-  // 바깥에서 값이 바뀌면(필터 모두 지우기) 입력칸도 맞춘다. 입력 중인 글자(끝의 공백)는 건드리지 않는다
-  const [seen, setSeen] = useState(value);
-  if (seen !== value) {
-    setSeen(value);
-    if (value !== text.trim()) setText(value);
-  }
-  useEffect(() => {
-    const next = text.trim();
-    if (next === value) return;
-    const timer = setTimeout(() => onApply(next), SEARCH_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [text, value, onApply]);
-  return (
-    <ListSearch
-      label={label}
-      value={text}
-      onChange={setText}
-      onSubmit={() => onApply(text.trim())}
-      className="w-full max-w-md"
-    />
-  );
 }
 
 const PAGE_SIZE = 50;
@@ -536,7 +496,7 @@ function TriggerFilterPopover({
                 variant="ghost"
                 onClick={() => setDraft({ states: [], types: [], group: undefined })}
               >
-                초기화
+                초기화하기
               </Button>
               <Button type="submit">필터 적용하기</Button>
             </div>

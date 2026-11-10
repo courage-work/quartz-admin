@@ -2,7 +2,14 @@
 
 import type { JobDataDto, JobDetailResponse, SchedulerDetailDto } from '@qa/shared';
 import { useQuery } from '@tanstack/react-query';
-import { EyeIcon, EyeOffIcon, FileLockIcon, SearchXIcon, TimerIcon } from 'lucide-react';
+import {
+  BracesIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FileLockIcon,
+  SearchXIcon,
+  TimerIcon,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { type ReactNode, useState } from 'react';
@@ -14,6 +21,7 @@ import { RefreshControls, useRefreshInterval } from '@/components/schedulers/ref
 import { TriggerActions } from '@/components/schedulers/trigger-actions';
 import { TriggerTable } from '@/components/schedulers/trigger-table';
 import { PageHeader } from '@/components/shell/page-header';
+import { TableEmpty } from '@/components/table-empty';
 import { EnvBadge, ProdStripe } from '@/components/status/environment';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -57,9 +65,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 function JobDataCard({ data }: { data: JobDataDto }) {
   const [shown, setShown] = useState(false);
   let body: ReactNode;
-  if (data.format === 'empty')
-    body = <p className="text-sm text-muted-foreground">JobDataMap이 비어 있습니다.</p>;
-  else if (data.format === 'java-serialized' || data.format === 'unreadable')
+  if (data.format === 'java-serialized' || data.format === 'unreadable')
     body = (
       <Alert>
         <FileLockIcon aria-hidden />
@@ -75,20 +81,21 @@ function JobDataCard({ data }: { data: JobDataDto }) {
         </AlertDescription>
       </Alert>
     );
-  else
-    body =
-      data.entries.length === 0 ? (
-        <p className="text-sm text-muted-foreground">항목이 없습니다.</p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>키</TableHead>
-              <TableHead>값</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.entries.map((e) => (
+  else {
+    const entries = data.format === 'properties' ? data.entries : [];
+    body = (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>키</TableHead>
+            <TableHead>값</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {entries.length === 0 ? (
+            <TableEmpty colSpan={2} icon={BracesIcon} title="JobDataMap이 비어 있습니다" />
+          ) : (
+            entries.map((e) => (
               <TableRow key={e.key}>
                 <TableCell>
                   <span className="font-mono">{e.key}</span>
@@ -97,10 +104,12 @@ function JobDataCard({ data }: { data: JobDataDto }) {
                   <span className="font-mono break-all">{shown ? e.value : '••••••'}</span>
                 </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      );
+            ))
+          )}
+        </TableBody>
+      </Table>
+    );
+  }
 
   return (
     <Card>

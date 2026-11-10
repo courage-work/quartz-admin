@@ -102,9 +102,21 @@ export function SchedulerView() {
     refetchInterval: refreshMs || false,
   });
 
-  if (id === null || isApiError(detail.error, 'NOT_FOUND')) return <NotFound />;
-  if (detail.isError) return <FormAlert error={detail.error} />;
-  if (detail.isPending) return <Skeleton className="h-64 w-full" />;
+  // 아직 못 읽었거나 읽지 못했어도 화면 머리(경로, 돌아가기)는 남긴다
+  if (id === null || detail.isError || detail.isPending) {
+    return (
+      <>
+        <PageHeader trail={[{ label: '대시보드', href: '/' }]} title="스케줄러" />
+        {id === null || isApiError(detail.error, 'NOT_FOUND') ? (
+          <NotFound />
+        ) : detail.isError ? (
+          <FormAlert error={detail.error} />
+        ) : (
+          <Skeleton className="h-64 w-full" />
+        )}
+      </>
+    );
+  }
   const s = detail.data;
   const unreachable = s.snapshot?.status === 'unreachable';
 

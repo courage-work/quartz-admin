@@ -43,6 +43,7 @@ import {
   describeActor,
   describeTarget,
   EMPTY_AUDIT_FILTER,
+  isCodeTarget,
 } from '@/lib/audit';
 import { formatDateTime } from '@/lib/format';
 import { AUDIT_ACTION_LABELS, auditActionLabel } from '@/lib/labels';
@@ -145,7 +146,7 @@ function FilterPopover({
                 variant="ghost"
                 onClick={() => setDraft({ ...EMPTY_AUDIT_FILTER, username: draft.username })}
               >
-                초기화
+                초기화하기
               </Button>
               <Button type="submit">필터 적용하기</Button>
             </div>
@@ -329,11 +330,15 @@ export function AuditLogsView() {
                     </RowLink>
                   </TableCell>
                   <TableCell>
-                    <span className="font-mono">{describeActor(log)}</span>
+                    <span className={log.username ? 'font-mono' : undefined}>
+                      {describeActor(log)}
+                    </span>
                   </TableCell>
                   <TableCell>{auditActionLabel(log.action)}</TableCell>
                   <TableCell>
-                    <span className="font-mono">{describeTarget(log)}</span>
+                    <span className={isCodeTarget(log) ? 'font-mono' : undefined}>
+                      {describeTarget(log)}
+                    </span>
                   </TableCell>
                   <TableCell>
                     <AuditResultBadge result={log.result} errorCode={log.errorCode} />

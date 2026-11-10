@@ -309,7 +309,7 @@ export function UsersView() {
           <Button asChild>
             <Link href="/users/new">
               <UserPlusIcon data-icon="inline-start" aria-hidden />
-              사용자 추가
+              사용자 추가하기
             </Link>
           </Button>
         }

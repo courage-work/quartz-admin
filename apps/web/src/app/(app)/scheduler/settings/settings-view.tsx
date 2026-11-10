@@ -184,26 +184,34 @@ export function SchedulerSettingsView() {
     enabled: id !== null,
   });
 
-  if (id === null || isApiError(detail.error, 'NOT_FOUND')) {
+  // 아직 못 읽었거나 읽지 못했어도 화면 머리(경로, 돌아가기)는 남긴다
+  if (detail.isError || detail.isPending) {
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <SearchXIcon aria-hidden />
-          </EmptyMedia>
-          <EmptyTitle>스케줄러를 찾을 수 없습니다</EmptyTitle>
-          <EmptyDescription>주소가 잘못됐거나 등록을 해제한 스케줄러입니다.</EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button asChild variant="outline">
-            <Link href="/connections">접속 목록으로 가기</Link>
-          </Button>
-        </EmptyContent>
-      </Empty>
+      <>
+        <PageHeader trail={[{ label: '접속', href: '/connections' }]} title="스케줄러 설정" />
+        {id === null || isApiError(detail.error, 'NOT_FOUND') ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <SearchXIcon aria-hidden />
+              </EmptyMedia>
+              <EmptyTitle>스케줄러를 찾을 수 없습니다</EmptyTitle>
+              <EmptyDescription>주소가 잘못됐거나 등록을 해제한 스케줄러입니다.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button asChild variant="outline">
+                <Link href="/connections">접속 목록으로 가기</Link>
+              </Button>
+            </EmptyContent>
+          </Empty>
+        ) : detail.isError ? (
+          <FormAlert error={detail.error} />
+        ) : (
+          <Skeleton className="h-64 w-full" />
+        )}
+      </>
     );
   }
-  if (detail.isError) return <FormAlert error={detail.error} />;
-  if (detail.isPending) return <Skeleton className="h-64 w-full" />;
   const s = detail.data;
 
   return (
