@@ -228,6 +228,8 @@ export function JobView() {
               empty={{ icon: TimerIcon, title: '이 잡을 실행하는 트리거가 없습니다' }}
               actions={(t) => (
                 <TriggerActions
+                  schedulerId={schedulerId ?? 0}
+                  fromJob
                   trigger={t}
                   blockedReason={
                     scheduler.data

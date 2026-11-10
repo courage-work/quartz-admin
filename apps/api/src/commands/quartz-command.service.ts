@@ -43,6 +43,8 @@ const AUDIT_ACTION: Record<CommandType, AuditAction> = {
   pauseJobGroup: 'job_group.pause',
   resumeJobGroup: 'job_group.resume',
   triggerJob: 'job.trigger',
+  updateCronSchedule: 'trigger.reschedule',
+  updateSimpleSchedule: 'trigger.reschedule',
 };
 
 /** 명령 대상 단위별 감사 대상 종류 */
@@ -81,7 +83,8 @@ function auditTarget(scheduler: SchedulerRow, command: QuartzCommand): Record<st
 function rejectionError(err: CommandRejection): ApiError {
   if (err.code === 'NOT_FOUND') return notFound(err.message);
   return new ApiError(
-    HttpStatus.CONFLICT,
+    // 스케줄 값이 잘못된 요청은 400, 지금 상태로는 할 수 없는 요청은 409
+    err.code === 'INVALID_SCHEDULE' ? HttpStatus.BAD_REQUEST : HttpStatus.CONFLICT,
     err.code,
     err.message,
     undefined,
@@ -156,6 +159,13 @@ export class QuartzCommandService {
       changes: preview.plan.changes,
       groupChanges: preview.plan.groupChanges,
       inserts: preview.plan.inserts,
+      scheduleChanges: preview.plan.scheduleChanges.map(({ group, name, from, to, upcoming }) => ({
+        group,
+        name,
+        from,
+        to,
+        upcoming,
+      })),
       warnings: preview.plan.warnings,
       blocked: blockedReason(connection) ?? preview.plan.rejection,
     };
@@ -193,13 +203,19 @@ export class QuartzCommandService {
           executeCommand(conn, ctx, command, expected, { actor: actor.username }),
         );
         const after = expectedOf(out.after);
-        const changed = out.changes.length + out.groupChanges.length + out.inserts.length > 0;
+        const changed =
+          out.changes.length +
+            out.groupChanges.length +
+            out.inserts.length +
+            out.scheduleChanges.length >
+          0;
         pending.succeed({
           after: {
             ...after,
             changes: out.changes,
             groupChanges: out.groupChanges,
             ...(out.inserts.length > 0 ? { inserts: out.inserts } : {}),
+            ...(out.scheduleChanges.length > 0 ? { scheduleChanges: out.scheduleChanges } : {}),
           },
         });
         this.logger.log(
@@ -217,6 +233,7 @@ export class QuartzCommandService {
           changes: out.changes,
           groupChanges: out.groupChanges,
           inserts: out.inserts,
+          scheduleChanges: out.scheduleChanges,
           warnings: out.warnings,
           before: expectedOf(out.before),
           after,

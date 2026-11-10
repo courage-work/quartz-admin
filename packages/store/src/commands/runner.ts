@@ -5,6 +5,7 @@ import {
   type CommandGroupChangeDto,
   type CommandInsertDto,
   type CommandNoticeDto,
+  type CommandScheduleChangeDto,
   type CommandType,
   type QuartzCommand,
   type TriggerStateRef,
@@ -22,11 +23,14 @@ import {
   resumeTriggerGroupHandler,
   resumeTriggerHandler,
 } from './pause-resume.js';
+import { updateCronScheduleHandler, updateSimpleScheduleHandler } from './reschedule.js';
 import { triggerJobHandler } from './trigger-job.js';
 import { applyPlan, plannedRows } from './triggers.js';
 import {
   CommandRejection,
+  REJECTION_CODES,
   type CommandHandler,
+  type CommandRejectionCode,
   type CommandPlan,
   type CommandSubject,
   type CommandTarget,
@@ -46,6 +50,8 @@ const HANDLERS: HandlerMap = {
   pauseJobGroup: pauseJobGroupHandler,
   resumeJobGroup: resumeJobGroupHandler,
   triggerJob: triggerJobHandler,
+  updateCronSchedule: updateCronScheduleHandler,
+  updateSimpleSchedule: updateSimpleScheduleHandler,
 };
 
 function handlerFor(command: QuartzCommand): CommandHandler {
@@ -127,6 +133,7 @@ export interface CommandOutcome {
   groupChanges: CommandGroupChangeDto[];
   /** 실제로 넣은 트리거(이름 포함) */
   inserts: CommandInsertDto[];
+  scheduleChanges: CommandScheduleChangeDto[];
   warnings: CommandNoticeDto[];
 }
 
@@ -175,11 +182,10 @@ export async function executeCommand(
 
     const plan = handler.plan(command, before, { dbNow, actor: options.actor });
     if (plan.rejection) {
-      throw new CommandRejection(
-        'RESUME_IN_PAUSED_GROUP',
-        plan.rejection.message,
-        plan.rejection.triggers,
-      );
+      const code = REJECTION_CODES.has(plan.rejection.code)
+        ? (plan.rejection.code as CommandRejectionCode)
+        : 'STATE_CONFLICT';
+      throw new CommandRejection(code, plan.rejection.message, plan.rejection.triggers);
     }
     let after = before;
     let inserts: CommandInsertDto[] = [];
@@ -207,6 +213,13 @@ export async function executeCommand(
       changes: plan.changes,
       groupChanges: plan.groupChanges,
       inserts,
+      scheduleChanges: plan.scheduleChanges.map(({ group, name, from, to, upcoming }) => ({
+        group,
+        name,
+        from,
+        to,
+        upcoming,
+      })),
       warnings: plan.warnings,
     };
   } catch (err) {

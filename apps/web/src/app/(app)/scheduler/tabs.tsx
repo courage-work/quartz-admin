@@ -634,7 +634,12 @@ export function TriggersTab({ schedulerId, refreshMs, blockedReason }: TabProps 
               : { icon: TimerIcon, title: '등록된 트리거가 없습니다' }
           }
           actions={(t) => (
-            <TriggerActions trigger={t} blockedReason={blockedReason} onCommand={openCommand} />
+            <TriggerActions
+              schedulerId={schedulerId}
+              trigger={t}
+              blockedReason={blockedReason}
+              onCommand={openCommand}
+            />
           )}
         />
       </TableFrame>

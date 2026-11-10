@@ -59,6 +59,7 @@ export {
 export {
   ALL_GROUPS_PAUSED,
   getJobDetail,
+  getTriggerDetail,
   isActiveNode,
   listExecuting,
   listGroups,

@@ -10,12 +10,15 @@ import {
   type NodesResponse,
   type Page,
   type PausedGroupsResponse,
+  type TriggerDetailResponse,
   type TriggerDto,
+  type TriggerKeyQuery,
   type TriggerListQuery,
 } from '@qa/shared';
 import {
   ALL_GROUPS_PAUSED,
   getJobDetail,
+  getTriggerDetail,
   listExecuting,
   listGroups,
   listJobs,
@@ -97,6 +100,14 @@ export class SchedulerViewsService {
         triggers: detail.triggers,
         jobData: describeJobData(detail.jobData),
       };
+    });
+  }
+
+  triggerDetail(id: number, key: TriggerKeyQuery): Promise<TriggerDetailResponse> {
+    return this.withScheduler(id, async ({ conn, ctx, dbNow }) => {
+      const trigger = await getTriggerDetail(conn, ctx, key);
+      if (!trigger) throw notFound('트리거를 찾을 수 없습니다');
+      return { dbNow, trigger };
     });
   }
 

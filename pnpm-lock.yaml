@@ -453,6 +453,9 @@ importers:
 
   packages/store:
     dependencies:
+      '@qa/core':
+        specifier: workspace:*
+        version: link:../core
       '@qa/shared':
         specifier: workspace:*
         version: link:../shared

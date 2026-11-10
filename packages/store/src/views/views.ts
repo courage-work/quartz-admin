@@ -320,6 +320,23 @@ export async function listTriggers(
   return { items: rows.map((r) => toTrigger(ctx, r)), total };
 }
 
+/** 트리거 하나 (스케줄 수정 화면, 명령의 스케줄 읽기). 없으면 null */
+export async function getTriggerDetail(
+  conn: TargetConn,
+  ctx: SchedulerViewContext,
+  key: { group: string; name: string },
+): Promise<TriggerDto | null> {
+  const { select, from } = triggerFrom(ctx);
+  const b = new Binds(ctx.dialect);
+  const rows = await conn.query(
+    `${select} FROM ${from} WHERE t.SCHED_NAME = ${b.add(ctx.schedName)} ` +
+      `AND t.TRIGGER_GROUP = ${b.add(key.group)} AND t.TRIGGER_NAME = ${b.add(key.name)}`,
+    b.values,
+  );
+  const row = rows[0];
+  return row ? toTrigger(ctx, row) : null;
+}
+
 /** 잡 상세: 잡, 연결된 트리거, JobDataMap 원본 (FR-VIEW-03, 08). 없으면 null */
 export async function getJobDetail(
   conn: TargetConn,

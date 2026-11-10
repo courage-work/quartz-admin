@@ -48,6 +48,13 @@ interface FakeTrigger {
   jobName: string;
   state: string;
   nft: number | null;
+  /** 스케줄 수정 테스트용. 기본은 SIMPLE(1분 간격 무한 반복) */
+  type?: 'CRON' | 'SIMPLE';
+  cron?: { expression: string; timeZone: string | null };
+  simple?: { repeatCount: number; repeatInterval: number; timesTriggered: number };
+  startTime?: number;
+  endTime?: number;
+  calendar?: string;
 }
 
 interface FakeDb {
@@ -166,6 +173,39 @@ class FakeConn implements TargetConn {
       });
       return [{ C: keys.length }];
     }
+    if (sql.includes('LEFT JOIN') && sql.includes('QRTZ_TRIGGERS')) {
+      const [, group, name] = binds;
+      const t = db.triggers.find((x) => x.group === group && x.name === name);
+      if (!t) return [];
+      const type = t.type ?? 'SIMPLE';
+      const simple =
+        type === 'SIMPLE'
+          ? (t.simple ?? { repeatCount: -1, repeatInterval: 60_000, timesTriggered: 3 })
+          : null;
+      return [
+        {
+          G: t.group,
+          N: t.name,
+          JG: t.jobGroup,
+          JN: t.jobName,
+          D: null,
+          TY: type,
+          ST: t.state,
+          NFT: t.nft ?? -1,
+          PFT: -1,
+          STT: t.startTime ?? DB_NOW - 86_400_000,
+          ET: t.endTime ?? 0,
+          PR: 5,
+          MI: 0,
+          CAL: t.calendar ?? null,
+          CE: type === 'CRON' ? (t.cron?.expression ?? '0 0 12 * * ?') : null,
+          TZ: type === 'CRON' ? (t.cron?.timeZone ?? 'UTC') : null,
+          RC: simple?.repeatCount ?? null,
+          RI: simple?.repeatInterval ?? null,
+          TT: simple?.timesTriggered ?? null,
+        },
+      ];
+    }
     if (sql.includes('QRTZ_TRIGGERS')) {
       const where = sql.slice(sql.indexOf(' WHERE '), sql.indexOf(' ORDER BY '));
       const match = (t: FakeTrigger): boolean => {
@@ -200,6 +240,34 @@ class FakeConn implements TargetConn {
         this.opts.lockRow = true;
         return Promise.reject(new TargetError('TARGET_ERROR', { driverCode: 'ORA-00001' }));
       }
+      return Promise.resolve(1);
+    }
+    if (sql.startsWith('UPDATE "Q"."QRTZ_CRON_TRIGGERS"')) {
+      const [expression, timeZone, , group, name] = binds;
+      const t = db.triggers.find((x) => x.group === group && x.name === name);
+      if (!t) return Promise.resolve(0);
+      t.cron = { expression: expression as string, timeZone: timeZone as string };
+      return Promise.resolve(1);
+    }
+    if (sql.startsWith('UPDATE "Q"."QRTZ_SIMPLE_TRIGGERS"')) {
+      const [repeatCount, repeatInterval, timesTriggered, , group, name] = binds;
+      const t = db.triggers.find((x) => x.group === group && x.name === name);
+      if (!t) return Promise.resolve(0);
+      t.simple = {
+        repeatCount: repeatCount as number,
+        repeatInterval: repeatInterval as number,
+        timesTriggered: timesTriggered as number,
+      };
+      return Promise.resolve(1);
+    }
+    if (sql.startsWith('UPDATE "Q"."QRTZ_TRIGGERS" SET NEXT_FIRE_TIME')) {
+      const simple = sql.includes('START_TIME');
+      const [nft, start] = binds;
+      const [group, name, from] = binds.slice(simple ? 3 : 2);
+      const t = db.triggers.find((x) => x.group === group && x.name === name && x.state === from);
+      if (!t) return Promise.resolve(0);
+      t.nft = nft as number;
+      if (simple) t.startTime = start as number;
       return Promise.resolve(1);
     }
     if (sql.startsWith('UPDATE "Q"."QRTZ_TRIGGERS"')) {
@@ -849,6 +917,205 @@ describe('triggerJob (부록 A.5)', () => {
   });
 });
 
+describe('스케줄 수정 (부록 A.6)', () => {
+  /** DB_NOW(2025-11-06 03:33:20Z) 다음 12:00 UTC */
+  const NEXT_NOON = Date.UTC(2025, 10, 6, 12);
+  const DAY = 86_400_000;
+  const cronTrig = (state: string, more: Partial<FakeTrigger> = {}) =>
+    trig('t', state, {
+      type: 'CRON',
+      cron: { expression: '0 0 6 * * ?', timeZone: 'Asia/Seoul' },
+      ...more,
+    });
+  const CRON: QuartzCommand = {
+    type: 'updateCronSchedule',
+    trigger: { group: 'g', name: 't' },
+    cronExpression: '0 0 12 * * ?',
+    timeZone: 'UTC',
+  };
+  const simpleCmd = (
+    more: Partial<{ repeatIntervalMs: number; repeatCount: number; startAt: number }>,
+  ) =>
+    ({
+      type: 'updateSimpleSchedule',
+      trigger: { group: 'g', name: 't' },
+      repeatIntervalMs: 5_000,
+      repeatCount: 3,
+      ...more,
+    }) as QuartzCommand;
+
+  it('C-01 CRON: 식·타임존을 바꾸고 다음 실행 시각을 다시 계산한다. 상태는 WAITING', async () => {
+    const conn = new FakeConn({ triggers: [cronTrig('WAITING')] });
+    const out = await previewThenRun(conn, CRON);
+    const [t] = conn.committed.triggers;
+    expect(t?.cron).toEqual({ expression: '0 0 12 * * ?', timeZone: 'UTC' });
+    expect(t?.nft).toBe(NEXT_NOON);
+    expect(t?.state).toBe('WAITING');
+    expect(out.changes).toEqual([]);
+    expect(out.scheduleChanges[0]).toMatchObject({
+      from: { kind: 'CRON', cronExpression: '0 0 6 * * ?', timeZone: 'Asia/Seoul' },
+      to: {
+        kind: 'CRON',
+        cronExpression: '0 0 12 * * ?',
+        timeZone: 'UTC',
+        nextFireTime: NEXT_NOON,
+      },
+      upcoming: [0, 1, 2, 3, 4].map((i) => NEXT_NOON + i * DAY),
+    });
+    // START_TIME은 바꾸지 않는다
+    expect(conn.sqls('execute').find((q) => q.includes('SET NEXT_FIRE_TIME'))).not.toContain(
+      'START_TIME',
+    );
+  });
+
+  it('식은 Quartz처럼 대문자로 저장한다', async () => {
+    const conn = new FakeConn({ triggers: [cronTrig('WAITING')] });
+    await previewThenRun(conn, { ...CRON, cronExpression: '0 0 12 ? * mon-fri' });
+    expect(conn.committed.triggers[0]?.cron?.expression).toBe('0 0 12 ? * MON-FRI');
+  });
+
+  it('C-02·C-03 개별 일시정지는 유지한다. PAUSED_BLOCKED는 잡이 실행 중이면 그대로, 아니면 PAUSED', async () => {
+    const paused = new FakeConn({ triggers: [cronTrig('PAUSED')] });
+    const a = await previewThenRun(paused, CRON);
+    expect(paused.state('t')).toBe('PAUSED');
+    expect(a.warnings.map((w) => w.code)).toEqual(['PAUSE_KEPT']);
+
+    const fired = [{ jobGroup: 'jg', jobName: 'j', nonConcurrent: true }];
+    const running = new FakeConn({ triggers: [cronTrig('PAUSED_BLOCKED')], fired });
+    await previewThenRun(running, CRON);
+    expect(running.state('t')).toBe('PAUSED_BLOCKED');
+
+    const idle = new FakeConn({ triggers: [cronTrig('PAUSED_BLOCKED')] });
+    const c = await previewThenRun(idle, CRON);
+    expect(idle.state('t')).toBe('PAUSED');
+    expect(c.changes).toEqual([{ group: 'g', name: 't', from: 'PAUSED_BLOCKED', to: 'PAUSED' }]);
+  });
+
+  it('C-04·C-05·C-06 BLOCKED(실행 중)는 그대로, ACQUIRED와 ERROR는 WAITING', async () => {
+    const blocked = new FakeConn({
+      triggers: [cronTrig('BLOCKED')],
+      fired: [{ jobGroup: 'jg', jobName: 'j', nonConcurrent: true }],
+    });
+    await previewThenRun(blocked, CRON);
+    expect(blocked.state('t')).toBe('BLOCKED');
+
+    const acquired = new FakeConn({ triggers: [cronTrig('ACQUIRED')] });
+    const a = await previewThenRun(acquired, CRON);
+    expect(acquired.state('t')).toBe('WAITING');
+    expect(acquired.committed.triggers[0]?.nft).toBe(NEXT_NOON);
+    expect(a.changes).toEqual([{ group: 'g', name: 't', from: 'ACQUIRED', to: 'WAITING' }]);
+    // 스케줄 UPDATE는 바꾸기 전 상태(ACQUIRED)를 조건으로, 그 뒤 상태를 바꾼다
+    const writes = acquired.writes();
+    expect(writes.findIndex((q) => q.includes('SET NEXT_FIRE_TIME'))).toBeLessThan(
+      writes.findIndex((q) => q.includes('SET TRIGGER_STATE')),
+    );
+
+    const error = new FakeConn({ triggers: [cronTrig('ERROR')] });
+    const e = await previewThenRun(error, CRON);
+    expect(error.state('t')).toBe('WAITING');
+    expect(e.warnings.map((w) => w.code)).toEqual(['ERROR_CLEARED']);
+  });
+
+  it('C-07·C-08 그룹이 일시정지면 PAUSED, 전체 일시정지만 있으면 그룹 행을 넣고 PAUSED', async () => {
+    const grouped = new FakeConn({ triggers: [cronTrig('WAITING')], pausedGroups: ['g'] });
+    await previewThenRun(grouped, CRON);
+    expect(grouped.state('t')).toBe('PAUSED');
+
+    const all = new FakeConn({
+      triggers: [cronTrig('WAITING')],
+      pausedGroups: [ALL_GROUPS_PAUSED],
+    });
+    const out = await previewThenRun(all, CRON);
+    expect(all.state('t')).toBe('PAUSED');
+    expect(out.groupChanges).toEqual([{ group: 'g', paused: true }]);
+  });
+
+  it('C-09·C-10 COMPLETE와 캘린더 연결 트리거는 거부하고 바꾸지 않는다', async () => {
+    for (const [conn, code] of [
+      [new FakeConn({ triggers: [cronTrig('COMPLETE')] }), 'TRIGGER_COMPLETE'],
+      [
+        new FakeConn({ triggers: [cronTrig('WAITING', { calendar: 'holidays' })] }),
+        'CALENDAR_ATTACHED',
+      ],
+    ] as const) {
+      const preview = await previewCommand(conn, ctx, CRON);
+      expect(preview.plan.rejection?.code).toBe(code);
+      const err = await rejected(executeCommand(conn, ctx, CRON, expectedOf(preview.subject)));
+      expect(err).toMatchObject({ code });
+      expect(conn.writes()).toEqual([]);
+    }
+  });
+
+  it('C-11 종료 시각이 지나 더 발화하지 않으면 INVALID_SCHEDULE', async () => {
+    const conn = new FakeConn({ triggers: [cronTrig('WAITING', { endTime: DB_NOW - 1_000 })] });
+    const preview = await previewCommand(conn, ctx, CRON);
+    expect(preview.plan.rejection?.code).toBe('INVALID_SCHEDULE');
+  });
+
+  it('C-12 시작 시각이 미래면 다음 실행 시각은 시작 시각 이후', async () => {
+    const start = DB_NOW + 2 * DAY;
+    const conn = new FakeConn({ triggers: [cronTrig('WAITING', { startTime: start })] });
+    await previewThenRun(conn, CRON);
+    expect(conn.committed.triggers[0]?.nft).toBe(NEXT_NOON + 2 * DAY);
+  });
+
+  it('잘못된 식·타임존, 종류가 다른 트리거는 거부한다', async () => {
+    const conn = new FakeConn({ triggers: [cronTrig('WAITING')] });
+    for (const [command, code] of [
+      [{ ...CRON, cronExpression: '0 0 25 * * ?' }, 'INVALID_SCHEDULE'],
+      [{ ...CRON, timeZone: 'Mars/Olympus' }, 'INVALID_SCHEDULE'],
+      [simpleCmd({}), 'TRIGGER_TYPE_MISMATCH'],
+    ] as const) {
+      const preview = await previewCommand(conn, ctx, command);
+      expect(preview.plan.rejection?.code).toBe(code);
+    }
+  });
+
+  it('S-01·S-02 SIMPLE: 간격·횟수를 바꾸고 횟수를 0으로, START = NFT = startAt(기본 지금)', async () => {
+    const now = new FakeConn({ triggers: [trig('t', 'WAITING')] });
+    const out = await previewThenRun(now, simpleCmd({}));
+    const [t] = now.committed.triggers;
+    expect(t?.simple).toEqual({ repeatCount: 3, repeatInterval: 5_000, timesTriggered: 0 });
+    expect(t).toMatchObject({ startTime: DB_NOW, nft: DB_NOW, state: 'WAITING' });
+    expect(out.scheduleChanges[0]?.upcoming).toEqual([0, 1, 2, 3].map((i) => DB_NOW + i * 5_000));
+
+    const later = new FakeConn({ triggers: [trig('t', 'WAITING')] });
+    await previewThenRun(later, simpleCmd({ startAt: DB_NOW + 3_600_000 }));
+    expect(later.committed.triggers[0]).toMatchObject({
+      startTime: DB_NOW + 3_600_000,
+      nft: DB_NOW + 3_600_000,
+    });
+  });
+
+  it('S-03·S-04·S-05 지난 시작 시각, 반복하는데 간격 0, 종료 시각보다 늦은 시작은 거부한다', async () => {
+    const cases: [FakeConn, QuartzCommand][] = [
+      [new FakeConn({ triggers: [trig('t', 'WAITING')] }), simpleCmd({ startAt: DB_NOW - 60_000 })],
+      [new FakeConn({ triggers: [trig('t', 'WAITING')] }), simpleCmd({ repeatIntervalMs: 0 })],
+      [
+        new FakeConn({ triggers: [trig('t', 'WAITING', { endTime: DB_NOW + 60_000 })] }),
+        simpleCmd({ startAt: DB_NOW + 120_000 }),
+      ],
+    ];
+    for (const [conn, command] of cases) {
+      const preview = await previewCommand(conn, ctx, command);
+      expect(preview.plan.rejection?.code).toBe('INVALID_SCHEDULE');
+      const err = await rejected(executeCommand(conn, ctx, command, expectedOf(preview.subject)));
+      expect(err).toMatchObject({ code: 'INVALID_SCHEDULE' });
+      expect(conn.writes()).toEqual([]);
+    }
+  });
+
+  it('S-06·S-07 PAUSED는 유지하고 ACQUIRED는 WAITING', async () => {
+    const paused = new FakeConn({ triggers: [trig('t', 'PAUSED')] });
+    await previewThenRun(paused, simpleCmd({}));
+    expect(paused.state('t')).toBe('PAUSED');
+
+    const acquired = new FakeConn({ triggers: [trig('t', 'ACQUIRED')] });
+    await previewThenRun(acquired, simpleCmd({}));
+    expect(acquired.state('t')).toBe('WAITING');
+  });
+});
+
 describe('newTriggerName', () => {
   it('Quartz와 같은 MT_ 형식이고 30~36진법이다', () => {
     for (let i = 0; i < 7; i++) {
@@ -883,6 +1150,7 @@ describe('previewCommand', () => {
         changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
         groupChanges: [],
         inserts: [],
+        scheduleChanges: [],
         warnings: [],
         rejection: null,
       },

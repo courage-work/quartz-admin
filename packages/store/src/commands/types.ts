@@ -4,8 +4,10 @@ import type {
   CommandGroupChangeDto,
   CommandInsertDto,
   CommandNoticeDto,
+  CommandScheduleChangeDto,
   CommandTargetDto,
   QuartzCommand,
+  TriggerDto,
   TriggerKey,
 } from '@qa/shared';
 import type { TargetConn } from '../adapter.js';
@@ -38,6 +40,8 @@ export interface CommandSubject {
   blockingJobs: ReadonlySet<string>;
   /** 활성 노드 수. 즉시 실행만 채운다(활성 노드가 없으면 경고, FR-CTL-05) */
   activeNodeCount?: number;
+  /** 대상 트리거의 스케줄까지 읽은 값. 스케줄 수정만 채운다 */
+  detail?: TriggerDto;
 }
 
 /** 명령이 거부된 이유. 대상 DB는 바뀌지 않았다 */
@@ -47,7 +51,24 @@ export type CommandRejectionCode =
   /** 실행 직전 상태가 화면에서 본 상태와 다름 (409, FR-CTL-00e) */
   | 'STATE_CONFLICT'
   /** 일시정지된 그룹 안의 지난 트리거를 개별로 재개하려 함 (409, TRD §7.4) */
-  | 'RESUME_IN_PAUSED_GROUP';
+  | 'RESUME_IN_PAUSED_GROUP'
+  /** 스케줄 값이 잘못됨 (400, TRD §7.6) */
+  | 'INVALID_SCHEDULE'
+  /** 캘린더가 연결된 트리거 (409, TRD §7.6) */
+  | 'CALENDAR_ATTACHED'
+  /** COMPLETE 트리거 (409, TRD §7.6) */
+  | 'TRIGGER_COMPLETE'
+  /** 트리거 종류가 명령과 맞지 않음 (409) */
+  | 'TRIGGER_TYPE_MISMATCH';
+
+/** 계획의 거부 사유 중 실행을 거부하는 코드 */
+export const REJECTION_CODES: ReadonlySet<string> = new Set<CommandRejectionCode>([
+  'RESUME_IN_PAUSED_GROUP',
+  'INVALID_SCHEDULE',
+  'CALENDAR_ATTACHED',
+  'TRIGGER_COMPLETE',
+  'TRIGGER_TYPE_MISMATCH',
+]);
 
 /**
  * 명령을 실행하지 않고 거부함. 대상 DB 오류(`TargetError`)와 달리 대상 DB는 정상이고 요청이 맞지 않는 경우다.
@@ -86,6 +107,8 @@ export interface CommandPlan {
   groupChanges: CommandGroupChangeDto[];
   /** 새로 넣을 트리거. 이름은 적용할 때 정한다(`name`은 null) */
   inserts: CommandInsertDto[];
+  /** 스케줄 변경. `state`는 바꾸기 전 상태로, UPDATE 조건에 쓴다 */
+  scheduleChanges: (CommandScheduleChangeDto & { state: string })[];
   warnings: CommandNoticeDto[];
   /**
    * 실행하면 안 되는 이유. 있으면 미리보기는 차단 사유로 보여 주고, 실행은 대상 DB를 바꾸지 않고 거부한다.
@@ -96,7 +119,7 @@ export interface CommandPlan {
 
 /**
  * 명령 하나의 동작 (TRD §7.3). 실행 절차(잠금, 상태 확인, 커밋)는 `executeCommand`가 맡고,
- * 핸들러는 대상을 읽고 바꿀 상태를 정하는 일만 한다. 적용(상태 변경, 그룹 행, 트리거 INSERT)은 공통(`applyPlan`)이다.
+ * 핸들러는 대상을 읽고 바꿀 상태를 정하는 일만 한다. 적용(그룹 행, 스케줄, 상태 변경, 트리거 INSERT)은 공통(`applyPlan`)이다.
  */
 export interface CommandHandler<C extends QuartzCommand = QuartzCommand> {
   readonly type: C['type'];

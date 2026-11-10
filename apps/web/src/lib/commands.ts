@@ -6,6 +6,7 @@ import {
   type CommandResultDto,
   type QuartzCommand,
   type SchedulerConnectionSummary,
+  type TriggerDto,
 } from '@qa/shared';
 
 /** 확인 대화상자 제목 */
@@ -29,6 +30,10 @@ export function commandTitle(command: QuartzCommand): string {
       return '잡 그룹 재개';
     case 'triggerJob':
       return '잡 즉시 실행';
+    case 'updateCronSchedule':
+      return 'CRON 스케줄 수정';
+    case 'updateSimpleSchedule':
+      return 'SIMPLE 스케줄 수정';
   }
 }
 
@@ -37,6 +42,9 @@ const isPause = (command: QuartzCommand) => command.type.startsWith('pause');
 /** 실행 버튼 문구. 동사로 쓴다(DESIGN §10) */
 export function commandConfirmLabel(command: QuartzCommand): string {
   if (command.type === 'triggerJob') return '실행하기';
+  if (command.type === 'updateCronSchedule' || command.type === 'updateSimpleSchedule') {
+    return '수정하기';
+  }
   return isPause(command) ? '일시정지하기' : '재개하기';
 }
 
@@ -45,6 +53,8 @@ export function commandSubject(command: QuartzCommand): string {
   switch (command.type) {
     case 'pauseTrigger':
     case 'resumeTrigger':
+    case 'updateCronSchedule':
+    case 'updateSimpleSchedule':
       return `${command.trigger.name} 트리거`;
     case 'pauseJob':
     case 'resumeJob':
@@ -71,6 +81,12 @@ export function commandResultMessage(
   const topic = `${subject}${vowel ? '는' : '은'}`;
   const object = `${subject}${vowel ? '를' : '을'}`;
   if (command.type === 'triggerJob') return triggerJobMessage(object, result.inserts?.[0]?.state);
+  if (command.type === 'updateCronSchedule' || command.type === 'updateSimpleSchedule') {
+    const kept = result.warnings?.some((w) => w.code === 'PAUSE_KEPT');
+    return kept
+      ? `${subject}의 스케줄을 수정했습니다. 일시정지 상태는 그대로입니다`
+      : `${subject}의 스케줄을 수정했습니다`;
+  }
   if (!result.changed) {
     return isPause(command)
       ? `${topic} 바뀐 것이 없습니다. 이미 일시정지됐거나 일시정지할 수 없는 상태입니다`
@@ -95,6 +111,43 @@ function triggerJobMessage(object: string, state: string | undefined): string {
       // 도구는 노드를 깨울 수 없어 노드가 다음 획득 주기에 집는다(TRD §7.5)
       return `${object} 즉시 실행으로 걸었습니다. Quartz 노드가 다음 확인 때(기본 최대 30초) 실행합니다`;
   }
+}
+
+/**
+ * 스케줄을 수정할 수 없는 이유 (TRD §7.6). 서버도 같은 기준으로 다시 거부한다.
+ * CRON과 SIMPLE 트리거만 고칠 수 있고, 캘린더가 연결됐거나 COMPLETE면 안 된다
+ */
+export function rescheduleBlockedReason(
+  trigger: Pick<TriggerDto, 'type' | 'state' | 'calendarName' | 'cron' | 'simple'>,
+): string | null {
+  if (trigger.state === 'COMPLETE') return '실행을 마쳐 곧 삭제될 트리거입니다';
+  if (trigger.calendarName) return '캘린더가 연결된 트리거는 수정할 수 없습니다';
+  if (
+    !(trigger.type === 'CRON' && trigger.cron) &&
+    !(trigger.type === 'SIMPLE' && trigger.simple)
+  ) {
+    return 'CRON, SIMPLE 트리거만 수정할 수 있습니다';
+  }
+  return null;
+}
+
+/** 스케줄 수정 화면 주소. `from=job`이면 저장·취소 뒤 잡 상세로 돌아간다 */
+export function rescheduleHref(
+  schedulerId: number,
+  trigger: { group: string; name: string },
+  from?: { job: { group: string; name: string } },
+): string {
+  const q = new URLSearchParams({
+    scheduler: String(schedulerId),
+    group: trigger.group,
+    name: trigger.name,
+  });
+  if (from) {
+    q.set('from', 'job');
+    q.set('jobGroup', from.job.group);
+    q.set('jobName', from.job.name);
+  }
+  return `/trigger/schedule?${q.toString()}`;
 }
 
 /** 이 상태에서 일시정지하면 바뀌는 것이 있는지 (TRD §7.3) */

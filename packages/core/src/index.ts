@@ -26,6 +26,7 @@ export {
   resolveJavaTimeZone,
   UnsupportedTimeZoneError,
 } from './tz/java-time-zone.js';
+export { JAVA_ZONE_IDS } from './tz/java-zone-ids.js';
 
 export {
   JavaPropertiesError,
