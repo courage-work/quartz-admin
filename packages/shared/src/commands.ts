@@ -144,7 +144,23 @@ export const updateSimpleScheduleCommandSchema = z.object({
 export type UpdateSimpleScheduleCommand = z.infer<typeof updateSimpleScheduleCommandSchema>;
 
 /**
- * 제어 명령. `type`으로 나눈다. 명령을 추가하는 작업(B-21)이 여기에 이어 붙인다.
+ * 트리거 삭제 (FR-CTL-08, `unscheduleJob`, TRD §7.3). 잡이 durable이 아니고 마지막 트리거면 잡도 지운다
+ */
+export const deleteTriggerCommandSchema = z.object({
+  type: z.literal('deleteTrigger'),
+  trigger: triggerKeySchema,
+});
+export type DeleteTriggerCommand = z.infer<typeof deleteTriggerCommandSchema>;
+
+/** 잡 삭제 (FR-CTL-09, `deleteJob`, TRD §7.3): 잡의 모든 트리거와 하위 행, 잡을 지운다 */
+export const deleteJobCommandSchema = z.object({
+  type: z.literal('deleteJob'),
+  job: jobKeySchema,
+});
+export type DeleteJobCommand = z.infer<typeof deleteJobCommandSchema>;
+
+/**
+ * 제어 명령. `type`으로 나눈다. 서버(`@qa/store`의 명령 핸들러)와 화면이 같은 목록을 쓴다.
  * 서버(`@qa/store`의 명령 핸들러)와 화면이 같은 목록을 쓴다.
  */
 export const commandSchema = z.discriminatedUnion('type', [
@@ -159,6 +175,8 @@ export const commandSchema = z.discriminatedUnion('type', [
   triggerJobCommandSchema,
   updateCronScheduleCommandSchema,
   updateSimpleScheduleCommandSchema,
+  deleteTriggerCommandSchema,
+  deleteJobCommandSchema,
 ]);
 export type QuartzCommand = z.infer<typeof commandSchema>;
 export type CommandType = QuartzCommand['type'];
@@ -172,10 +190,12 @@ export function commandScope(command: QuartzCommand): CommandScope {
     case 'resumeTrigger':
     case 'updateCronSchedule':
     case 'updateSimpleSchedule':
+    case 'deleteTrigger':
       return 'trigger';
     case 'pauseJob':
     case 'resumeJob':
     case 'triggerJob':
+    case 'deleteJob':
       return 'job';
     case 'pauseTriggerGroup':
     case 'resumeTriggerGroup':
@@ -304,6 +324,12 @@ export interface CommandScheduleChangeDto extends TriggerKey {
   upcoming: number[];
 }
 
+/** 지울 트리거와 잡 (TRD §7.3). 트리거는 하위 테이블 행과 함께 지운다 */
+export interface CommandDeletionDto {
+  triggers: TriggerKey[];
+  jobs: JobKey[];
+}
+
 /** `PAUSED_TRIGGER_GRPS` 행 변경. `paused`가 참이면 넣고 거짓이면 지운다 */
 export interface CommandGroupChangeDto {
   group: string;
@@ -349,6 +375,10 @@ export const COMMAND_NOTICE_CODES = [
   'ERROR_CLEARED',
   /** 개별 일시정지는 수정 뒤에도 유지됨(Quartz `rescheduleJob`과 의도된 차이, TRD §7.6) */
   'PAUSE_KEPT',
+  /** durable이 아닌 잡의 마지막 트리거라 잡도 함께 지움 (FR-CTL-08) */
+  'JOB_ALSO_DELETED',
+  /** 지우는 트리거·잡이 실행 중. 실행은 끝까지 진행되고 노드가 완료 기록을 지움 (FR-CTL-09) */
+  'DELETING_EXECUTING',
 ] as const;
 export type CommandNoticeCode = (typeof COMMAND_NOTICE_CODES)[number];
 
@@ -385,6 +415,8 @@ export interface CommandPreviewResponse {
   inserts: CommandInsertDto[];
   /** 실행하면 바뀔 스케줄 */
   scheduleChanges: CommandScheduleChangeDto[];
+  /** 실행하면 지울 트리거와 잡 */
+  deletions: CommandDeletionDto;
   warnings: CommandNoticeDto[];
   /** 실행할 수 없는 이유. 있으면 화면은 실행 버튼을 끈다 */
   blocked: CommandNoticeDto | null;
@@ -401,6 +433,7 @@ export interface CommandResultDto {
   /** 실제로 넣은 트리거(이름 포함) */
   inserts: CommandInsertDto[];
   scheduleChanges: CommandScheduleChangeDto[];
+  deletions: CommandDeletionDto;
   /** 실행 결과에 붙는 안내(misfire 위임 등) */
   warnings: CommandNoticeDto[];
   /** 잠금 안에서 다시 읽은 실행 직전 상태 */

@@ -45,6 +45,8 @@ const AUDIT_ACTION: Record<CommandType, AuditAction> = {
   triggerJob: 'job.trigger',
   updateCronSchedule: 'trigger.reschedule',
   updateSimpleSchedule: 'trigger.reschedule',
+  deleteTrigger: 'trigger.delete',
+  deleteJob: 'job.delete',
 };
 
 /** 명령 대상 단위별 감사 대상 종류 */
@@ -166,6 +168,7 @@ export class QuartzCommandService {
         to,
         upcoming,
       })),
+      deletions: preview.plan.deletions ?? { triggers: [], jobs: [] },
       warnings: preview.plan.warnings,
       blocked: blockedReason(connection) ?? preview.plan.rejection,
     };
@@ -207,15 +210,21 @@ export class QuartzCommandService {
           out.changes.length +
             out.groupChanges.length +
             out.inserts.length +
-            out.scheduleChanges.length >
+            out.scheduleChanges.length +
+            out.deletions.triggers.length +
+            out.deletions.jobs.length >
           0;
+        const deleted = out.deletions.triggers.length + out.deletions.jobs.length > 0;
         pending.succeed({
+          // 삭제는 잠금 안에서 읽은 삭제 전 정의를 남긴다(자동 복원은 범위 밖, FR-CTL-09)
+          ...(out.snapshot ? { before: { command, expected, snapshot: out.snapshot } } : {}),
           after: {
             ...after,
             changes: out.changes,
             groupChanges: out.groupChanges,
             ...(out.inserts.length > 0 ? { inserts: out.inserts } : {}),
             ...(out.scheduleChanges.length > 0 ? { scheduleChanges: out.scheduleChanges } : {}),
+            ...(deleted ? { deletions: out.deletions } : {}),
           },
         });
         this.logger.log(
@@ -234,6 +243,7 @@ export class QuartzCommandService {
           groupChanges: out.groupChanges,
           inserts: out.inserts,
           scheduleChanges: out.scheduleChanges,
+          deletions: out.deletions,
           warnings: out.warnings,
           before: expectedOf(out.before),
           after,

@@ -34,7 +34,17 @@ export function commandTitle(command: QuartzCommand): string {
       return 'CRON 스케줄 수정';
     case 'updateSimpleSchedule':
       return 'SIMPLE 스케줄 수정';
+    // 지우는 명령은 대상 이름을 쓴 질문으로 묻는다(DESIGN §8.1.3)
+    case 'deleteTrigger':
+      return `${command.trigger.name} 트리거를 삭제할까요?`;
+    case 'deleteJob':
+      return `${command.job.name} 잡을 삭제할까요?`;
   }
+}
+
+/** 되돌릴 수 없는 명령인지. 확인 버튼과 메뉴 항목을 destructive 모양으로 그린다 */
+export function isDestructive(command: QuartzCommand): boolean {
+  return command.type === 'deleteTrigger' || command.type === 'deleteJob';
 }
 
 const isPause = (command: QuartzCommand) => command.type.startsWith('pause');
@@ -42,6 +52,8 @@ const isPause = (command: QuartzCommand) => command.type.startsWith('pause');
 /** 실행 버튼 문구. 동사로 쓴다(DESIGN §10) */
 export function commandConfirmLabel(command: QuartzCommand): string {
   if (command.type === 'triggerJob') return '실행하기';
+  if (command.type === 'deleteTrigger') return `${command.trigger.name} 삭제하기`;
+  if (command.type === 'deleteJob') return `${command.job.name} 삭제하기`;
   if (command.type === 'updateCronSchedule' || command.type === 'updateSimpleSchedule') {
     return '수정하기';
   }
@@ -55,10 +67,12 @@ export function commandSubject(command: QuartzCommand): string {
     case 'resumeTrigger':
     case 'updateCronSchedule':
     case 'updateSimpleSchedule':
+    case 'deleteTrigger':
       return `${command.trigger.name} 트리거`;
     case 'pauseJob':
     case 'resumeJob':
     case 'triggerJob':
+    case 'deleteJob':
       return `${command.job.name} 잡`;
     case 'pauseTriggerGroup':
     case 'resumeTriggerGroup':
@@ -72,7 +86,7 @@ export function commandSubject(command: QuartzCommand): string {
 /** 실행 결과 알림 (NFR-UX-03). 재개한 트리거 중 실행 시각이 지난 것이 있으면 misfire 처리 안내를 붙인다 */
 export function commandResultMessage(
   result: Pick<CommandResultDto, 'command' | 'changed'> &
-    Partial<Pick<CommandResultDto, 'warnings' | 'inserts'>>,
+    Partial<Pick<CommandResultDto, 'warnings' | 'inserts' | 'deletions'>>,
 ): string {
   const { command } = result;
   const subject = commandSubject(command);
@@ -81,6 +95,15 @@ export function commandResultMessage(
   const topic = `${subject}${vowel ? '는' : '은'}`;
   const object = `${subject}${vowel ? '를' : '을'}`;
   if (command.type === 'triggerJob') return triggerJobMessage(object, result.inserts?.[0]?.state);
+  if (command.type === 'deleteTrigger') {
+    return (result.deletions?.jobs.length ?? 0) > 0
+      ? `${object} 삭제했습니다. durable이 아닌 잡이라 잡도 함께 삭제했습니다`
+      : `${object} 삭제했습니다`;
+  }
+  if (command.type === 'deleteJob') {
+    const count = result.deletions?.triggers.length ?? 0;
+    return count > 0 ? `${object} 트리거 ${count}개와 함께 삭제했습니다` : `${object} 삭제했습니다`;
+  }
   if (command.type === 'updateCronSchedule' || command.type === 'updateSimpleSchedule') {
     const kept = result.warnings?.some((w) => w.code === 'PAUSE_KEPT');
     return kept

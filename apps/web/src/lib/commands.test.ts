@@ -8,6 +8,7 @@ import {
   commandResultMessage,
   commandTitle,
   controlBlockedReason,
+  isDestructive,
   summarizeChanges,
 } from './commands';
 
@@ -91,6 +92,45 @@ describe('즉시 실행 문구 (TRD §7.5)', () => {
     expect(
       commandResultMessage({ command: TRIGGER, changed: true, inserts: ins('PAUSED') }),
     ).toMatch(/재개해야 실행됩니다/);
+  });
+});
+
+describe('삭제 문구 (FR-CTL-08, 09)', () => {
+  const DEL: QuartzCommand = { type: 'deleteTrigger', trigger: { group: 'g', name: 'nightly' } };
+  const DEL_JOB: QuartzCommand = { type: 'deleteJob', job: { group: 'jg', name: 'report' } };
+
+  it('대상 이름을 쓴 질문과 버튼, destructive', () => {
+    expect(commandTitle(DEL)).toBe('nightly 트리거를 삭제할까요?');
+    expect(commandConfirmLabel(DEL)).toBe('nightly 삭제하기');
+    expect(commandTitle(DEL_JOB)).toBe('report 잡을 삭제할까요?');
+    expect(isDestructive(DEL_JOB)).toBe(true);
+    expect(isDestructive({ type: 'pauseJob', job: { group: 'jg', name: 'report' } })).toBe(false);
+  });
+
+  it('함께 지운 잡과 트리거 수를 알린다', () => {
+    expect(
+      commandResultMessage({
+        command: DEL,
+        changed: true,
+        deletions: {
+          triggers: [{ group: 'g', name: 'nightly' }],
+          jobs: [{ group: 'jg', name: 'j' }],
+        },
+      }),
+    ).toBe('nightly 트리거를 삭제했습니다. durable이 아닌 잡이라 잡도 함께 삭제했습니다');
+    expect(
+      commandResultMessage({
+        command: DEL_JOB,
+        changed: true,
+        deletions: {
+          triggers: [
+            { group: 'g', name: 'a' },
+            { group: 'g', name: 'b' },
+          ],
+          jobs: [{ group: 'jg', name: 'report' }],
+        },
+      }),
+    ).toBe('report 잡을 트리거 2개와 함께 삭제했습니다');
   });
 });
 

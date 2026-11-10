@@ -37,6 +37,7 @@ import {
   commandConfirmLabel,
   commandResultMessage,
   commandTitle,
+  isDestructive,
   summarizeChanges,
 } from '@/lib/commands';
 import { formatDateTime } from '@/lib/format';
@@ -125,7 +126,17 @@ function ScheduleChange({ change }: { change: CommandScheduleChangeDto }) {
 }
 
 function Summary({ data }: { data: CommandPreviewResponse }) {
-  const { scheduler, targets, changes, groupChanges, inserts, scheduleChanges, command } = data;
+  const {
+    scheduler,
+    targets,
+    changes,
+    groupChanges,
+    inserts,
+    scheduleChanges,
+    deletions,
+    command,
+  } = data;
+  const deleting = deletions.triggers.length + deletions.jobs.length > 0;
   const single = commandScope(command) === 'trigger';
   const listed = targets.slice(0, COMMAND_TARGETS_LISTED);
   return (
@@ -187,7 +198,26 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
             </span>
           </span>
         ))}
-        {inserts.length > 0 && changes.length === 0 ? null : (
+        {deleting ? (
+          <span className="flex flex-col gap-1">
+            <span>
+              {deletions.triggers.length > 0
+                ? `트리거 ${deletions.triggers.length}개를 하위 행과 함께 지웁니다`
+                : '지울 트리거가 없습니다'}
+            </span>
+            {/* 트리거 삭제가 잡까지 지우면 "잡도", 잡 삭제면 대상 잡 자신이라 "잡을" */}
+            {deletions.jobs.map((j) => (
+              <span key={`${j.group}\u0000${j.name}`}>
+                잡 <span className="font-mono break-all">{`${j.group} / ${j.name}`}</span>
+                {command.type === 'deleteJob' ? '을' : '도'} 지웁니다
+              </span>
+            ))}
+            <span className="text-xs text-muted-foreground">
+              되돌릴 수 없습니다. 지우기 전 정의는 감사 로그에 남습니다
+            </span>
+          </span>
+        ) : null}
+        {deleting || (inserts.length > 0 && changes.length === 0) ? null : (
           <span>
             {changes.length > 0
               ? `트리거 ${changes.length}개의 상태가 바뀝니다`
@@ -357,6 +387,7 @@ export function CommandDialog({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={run.isPending}>취소</AlertDialogCancel>
           <AlertDialogAction
+            variant={isDestructive(command) ? 'destructive' : 'default'}
             disabled={!canRun}
             onClick={(e) => {
               e.preventDefault();

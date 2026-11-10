@@ -3,7 +3,7 @@
 import type { QuartzCommand } from '@qa/shared';
 import { ChevronDownIcon, type LucideIcon, MoreHorizontalIcon } from 'lucide-react';
 import Link from 'next/link';
-import { useRef } from 'react';
+import { Fragment, useRef } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -20,6 +20,8 @@ interface ControlItemBase {
   icon: LucideIcon;
   /** 지금 상태에서 바뀌는 것이 없거나 할 수 없으면 끈다 */
   disabled?: boolean;
+  /** 되돌릴 수 없는 동작(삭제). 구분선 아래에 빨간 글자로 둔다 */
+  destructive?: boolean;
 }
 
 /** 확인 대화상자를 여는 항목, 또는 입력이 긴 명령(스케줄 수정)의 화면으로 가는 항목 */
@@ -77,32 +79,43 @@ export function ControlMenu({
             <DropdownMenuSeparator />
           </>
         ) : null}
-        {items.map((item) => {
+        {items.map((item, i) => {
           const { label: itemLabel, icon: Icon } = item;
           const off = !!blockedReason || item.disabled;
-          return item.href !== undefined ? (
-            <DropdownMenuItem key={item.href} disabled={off} asChild={!off}>
-              {off ? (
-                <>
-                  <Icon aria-hidden />
-                  {itemLabel}
-                </>
-              ) : (
-                <Link href={item.href}>
-                  <Icon aria-hidden />
-                  {itemLabel}
-                </Link>
-              )}
-            </DropdownMenuItem>
+          const separated = item.destructive && i > 0 && !items[i - 1]?.destructive;
+          const entry =
+            item.href !== undefined ? (
+              <DropdownMenuItem key={item.href} disabled={off} asChild={!off}>
+                {off ? (
+                  <>
+                    <Icon aria-hidden />
+                    {itemLabel}
+                  </>
+                ) : (
+                  <Link href={item.href}>
+                    <Icon aria-hidden />
+                    {itemLabel}
+                  </Link>
+                )}
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                key={item.command.type}
+                variant={item.destructive ? 'destructive' : 'default'}
+                disabled={off}
+                onSelect={() => onCommand(item.command, button.current)}
+              >
+                <Icon aria-hidden />
+                {itemLabel}
+              </DropdownMenuItem>
+            );
+          return separated ? (
+            <Fragment key={`sep-${i}`}>
+              <DropdownMenuSeparator />
+              {entry}
+            </Fragment>
           ) : (
-            <DropdownMenuItem
-              key={item.command.type}
-              disabled={off}
-              onSelect={() => onCommand(item.command, button.current)}
-            >
-              <Icon aria-hidden />
-              {itemLabel}
-            </DropdownMenuItem>
+            entry
           );
         })}
       </DropdownMenuContent>

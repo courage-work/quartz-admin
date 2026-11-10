@@ -1,5 +1,6 @@
 import type {
   CommandChangeDto,
+  CommandDeletionDto,
   CommandExpected,
   CommandGroupChangeDto,
   CommandInsertDto,
@@ -7,6 +8,7 @@ import type {
   CommandScheduleChangeDto,
   CommandTargetDto,
   QuartzCommand,
+  JobDto,
   TriggerDto,
   TriggerKey,
 } from '@qa/shared';
@@ -40,8 +42,12 @@ export interface CommandSubject {
   blockingJobs: ReadonlySet<string>;
   /** 활성 노드 수. 즉시 실행만 채운다(활성 노드가 없으면 경고, FR-CTL-05) */
   activeNodeCount?: number;
-  /** 대상 트리거의 스케줄까지 읽은 값. 스케줄 수정만 채운다 */
+  /** 대상 트리거의 스케줄까지 읽은 값. 스케줄 수정과 트리거 삭제가 채운다 */
   detail?: TriggerDto;
+  /** 대상 잡과 그 트리거 전체, JOB_DATA 원본. 삭제가 채운다(durable 판정, 남은 트리거 수, 삭제 전 스냅샷) */
+  job?: { dto: JobDto; triggers: TriggerDto[]; jobData: Buffer | null };
+  /** 실행 중(`FIRED_TRIGGERS`에 잡 이름이 있는 행)인 트리거 키(`그룹\0이름`). 삭제가 채운다 */
+  executing?: ReadonlySet<string>;
 }
 
 /** 명령이 거부된 이유. 대상 DB는 바뀌지 않았다 */
@@ -112,6 +118,10 @@ export interface CommandPlan {
   inserts: CommandInsertDto[];
   /** 스케줄 변경. `state`는 바꾸기 전 상태로, UPDATE 조건에 쓴다 */
   scheduleChanges: (CommandScheduleChangeDto & { state: string })[];
+  /** 지울 트리거와 잡. 삭제 명령만 쓴다 */
+  deletions?: CommandDeletionDto;
+  /** 감사 로그 `before`에 덧붙일 삭제 전 정의 (FR-CTL-09). 삭제 명령만 쓴다 */
+  snapshot?: Record<string, unknown>;
   warnings: CommandNoticeDto[];
   /**
    * 실행하면 안 되는 이유. 있으면 미리보기는 차단 사유로 보여 주고, 실행은 대상 DB를 바꾸지 않고 거부한다.
@@ -122,7 +132,7 @@ export interface CommandPlan {
 
 /**
  * 명령 하나의 동작 (TRD §7.3). 실행 절차(잠금, 상태 확인, 커밋)는 `executeCommand`가 맡고,
- * 핸들러는 대상을 읽고 바꿀 상태를 정하는 일만 한다. 적용(그룹 행, 스케줄, 상태 변경, 트리거 INSERT)은 공통(`applyPlan`)이다.
+ * 핸들러는 대상을 읽고 바꿀 상태를 정하는 일만 한다. 적용(그룹 행, 스케줄, 상태 변경, 트리거 INSERT, 삭제)은 공통(`applyPlan`)이다.
  */
 export interface CommandHandler<C extends QuartzCommand = QuartzCommand> {
   readonly type: C['type'];

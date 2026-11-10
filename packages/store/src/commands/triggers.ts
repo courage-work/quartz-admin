@@ -242,14 +242,55 @@ export function noChangeWarning(plan: CommandPlan, message: string): CommandPlan
 
 /** 계획이 바꿀 행 수(트리거 상태, 그룹 행, 새 트리거). 적용한 행 수와 비교한다 */
 export function plannedRows(
-  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts' | 'scheduleChanges'>,
+  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts' | 'scheduleChanges' | 'deletions'>,
 ): number {
   return (
     plan.changes.length +
     plan.groupChanges.length +
     plan.inserts.length +
-    plan.scheduleChanges.length
+    plan.scheduleChanges.length +
+    (plan.deletions?.triggers.length ?? 0) +
+    (plan.deletions?.jobs.length ?? 0)
   );
+}
+
+/**
+ * 트리거와 잡을 지운다 (TRD §7.3, `JSS.removeTrigger`, `JSS.removeJob`). 바뀐 행 수(TRIGGERS + JOB_DETAILS)를 돌려준다.
+ * Quartz는 SIMPLE → CRON → SIMPROP 순서로 하위 행을 지워 보고 없으면 BLOB을 지운다. 트리거 하나의 하위 행은 하나뿐이라
+ * 모든 하위 테이블에서 지워도 남는 행은 같다. `FIRED_TRIGGERS`와 `PAUSED_TRIGGER_GRPS`는 건드리지 않는다.
+ */
+async function applyDeletions(
+  conn: TargetConn,
+  ctx: SchedulerCommandContext,
+  deletions: NonNullable<CommandPlan['deletions']>,
+): Promise<number> {
+  const { dialect: d, tables } = ctx;
+  const children = (
+    ['SIMPLE_TRIGGERS', 'CRON_TRIGGERS', 'SIMPROP_TRIGGERS', 'BLOB_TRIGGERS'] as const
+  ).filter((t) => tables.has(t));
+  let changed = 0;
+  for (const t of deletions.triggers) {
+    const key = (b: Binds) =>
+      `SCHED_NAME = ${b.add(ctx.schedName)} AND TRIGGER_GROUP = ${b.add(t.group)} AND TRIGGER_NAME = ${b.add(t.name)}`;
+    for (const child of children) {
+      const b = new Binds(d);
+      await conn.execute(`DELETE FROM ${tables.table(child)} WHERE ${key(b)}`, b.values);
+    }
+    const b = new Binds(d);
+    changed += await conn.execute(
+      `DELETE FROM ${tables.table('TRIGGERS')} WHERE ${key(b)}`,
+      b.values,
+    );
+  }
+  for (const j of deletions.jobs) {
+    const b = new Binds(d);
+    changed += await conn.execute(
+      `DELETE FROM ${tables.table('JOB_DETAILS')} WHERE SCHED_NAME = ${b.add(ctx.schedName)} ` +
+        `AND JOB_GROUP = ${b.add(j.group)} AND JOB_NAME = ${b.add(j.name)}`,
+      b.values,
+    );
+  }
+  return changed;
 }
 
 /** 한 UPDATE에 넣는 트리거 이름 수. Oracle의 IN 목록 상한(1,000)보다 작게 둔다 */
@@ -417,14 +458,14 @@ async function applyScheduleChange(
 }
 
 /**
- * 계획을 적용한다. `PAUSED_TRIGGER_GRPS` 행, 스케줄, 트리거 상태, 새 트리거 순서로 바꾸고 바뀐 행 수를 돌려준다.
+ * 계획을 적용한다. `PAUSED_TRIGGER_GRPS` 행, 스케줄, 트리거 상태, 새 트리거, 삭제 순서로 바꾸고 바뀐 행 수를 돌려준다.
  * 스케줄 UPDATE가 바꾸기 전 상태를 조건으로 쓰므로 상태 변경보다 먼저 한다.
  * 그룹 행은 계획이 지금 상태를 보고 정했으므로(없을 때만 넣고 있을 때만 지움) 행마다 1이어야 한다.
  */
 export async function applyPlan(
   conn: TargetConn,
   ctx: SchedulerCommandContext,
-  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts' | 'scheduleChanges'>,
+  plan: Pick<CommandPlan, 'changes' | 'groupChanges' | 'inserts' | 'scheduleChanges' | 'deletions'>,
 ): Promise<AppliedPlan> {
   const { dialect: d, tables } = ctx;
   let changed = 0;
@@ -446,5 +487,6 @@ export async function applyPlan(
     inserts.push(await insertTrigger(conn, ctx, ins));
     changed++;
   }
+  if (plan.deletions) changed += await applyDeletions(conn, ctx, plan.deletions);
   return { changed, inserts };
 }
