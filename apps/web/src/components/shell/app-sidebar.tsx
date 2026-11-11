@@ -2,10 +2,12 @@
 
 import { APP_NAME } from '@qa/shared';
 import {
+  BellIcon,
   DatabaseIcon,
   LayoutDashboardIcon,
   type LucideIcon,
   ScrollTextIcon,
+  SendIcon,
   UsersIcon,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -47,6 +49,13 @@ const MAIN_NAV: NavItem[] = [
     label: '접속',
     icon: DatabaseIcon,
     match: ['/connection', '/connection/edit', '/connections/new', '/scheduler/settings'],
+  },
+  { href: '/alerts', label: '알림 센터', icon: BellIcon },
+  {
+    href: '/channels',
+    label: '알림 채널',
+    icon: SendIcon,
+    match: ['/channels/new', '/channel/edit'],
   },
   { href: '/audit-logs', label: '감사 로그', icon: ScrollTextIcon, match: ['/audit-log'] },
 ];

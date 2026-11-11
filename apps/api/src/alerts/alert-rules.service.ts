@@ -14,7 +14,9 @@ import { ApiError, notFound } from '../common/api-error.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { MetaDbService } from '../meta-db/meta-db.service.js';
 import { alertRuleChannels, alertRules, alerts, schedulers } from '../meta-db/schema.js';
+import type { MonitorTx } from '../monitor/monitor-hooks.js';
 import { AlertDefaults } from './alert-defaults.js';
+import { ChannelsService } from './channels.service.js';
 
 type RuleRow = typeof alertRules.$inferSelect;
 type AlertRow = typeof alerts.$inferSelect;
@@ -43,6 +45,7 @@ export class AlertRulesService {
   constructor(
     private readonly metaDb: MetaDbService,
     private readonly defaults: AlertDefaults,
+    private readonly channels: ChannelsService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -68,17 +71,20 @@ export class AlertRulesService {
     return this.toDto(row, this.channelLinks([id]));
   }
 
-  /** 새 규칙은 인앱 채널에 연결한다. 채널 선택은 B-25 */
+  /** 채널을 고르지 않으면 인앱 채널에 연결한다 */
   create(schedulerId: number, input: AlertRuleInput): AlertRuleDto {
     this.requireScheduler(schedulerId);
+    const { channelIds, ...values } = input;
+    if (channelIds) this.channels.assertExist(channelIds);
     const now = this.clock();
     const id = this.metaDb.db.transaction((tx) => {
       const row = tx
         .insert(alertRules)
-        .values({ schedulerId, ...input, createdAt: now, updatedAt: now })
+        .values({ schedulerId, ...values, createdAt: now, updatedAt: now })
         .returning({ id: alertRules.id })
         .get();
-      this.defaults.linkInapp(tx, row.id);
+      if (channelIds) this.link(tx, row.id, channelIds);
+      else this.defaults.linkInapp(tx, row.id);
       return row.id;
     });
     return this.get(id);
@@ -99,12 +105,25 @@ export class AlertRulesService {
         [{ path: 'type', message: '규칙 타입은 바꿀 수 없습니다' }],
       );
     }
-    this.metaDb.db
-      .update(alertRules)
-      .set({ ...input, updatedAt: this.clock() })
-      .where(eq(alertRules.id, id))
-      .run();
+    const { channelIds, ...values } = input;
+    if (channelIds) this.channels.assertExist(channelIds);
+    this.metaDb.db.transaction((tx) => {
+      tx.update(alertRules)
+        .set({ ...values, updatedAt: this.clock() })
+        .where(eq(alertRules.id, id))
+        .run();
+      // 채널을 보내지 않으면 지금 연결을 그대로 둔다
+      if (channelIds) this.link(tx, id, channelIds);
+    });
     return this.get(id);
+  }
+
+  /** 규칙의 채널 연결을 통째로 바꾼다 */
+  private link(tx: MonitorTx, ruleId: number, channelIds: readonly number[]): void {
+    tx.delete(alertRuleChannels).where(eq(alertRuleChannels.ruleId, ruleId)).run();
+    for (const channelId of new Set(channelIds)) {
+      tx.insert(alertRuleChannels).values({ ruleId, channelId }).run();
+    }
   }
 
   /** 지운 규칙의 열린 알림은 바로 해소한다(발송 없음). 알림 기록은 규칙 없이 남는다 */

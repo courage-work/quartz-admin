@@ -275,8 +275,13 @@ export class AlertEngine implements MonitorHook, OnModuleInit {
         return true;
       }
       case 'resolve':
+        // 해소 알림도 발송이다. 알림 센터가 읽지 않은 알림으로 센다
         tx.update(alerts)
-          .set({ status: 'resolved', resolvedAt: now })
+          .set({
+            status: 'resolved',
+            resolvedAt: now,
+            ...(step.notify ? { lastNotifiedAt: now } : {}),
+          })
           .where(eq(alerts.id, existing!.id))
           .run();
         if (step.notify) this.enqueue(tx, rule.id, existing!.id, step.notify, now);

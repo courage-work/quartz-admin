@@ -120,6 +120,9 @@ catalogs:
     next-themes:
       specifier: 0.4.6
       version: 0.4.6
+    nodemailer:
+      specifier: 10.2.1
+      version: 10.2.1
     oracledb:
       specifier: 26.0.0
       version: 26.0.0
@@ -269,6 +272,9 @@ importers:
       nestjs-pino:
         specifier: 'catalog:'
         version: 5.3.1(@nestjs/common@12.3.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.3)(pino-http@11.0.0)(pino@10.4.0)(rxjs@7.8.2)
+      nodemailer:
+        specifier: 'catalog:'
+        version: 10.2.1
       pino:
         specifier: 'catalog:'
         version: 10.4.0
@@ -4758,6 +4764,10 @@ packages:
   node-releases@2.0.63:
     resolution: {integrity: sha512-6li2QanLsAXpIH2R6j77MzRyvOyrvdTqlKtO4CgBdHGNvN99ZZfyxszHc5o5+IZBWD5u6Hzwg83JoGXmqZNG9Q==}
     engines: {node: '>=18'}
+
+  nodemailer@10.2.1:
+    resolution: {integrity: sha512-ZrDNsPFoDMwefNs7sJwrYiEJ/CG4ClJWDZv05iNJsEBWa8GRDry1QJHTJxsuTAY9eDDKjX4k+q3SxslXJOao7w==}
+    engines: {node: '>=20.0.0'}
 
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
@@ -9597,6 +9607,8 @@ snapshots:
       skin-tone: 2.0.0
 
   node-releases@2.0.63: {}
+
+  nodemailer@10.2.1: {}
 
   normalize-path@3.0.0: {}
 

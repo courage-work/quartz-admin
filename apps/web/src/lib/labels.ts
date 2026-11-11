@@ -31,6 +31,11 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   'alert_rule.create': '알림 규칙 추가',
   'alert_rule.update': '알림 규칙 수정',
   'alert_rule.delete': '알림 규칙 삭제',
+  'channel.create': '알림 채널 추가',
+  'channel.update': '알림 채널 수정',
+  'channel.delete': '알림 채널 삭제',
+  'channel.test': '알림 채널 테스트 발송',
+  'alert.ack': '알림 확인',
 };
 
 export function auditActionLabel(action: string): string {

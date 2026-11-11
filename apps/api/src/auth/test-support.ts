@@ -9,6 +9,7 @@ import { CLOCK } from '../common/clock.js';
 import type { AppConfig } from '../config/env.js';
 import { testConfig } from '../config/test-support.js';
 import { tempDataDir } from '../meta-db/test-support.js';
+import { NOTIFIER_OPTIONS } from '../alerts/notification-worker.js';
 import { MONITOR_OPTIONS, type MonitorOptions } from '../monitor/monitor.service.js';
 import { LOGIN_RATE_LIMITER } from './auth.controller.js';
 import { FixedWindowRateLimiter } from './rate-limiter.js';
@@ -87,7 +88,10 @@ export async function createTestApp(
     .overrideProvider(LOGIN_RATE_LIMITER)
     .useValue(new FixedWindowRateLimiter(options.loginRateLimit ?? 1_000, 60_000))
     .overrideProvider(MONITOR_OPTIONS)
-    .useValue({ enabled: false, concurrency: 8, roundTimeoutMs: 30_000, ...options.monitor });
+    .useValue({ enabled: false, concurrency: 8, roundTimeoutMs: 30_000, ...options.monitor })
+    // 발송 워커도 돌리지 않는다. 발송 테스트는 `NotificationWorker.tick()`을 직접 부른다
+    .overrideProvider(NOTIFIER_OPTIONS)
+    .useValue({ enabled: false, intervalMs: 5_000, sendTimeoutMs: 2_000 });
   for (const o of options.overrides ?? []) {
     builder = builder.overrideProvider(o.provide).useValue(o.useValue);
   }

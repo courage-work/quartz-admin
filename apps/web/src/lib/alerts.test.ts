@@ -89,7 +89,17 @@ describe('규칙 폼', () => {
       severity: 'warning',
       renotifyMinutes: 90,
       enabled: true,
+      channelIds: [1],
     });
+  });
+
+  it('새 규칙은 기본 채널(인앱)을 골라 두고, 고른 채널을 그대로 보낸다', () => {
+    const values = ruleFormValues(undefined, [7]);
+    expect(values.channelIds).toEqual([7]);
+    expect(alertRuleInputSchema.parse(toRuleRequest({ ...values, channelIds: [] }))).toMatchObject({
+      channelIds: [],
+    });
+    expect(ruleFormPathOf(['channelIds'])).toBe('channelIds');
   });
 
   it('스케줄러 단위 규칙은 범위를 보내지 않고, 빈 재알림은 null', () => {

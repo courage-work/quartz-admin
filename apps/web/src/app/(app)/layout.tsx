@@ -2,6 +2,7 @@
 
 import { type ReactNode, Suspense, useState } from 'react';
 
+import { AlertBell } from '@/components/shell/alert-bell';
 import { AppSidebar } from '@/components/shell/app-sidebar';
 import { AuthGate } from '@/components/shell/auth-gate';
 import { QuickNav } from '@/components/shell/quick-nav';
@@ -43,6 +44,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               </Tooltip>
               <div ref={setTrailSlot} className="min-w-0 flex-1" />
               <QuickNav />
+              <AlertBell />
               <ThemeToggle />
               <UserMenu />
             </header>

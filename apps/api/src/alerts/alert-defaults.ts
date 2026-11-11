@@ -31,9 +31,11 @@ export class AlertDefaults implements OnApplicationBootstrap {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  /** B-24 이전에 등록해 규칙이 하나도 없는 스케줄러에 기본 규칙을 채운다. 한 번만 한다 */
+  /** 인앱 채널을 만들고, B-24 이전에 등록해 규칙이 하나도 없는 스케줄러에 기본 규칙을 채운다(한 번만) */
   onApplicationBootstrap(): void {
     const filled = this.metaDb.db.transaction((tx) => {
+      // 인앱 채널은 처음부터 있다. 채널 화면과 규칙 화면이 기본 채널로 보여 준다
+      this.inappChannelId(tx);
       if (tx.select().from(settings).where(eq(settings.key, BACKFILL_KEY)).get()) return null;
       const bare = tx
         .select({ id: schedulers.id })

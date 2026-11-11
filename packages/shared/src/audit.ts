@@ -38,6 +38,11 @@ export const AUDIT_ACTIONS = [
   'alert_rule.create',
   'alert_rule.update',
   'alert_rule.delete',
+  'channel.create',
+  'channel.update',
+  'channel.delete',
+  'channel.test',
+  'alert.ack',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -51,6 +56,8 @@ export const AUDIT_TARGET_TYPES = [
   'trigger_group',
   'job_group',
   'alert_rule',
+  'channel',
+  'alert',
 ] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 
