@@ -498,7 +498,8 @@ describe('삭제 (FR-CON-05)', () => {
       .body as DeleteImpactDto;
     expect(impact).toMatchObject({
       schedulers: [{ displayName: '정산', schedName: 'Billing' }],
-      alertRuleCount: 0,
+      // 등록하면 기본 규칙 6종이 생긴다 (TRD §9.2)
+      alertRuleCount: 6,
       openAlertCount: 0,
     });
 

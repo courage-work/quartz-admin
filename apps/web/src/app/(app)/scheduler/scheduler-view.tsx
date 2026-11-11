@@ -6,6 +6,7 @@ import { SearchXIcon, Settings2Icon, UnplugIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
+import { AlertsTab } from '@/components/alerts/alerts-tab';
 import { FormAlert } from '@/components/form/form-alert';
 import { InlineLink } from '@/components/links';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
@@ -42,6 +43,7 @@ const TABS = [
   { value: 'executing', label: '실행 중' },
   { value: 'nodes', label: '노드' },
   { value: 'paused', label: '일시정지 그룹' },
+  { value: 'alerts', label: '알림' },
 ] as const;
 type TabValue = (typeof TABS)[number]['value'];
 
@@ -231,6 +233,9 @@ export function SchedulerView() {
             refreshMs={refreshMs}
             blockedReason={controlBlockedReason(s.connection)}
           />
+        </TabsContent>
+        <TabsContent value="alerts">
+          <AlertsTab schedulerId={id} refreshMs={refreshMs} thresholds={s} />
         </TabsContent>
       </Tabs>
     </>

@@ -14,7 +14,7 @@ export interface CollectOptions {
   checkinMultiplier: number;
   /** `misfire_threshold_ms + overdue_grace_ms` */
   overdueAfterMs: number;
-  /** 연체 트리거 목록 상한. 기본 50 */
+  /** 연체 트리거 목록 상한. 기본 500(ERROR·BLOCKED 목록과 같음). 알림의 적용 범위와 재개 제외가 목록을 걸러 쓴다 */
   overdueLimit?: number;
   /** ERROR·BLOCKED 트리거 목록 상한. 기본 500 */
   watchedLimit?: number;
@@ -67,7 +67,7 @@ export async function collectMonitorData(
       lb.next,
       lb.next + 1,
     );
-    lb.add(opts.overdueLimit ?? 50);
+    lb.add(opts.overdueLimit ?? 500);
     lb.add(0);
     overdue = (await conn.query(sql, lb.values)).map((r) => ({
       group: String(r.G),

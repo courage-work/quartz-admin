@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.22 (B-21 삭제 반영) |
+| 문서 버전 | v0.23 (B-24 알림 규칙 엔진 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -36,6 +36,7 @@
 | v0.20 | 2026-11-10 | B-20: §7.1 명령 형식에 `updateCronSchedule`·`updateSimpleSchedule`, 계획의 스케줄 변경(`scheduleChanges`)과 적용 순서, 명령별 거부 코드(`INVALID_SCHEDULE` 400, `CALENDAR_ATTACHED`·`TRIGGER_COMPLETE`·`TRIGGER_TYPE_MISMATCH` 409)와 경고(`ERROR_CLEARED`, `PAUSE_KEPT`), 감사 작업 종류 `trigger.reschedule`. §7.6 식 대문자 저장, 모르는 타임존 거부, 적용 방식, 미리보기·타임존 API, 수정 화면. §8.1 트리거 상세 API |
 | v0.21 | 2026-11-10 | §7.2·§7.6: 집힌(ACQUIRED) 트리거를 고친 뒤 다른 노드가 새 스케줄로 다시 집으면 옛 노드가 옛 스케줄로 발화하고 수정이 사라지는 경합을 확인(Quartz 2.5.2 CI 실패, 로컬 재현). 새 실행 시각이 옛 발화 시각부터 35초 안이면 `TRIGGER_ACQUIRED`(409)로 거부. 부록 A.6 C-05·S-07 조건을 경합 구간 밖으로 바꾸고 C-14·S-08 추가 |
 | v0.22 | 2026-11-10 | B-21: §7.1 명령 형식에 `deleteTrigger`·`deleteJob`, 계획의 삭제(`deletions`)와 적용 순서, 삭제 전 스냅샷(감사 `before.snapshot`), 경고(`JOB_ALSO_DELETED`, `DELETING_EXECUTING`), 감사 작업 종류 `trigger.delete`·`job.delete`. §7.3 삭제 세부(하위 테이블, durable 판정, 스냅샷 내용) 확정 |
+| v0.23 | 2026-11-10 | B-24: §8 스케줄러 API에 알림 규칙·알림 목록. §9.1 연체 목록 상한 50 → 500(적용 범위·재개 제외가 목록을 거름). §9.2 판정 세부(적용 범위는 수집 목록을 거름, BLOCKED와 PAUSED_BLOCKED, 감시 실패 회차, 기본 규칙과 기존 스케줄러 채우기). §9.3 엔진 구현(억제 순서, 억제가 풀린 뒤 `fire`, 지우거나 끈 규칙, 발송 큐까지), 감사 작업 종류 `alert_rule.create`·`update`·`delete` |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -399,6 +400,11 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 | PUT | `/schedulers/:id/settings` | 감시 설정(FR-CON-07) |
 | GET | `/schedulers/:id/delete-impact` | 등록 해제 영향 |
 | DELETE | `/schedulers/:id` | 등록 해제. 대상 DB의 Quartz 데이터는 건드리지 않는다 |
+| GET | `/schedulers/:id/alert-rules` | 알림 규칙 목록(FR-ALT-06). 연결된 채널 id 포함 |
+| POST | `/schedulers/:id/alert-rules` | 규칙 추가. 새 규칙은 인앱 채널에 연결한다(채널 선택은 B-25) |
+| PUT | `/alert-rules/:id` | 규칙 수정. 타입은 바꿀 수 없다(400) |
+| DELETE | `/alert-rules/:id` | 규칙 삭제. 그 규칙의 열린 알림은 발송 없이 해소하고 기록은 남긴다 |
+| GET | `/schedulers/:id/alerts` | 해소 전 알림(심각도·최근 순)과 최근 해소된 알림 20개. 억제 중 여부(`suppressed`)와 발송 여부(`notified`) 포함 |
 
 - **입력 검증**: 지금은 `SUPPORTED_DB_KINDS`(Oracle)만 받습니다. Oracle은 서비스 이름과 SID 중 정확히 하나, 다른 DB는 DB 이름이 필요합니다. 호스트·서비스 이름·SID는 접속 기술자를 깨뜨리는 문자(괄호, 등호, 공백)를 받지 않습니다. 환경 라벨은 소문자로 맞추고(`prod`, `stage`, `dev`), 태그는 10개·30자까지이며 중복을 없앱니다. 접속 이름은 고유합니다(409 `CONNECTION_NAME_TAKEN`).
 - **비밀번호 저장**: §4.1대로 빈 값으로 INSERT한 뒤 같은 트랜잭션에서 행 ID를 AAD로 암호화해 UPDATE합니다.
@@ -745,7 +751,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
   1. DB 현재 시각
   2. 상태별 트리거 수
   3. `SCHEDULER_STATE` 전체
-  4. 연체 트리거 상위 50개, ERROR와 BLOCKED 트리거 목록(UNION 또는 개별 쿼리)
+  4. 연체 트리거 상위 500개, ERROR와 BLOCKED 트리거 목록(UNION 또는 개별 쿼리)
   5. FIRED_TRIGGERS 개수
 - 결과는 스냅샷 저장, 규칙 평가, 알림 상태 갱신, 발송 큐 적재 순으로 처리합니다. SQLite 쓰기는 감시 1회당 트랜잭션 하나로 묶습니다.
 - 감시 1회는 전체 30초를 넘기지 않습니다. 넘으면 그 회차는 실패로 처리합니다.
@@ -756,7 +762,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
   - **회차 제한**: 대상 DB 조회 전체를 30초로 제한합니다. 접속별 풀(§5.2)이 연결 10초·쿼리 10초(어댑터 강제 제한 포함) 안에 끝내므로, 응답 없는 대상도 그 스케줄러의 회차만 실패합니다.
   - **확장 지점**(`MonitorHooks`): 스냅샷을 저장한 같은 SQLite 트랜잭션 안에서 등록된 훅에 결과(`ok`면 수집 값 전체, 실패면 실패 스냅샷)를 동기로 넘깁니다. 알림 규칙 평가(B-24)가 여기에 붙습니다. 훅이 던지면 그 회차의 쓰기 전체가 롤백되고 실패로 남습니다.
   - **`known_nodes`**: 감시에서 본 노드마다 `first_seen_at`(처음 본 시각), `last_seen_at`, 마지막 체크인 시각·간격을 갱신합니다. 사라진 노드의 행은 지우지 않습니다(노드 이탈 판정용).
-- 실제 수집 쿼리(왕복 7회, 모두 조회만): DB 시각, 상태별 개수(`GROUP BY TRIGGER_STATE`), `SCHEDULER_STATE`, 연체 수(`COUNT`), 연체 상위 50개(연체가 있을 때만), ERROR·BLOCKED·PAUSED_BLOCKED 트리거 목록(최대 500개, 그룹·이름 순), `FIRED_TRIGGERS` 개수. 연체 기준은 `NEXT_FIRE_TIME > 0 AND NEXT_FIRE_TIME < dbNow - (misfire_threshold_ms + overdue_grace_ms)`이고 상태는 WAITING·ACQUIRED입니다.
+- 실제 수집 쿼리(왕복 7회, 모두 조회만): DB 시각, 상태별 개수(`GROUP BY TRIGGER_STATE`), `SCHEDULER_STATE`, 연체 수(`COUNT`), 연체 상위 500개(연체가 있을 때만. 알림의 적용 범위와 재개 제외가 이 목록을 거르므로 ERROR·BLOCKED 목록과 같은 상한), ERROR·BLOCKED·PAUSED_BLOCKED 트리거 목록(최대 500개, 그룹·이름 순), `FIRED_TRIGGERS` 개수. 연체 기준은 `NEXT_FIRE_TIME > 0 AND NEXT_FIRE_TIME < dbNow - (misfire_threshold_ms + overdue_grace_ms)`이고 상태는 WAITING·ACQUIRED입니다.
 - B-15 확인(빌드한 API, 실제 테스트베드): 연결할 수 없는 스케줄러가 매 회차 실패하는 동안 정상 스케줄러는 60.007초 간격으로 감시됐고, API를 재시작하자 두 스케줄러 모두 3~6초 안에 감시가 다시 시작됐습니다.
 - 규모 추정: 스케줄러 100개 × 분당 5쿼리 = 대상 DB 전체에 분당 500쿼리. 스케줄러 하나가 놓인 DB에는 분당 5쿼리 수준입니다(NFR-PERF-03, PRD R7).
 
@@ -783,8 +789,12 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 - **연체 판정**: 정상 클러스터에서는 각 노드의 MisfireHandler가 `misfireThreshold`(기본 60초) 간격으로 misfire된 WAITING 트리거의 NEXT_FIRE_TIME을 갱신합니다(§7.4). 따라서 연체 상태가 이어진다는 것은 클러스터가 트리거를 처리하지 못한다는 뜻입니다(노드 다운, 스레드 풀 고갈 등). "misfire가 처리되어 실행을 건너뛴 경우"는 DB에 흔적이 남지 않아 MVP에서 감지하지 못합니다. 스냅샷 비교 방식은 Phase 2에서 검토합니다.
   - 트리거는 `misfireThreshold`가 지나야 misfire가 되고, MisfireHandler가 처리하기까지 최대 한 주기(`misfireThreshold`)가 더 걸립니다. 그래서 `overdue_grace_ms`는 `misfire_threshold_ms` 이상이어야 정상 클러스터에서 오탐이 나지 않습니다. 기본값(둘 다 60000)은 이 조건을 겨우 만족하므로, 스케줄러 설정에서 `misfire_threshold_ms`를 바꾸면 `overdue_grace_ms`의 기본값도 같은 값으로 맞춥니다.
   - 도구가 재개한 트리거는 MisfireHandler가 처리할 때까지 지난 NEXT_FIRE_TIME을 가진 WAITING으로 남으므로 연체로 보일 수 있습니다. 감사 로그에서 `misfire_threshold_ms + overdue_grace_ms` 안에 도구가 재개한 트리거는 `OVERDUE` 판정에서 뺍니다.
-- **적용 범위**: 규칙의 `scope_json`(`all` | `groups[]` | `triggers[]`)을 쿼리 조건에 반영합니다.
-- **기본 규칙 세트**: 스케줄러를 등록하면 위 6종을 기본값으로 만들고, 인앱 채널에 연결합니다.
+- **적용 범위**: 규칙의 `scope_json`(`all` | `groups[]` | `triggers[]`)으로 대상을 좁힙니다. 감시 쿼리를 규칙마다 따로 돌리지 않고, 감시가 읽은 목록(연체·ERROR·BLOCKED, 각 500개까지)을 거릅니다. 대상 DB 왕복은 규칙 수와 상관없이 같습니다. 전체 범위의 `OVERDUE`는 목록 상한을 넘은 연체도 개수로 셉니다. 범위는 트리거 단위 규칙(`OVERDUE`, `TRIGGER_ERROR`, `BLOCKED_LONG`)에만 있고 나머지는 늘 전체입니다. 그룹·트리거는 100개까지, 정확히 같은 이름만 봅니다.
+- **기본 규칙 세트**: 스케줄러를 등록하면 위 6종을 기본값으로 만들고, 인앱 채널에 연결합니다. 심각도는 표와 같고, 재알림은 critical 규칙만 60분입니다. 인앱 채널은 처음 필요할 때 하나 만듭니다. B-24 이전에 등록해 규칙이 없는 스케줄러에는 기동할 때 한 번만 채웁니다(`settings`의 `alerts.default_rules_backfilled`). 사용자가 규칙을 모두 지운 뒤에는 되살리지 않습니다.
+- **판정 세부** (B-24, `packages/store/src/alerts/evaluate.ts`): 판정과 수명주기는 대상 DB도 메타 저장소도 건드리지 않는 순수 함수로 두어 감시 루프와 통합 테스트가 같은 판정을 씁니다.
+  - `BLOCKED_LONG`: `trigger_observations`에 BLOCKED와 PAUSED_BLOCKED를 같은 "막힘"으로 기록해 둘 사이를 오가도 처음 본 시각(대상 DB 시각)을 유지하고, 목록에서 빠지면 지웁니다. 알림은 지금 BLOCKED인 트리거만 보냅니다. PAUSED_BLOCKED는 일시정지한 트리거라 `OVERDUE`가 일시정지를 빼는 것처럼 뺍니다.
+  - `OVERDUE`의 재개 제외: 감사 로그에서 `misfire_threshold_ms + overdue_grace_ms` 안에 성공한 재개(`trigger.resume`, `job.resume`, `trigger_group.resume`, `job_group.resume`)의 `after.changes`에 있는 트리거를 뺍니다.
+  - 감시가 실패한 회차에는 `MONITOR_UNREACHABLE`만 판정하고, 다른 규칙의 열린 알림은 해소하지 않고 그대로 둡니다. 대상 DB 상태를 모르기 때문입니다.
 
 ### 9.3 알림 수명주기 (FR-ALT-08, FR-ALT-09)
 
@@ -801,6 +811,16 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 - **요약**: 한 회차에 같은 채널로 나갈 발송이 5건을 넘으면 요약 메시지 하나로 묶습니다.
 - **음소거**(P1): `muted_until`이 지나지 않았으면 알림 상태는 기록하되 발송하지 않습니다.
 - **재시작**: 알림 상태와 `trigger_observations`는 SQLite에 있으므로 재시작해도 그대로 이어집니다.
+- **구현** (B-24, `apps/api/src/alerts/`): `AlertEngine`이 감시 루프의 확장 지점(`MonitorHooks`)에 붙어, 스냅샷을 저장한 같은 SQLite 트랜잭션 안에서 판정·알림 갱신·발송 큐 적재를 합니다. 발송(큐 워커, 채널, 요약)은 B-25입니다.
+  - 지문은 규칙 타입입니다(규칙 단위). 알림 시각(`first_seen_at`, `last_seen_at`, `last_notified_at`)은 도구 서버 시각입니다.
+  - 순서: `CLUSTER_DOWN`·`MONITOR_UNREACHABLE`을 먼저 판정하고, 그 알림이 이번 회차 뒤에도 열려 있으면 억제합니다. 같은 회차에 클러스터가 내려가도 연체 알림이 먼저 나가지 않습니다.
+  - 억제가 늦게 걸리는 경우(통합 테스트에서 확인): 노드의 마지막 체크인은 노드마다 몇 초씩 다르므로(기본 최대 7.5초), 노드가 모두 멈춰도 그 사이 회차에는 하나만 빠진 것으로 보여 `NODE_MISSING`이 먼저 나갈 수 있습니다. `OVERDUE`는 연체 기준(기본 2분)이 노드 비활성 판정(체크인 간격 × 배수, 기본 22.5초)보다 길어서 대개 `CLUSTER_DOWN`보다 먼저 나가지 않습니다(내려가기 전부터 밀리던 트리거는 예외). 연체 기준을 비활성 판정보다 짧게 두면 연체가 먼저 나갈 수 있습니다.
+  - 억제 중에 열린 알림은 `last_notified_at`이 비어 있습니다. 억제가 풀린 뒤에도 조건이 이어지면 그때 `fire`를 보내고, 한 번도 보내지 않고 해소되면 `resolve`도 보내지 않습니다. 억제 중에는 갱신·재알림·해소 발송도 하지 않습니다.
+  - "새 항목"(`update`)은 트리거 알림이면 대상 트리거, 노드 알림이면 빠진 노드 수가 늘어난 경우입니다. 대상이 줄기만 하면 보내지 않습니다. 재알림 간격은 마지막 발송(갱신 포함)부터 셉니다.
+  - 끄거나 지운 규칙, 타입이 바뀐 규칙(API는 타입 변경을 막음)의 열린 알림은 발송 없이 해소합니다. 지우면 API가 바로, 끄면 다음 회차에 해소합니다.
+  - 발송 큐(`notifications`)에는 규칙에 연결된 켜진 채널마다 한 줄씩 `pending`으로 넣습니다.
+  - 규칙 추가·수정·삭제는 감사 로그(`alert_rule.create`, `alert_rule.update`, `alert_rule.delete`, 대상 종류 `alert_rule`)에 전·후 규칙 값을 남깁니다.
+- **화면**: 스케줄러 상세의 "알림" 탭에 열린 알림(억제 중·발송 전 표시), 알림 규칙(조건 설명, 범위, 심각도, 재알림, 사용 스위치, 줄 메뉴의 수정·삭제), 최근 해소된 알림을 둡니다. 규칙 추가·수정은 별도 화면(`/scheduler/alert-rule?scheduler=N[&id=M]`)이고 저장·취소 뒤 알림 탭으로 돌아갑니다. 알림 확인(ack)과 알림 센터는 B-25입니다.
 
 ### 9.4 발송 (FR-ALT-07)
 

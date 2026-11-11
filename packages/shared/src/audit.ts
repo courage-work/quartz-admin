@@ -35,6 +35,9 @@ export const AUDIT_ACTIONS = [
   'trigger.reschedule',
   'trigger.delete',
   'job.delete',
+  'alert_rule.create',
+  'alert_rule.update',
+  'alert_rule.delete',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -47,6 +50,7 @@ export const AUDIT_TARGET_TYPES = [
   'job',
   'trigger_group',
   'job_group',
+  'alert_rule',
 ] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 

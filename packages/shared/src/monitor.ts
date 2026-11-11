@@ -21,7 +21,7 @@ export interface MonitorData {
   executingCount: number;
   /** WAITING·ACQUIRED이면서 `misfire_threshold_ms + overdue_grace_ms`보다 오래 밀린 트리거 수 */
   overdueCount: number;
-  /** 가장 오래 밀린 순서로 최대 50개 */
+  /** 가장 오래 밀린 순서로 최대 500개 */
   overdue: (TriggerRef & { nextFireTime: number })[];
   errorTriggers: TriggerRef[];
   /** BLOCKED, PAUSED_BLOCKED */
