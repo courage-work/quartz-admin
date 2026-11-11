@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { TargetConn, TargetConnectInfo } from '../adapter.js';
 import { TargetError } from '../errors.js';
-import { toMysqlPlaceholders } from './adapter.js';
-import { mysqlDialect } from './dialect.js';
+import { sessionTimeoutSql, toMysqlPlaceholders } from './adapter.js';
+import { mariadbDialect, mysqlDialect } from './dialect.js';
 import { toMysqlTargetError } from './errors.js';
 
 const info: TargetConnectInfo = {
@@ -96,6 +96,11 @@ describe('toMysqlTargetError', () => {
     ],
     [{ code: 'ECONNREFUSED' }, 'connect ECONNREFUSED 10.0.0.5:3306', 'TARGET_UNREACHABLE'],
     [{ code: 'ETIMEDOUT' }, 'connect ETIMEDOUT', 'TARGET_TIMEOUT'],
+    [
+      { errno: 1969 },
+      'Query execution was interrupted (max_statement_time exceeded)',
+      'TARGET_TIMEOUT',
+    ],
   ] as const)('%o → %s', (fields, message, expected) => {
     expect(toMysqlTargetError(myError(fields, message), info).code).toBe(expected);
   });
@@ -115,5 +120,44 @@ describe('toMysqlTargetError', () => {
       info,
     );
     expect(auth.detail).not.toMatch(/quartz_app|my-prod|scheduler|Sup3r-secret|3306/);
+  });
+});
+
+describe('MariaDB (B-29)', () => {
+  it('dialect는 MySQL과 같고 종류만 mariadb다', () => {
+    expect(mariadbDialect.kind).toBe('mariadb');
+    expect(mariadbDialect.paginate('SELECT 1', 1, 2)).toBe(mysqlDialect.paginate('SELECT 1', 1, 2));
+    expect(mariadbDialect.quote('QRTZ_LOCKS')).toBe('`QRTZ_LOCKS`');
+    expect(mariadbDialect.dbNowMillisSql()).toBe(mysqlDialect.dbNowMillisSql());
+  });
+
+  it('조회 시간 제한은 MySQL max_execution_time(ms), MariaDB max_statement_time(초)', () => {
+    expect(sessionTimeoutSql('mysql', 10_000)).toBe('SET SESSION max_execution_time = 10000');
+    expect(sessionTimeoutSql('mariadb', 10_000)).toBe('SET SESSION max_statement_time = 10.000');
+    expect(sessionTimeoutSql('mariadb', 1_500)).toBe('SET SESSION max_statement_time = 1.500');
+    expect(sessionTimeoutSql('mariadb', 0)).toBe('SET SESSION max_statement_time = 0.001');
+  });
+
+  it('ed25519 인증 계정은 TARGET_AUTH_FAILED이고 지원하지 않는다고 안내한다', () => {
+    const err = toMysqlTargetError(
+      myError(
+        { code: 'AUTH_SWITCH_PLUGIN_ERROR' },
+        'Server requests authentication using unknown plugin client_ed25519. See TODO',
+      ),
+      info,
+    );
+    expect(err).toMatchObject({
+      code: 'TARGET_AUTH_FAILED',
+      driverCode: 'AUTH_SWITCH_PLUGIN_ERROR',
+    });
+    expect(err.message).toContain('ed25519');
+    expect(err.message).toContain('mysql_native_password');
+    // 다른 플러그인 오류는 기본 문구
+    expect(
+      toMysqlTargetError(
+        myError({ code: 'AUTH_SWITCH_PLUGIN_ERROR' }, 'unknown plugin auth_gssapi_client'),
+        info,
+      ).message,
+    ).not.toContain('ed25519');
   });
 });

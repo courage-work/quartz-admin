@@ -9,9 +9,25 @@ import type {
   TargetConnectInfo,
 } from '../adapter.js';
 import { TargetError } from '../errors.js';
-import { toMysqlTargetError } from './errors.js';
+import { MYSQL_UNKNOWN_SYSTEM_VARIABLE, errnoOf, toMysqlTargetError } from './errors.js';
 
-/** 드라이버 쪽 시간 제한. 서버의 `max_execution_time`이 먼저 동작하도록 1초 더 준다 */
+/** MySQL 계열 서버 종류. 세션 시간 제한 변수만 다르다 */
+export type MysqlFlavor = 'mysql' | 'mariadb';
+
+const FLAVOR_LABEL: Record<MysqlFlavor, string> = { mysql: 'MySQL', mariadb: 'MariaDB' };
+
+/**
+ * 조회 시간 제한 세션 설정. MySQL은 `max_execution_time`(ms, 읽기 전용 SELECT에만 적용),
+ * MariaDB는 `max_statement_time`(초, 모든 문장에 적용)이다 (TRD §5.2)
+ */
+export function sessionTimeoutSql(flavor: MysqlFlavor, timeoutMs: number): string {
+  const ms = Math.max(1, Math.round(timeoutMs));
+  return flavor === 'mariadb'
+    ? `SET SESSION max_statement_time = ${(ms / 1000).toFixed(3)}`
+    : `SET SESSION max_execution_time = ${ms}`;
+}
+
+/** 드라이버 쪽 시간 제한. 서버의 시간 제한이 먼저 동작하도록 1초 더 준다 */
 const CLIENT_TIMEOUT_GRACE_MS = 1_000;
 
 /** 트랜잭션이 필요한 조회. 잠금은 자동 커밋이면 문장이 끝나는 즉시 풀리므로 먼저 트랜잭션을 연다 */
@@ -45,18 +61,18 @@ interface ResultHeader {
 }
 
 /**
- * MySQL 커넥션. PostgreSQL 어댑터와 같이 쓰기(`execute`)와 잠금 조회 앞에서만 트랜잭션을 연다.
+ * MySQL·MariaDB 커넥션. PostgreSQL 어댑터와 같이 쓰기(`execute`)와 잠금 조회 앞에서만 트랜잭션을 연다.
  * 세션 격리 수준은 접속할 때 READ COMMITTED로 맞춘다(MySQL 기본값은 REPEATABLE READ, TRD §5.3).
  *
  * UPDATE의 바뀐 행 수는 `FOUND_ROWS` 플래그로 "조건에 맞은 행 수"다. 값이 같아도 센다(다른 DB와 같음).
  * MySQL은 문장이 실패해도 트랜잭션을 유지하지만(교착은 예외), 호출자는 실패하면 ROLLBACK한다.
  */
 class MysqlTargetConn implements TargetConn {
-  readonly kind = 'mysql' as const;
   private tx = false;
   private broken = false;
 
   constructor(
+    readonly kind: MysqlFlavor,
     private readonly conn: mysql.Connection,
     private readonly info: TargetConnectInfo,
     private readonly defaultTimeoutMs: number,
@@ -135,10 +151,7 @@ class MysqlTargetConn implements TargetConn {
     const override = options.timeoutMs !== undefined && options.timeoutMs !== this.defaultTimeoutMs;
     const { sql: text, values } = toMysqlPlaceholders(sql, binds);
     try {
-      if (override)
-        await this.conn.query(
-          `SET SESSION max_execution_time = ${Math.max(1, Math.round(timeoutMs))}`,
-        );
+      if (override) await this.conn.query(sessionTimeoutSql(this.kind, timeoutMs));
       const [result] = await this.conn.query(
         { sql: text, timeout: timeoutMs + CLIENT_TIMEOUT_GRACE_MS },
         values,
@@ -151,7 +164,7 @@ class MysqlTargetConn implements TargetConn {
     } finally {
       if (override && !this.broken) {
         await this.conn
-          .query(`SET SESSION max_execution_time = ${this.defaultTimeoutMs}`)
+          .query(sessionTimeoutSql(this.kind, this.defaultTimeoutMs))
           .catch(() => undefined);
       }
     }
@@ -159,12 +172,13 @@ class MysqlTargetConn implements TargetConn {
 }
 
 /**
- * MySQL 드라이버 어댑터 (`mysql2`, TRD §5.1, §5.2). 큰 정수는 안전한 범위면 number, DECIMAL도 number,
- * 날짜는 문자열, 시간대는 UTC로 받는다. 조회 제한은 세션 `max_execution_time`(SELECT에만 적용되는
- * `MAX_EXECUTION_TIME` 힌트와 같은 장치), 드라이버 쪽 쿼리 시간 제한, TCP keepalive를 쓴다.
+ * MySQL 계열 드라이버 어댑터 (`mysql2`, TRD §5.1, §5.2). 큰 정수는 안전한 범위면 number, DECIMAL도 number,
+ * 날짜는 문자열, 시간대는 UTC로 받는다. 조회 제한은 세션 변수(MySQL `max_execution_time`은
+ * `MAX_EXECUTION_TIME` 힌트와 같은 장치, MariaDB `max_statement_time`), 드라이버 쪽 쿼리 시간 제한,
+ * TCP keepalive를 쓴다.
  */
-export class MysqlAdapter implements DriverAdapter {
-  readonly kind = 'mysql' as const;
+abstract class MysqlFamilyAdapter implements DriverAdapter {
+  abstract readonly kind: MysqlFlavor;
 
   async connect(info: TargetConnectInfo, options: ConnectOptions): Promise<TargetConn> {
     if (!info.database) {
@@ -196,13 +210,32 @@ export class MysqlAdapter implements DriverAdapter {
     conn.on('error', () => undefined);
     try {
       await conn.query('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
-      await conn.query(
-        `SET SESSION max_execution_time = ${Math.max(1, Math.round(options.queryTimeoutMs))}`,
-      );
+      await conn.query(sessionTimeoutSql(this.kind, options.queryTimeoutMs));
     } catch (err) {
       conn.destroy();
+      if (errnoOf(err) === MYSQL_UNKNOWN_SYSTEM_VARIABLE) throw this.wrongFlavor(err, info);
       throw toMysqlTargetError(err, info);
     }
-    return new MysqlTargetConn(conn, info, options.queryTimeoutMs);
+    return new MysqlTargetConn(this.kind, conn, info, options.queryTimeoutMs);
   }
+
+  /** 시간 제한 변수가 없으면 다른 계열 서버다. MySQL로 등록한 MariaDB(또는 반대)를 알려준다 */
+  private wrongFlavor(err: unknown, info: TargetConnectInfo): TargetError {
+    const other: MysqlFlavor = this.kind === 'mysql' ? 'mariadb' : 'mysql';
+    const mapped = toMysqlTargetError(err, info);
+    return new TargetError('TARGET_ERROR', {
+      message: `${FLAVOR_LABEL[other]} 서버로 보입니다. 접속의 DB 종류를 ${FLAVOR_LABEL[other]}(으)로 고르세요`,
+      ...(mapped.driverCode !== undefined ? { driverCode: mapped.driverCode } : {}),
+      ...(mapped.detail !== undefined ? { detail: mapped.detail } : {}),
+    });
+  }
+}
+
+export class MysqlAdapter extends MysqlFamilyAdapter {
+  readonly kind = 'mysql' as const;
+}
+
+/** MariaDB 어댑터. MySQL과 같은 `mysql2` 드라이버를 쓰고 시간 제한 변수만 다르다 (B-29) */
+export class MariadbAdapter extends MysqlFamilyAdapter {
+  readonly kind = 'mariadb' as const;
 }

@@ -24,7 +24,7 @@ export type QuartzTable = (typeof QUARTZ_TABLES)[number];
  * Quartz 배포본의 스키마 파일. `oracle`은 `tables_oracle.sql`(2.3.2와 2.5.x 공통, 불리언은 VARCHAR2(1)),
  * `oracle23`은 2.5.x에 추가된 `tables_oracle23.sql`(불리언 컬럼이 Oracle 23 BOOLEAN)이다.
  * `postgres`는 `tables_postgres.sql`(2.3.2와 2.5.x가 같음, 불리언은 BOOL, BLOB은 BYTEA, 이름은 따옴표 없음)이다.
- * `mysql`은 `tables_mysql_innodb.sql`(2.3.2와 2.5.x가 같음, 불리언은 VARCHAR(1), BLOB, 이름은 대문자)이다.
+ * `mysql`은 `tables_mysql_innodb.sql`(2.3.2와 2.5.x가 같음, 불리언은 VARCHAR(1), BLOB, 이름은 대문자)이다. MariaDB도 이 파일을 쓴다.
  */
 export type QuartzSchemaVariant = 'oracle' | 'oracle23' | 'postgres' | 'mysql';
 
@@ -46,7 +46,7 @@ export interface QuartzSchemaOptions {
   prefix?: string;
   /** 기본 `upper` */
   tableCase?: TableCase;
-  /** 기본은 DB에 맞춰 `oracle` 또는 `postgres` */
+  /** 기본은 DB에 맞춰 `oracle`, `postgres`, `mysql`(MariaDB 포함) */
   variant?: QuartzSchemaVariant;
   /** 기본 {@link TEST_DB} */
   db?: TestDbKind;
@@ -69,7 +69,7 @@ function resolve(options: QuartzSchemaOptions): Required<QuartzSchemaOptions> {
   return {
     prefix,
     tableCase: options.tableCase ?? 'upper',
-    variant: options.variant ?? (db === 'oracle' ? 'oracle' : db),
+    variant: options.variant ?? (db === 'mariadb' ? 'mysql' : db),
     db,
   };
 }

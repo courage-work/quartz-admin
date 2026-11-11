@@ -8,8 +8,9 @@ import {
 } from '../errors.js';
 
 /**
- * MySQL 서버 오류 번호(errno) 분류 (TRD §5.6).
+ * MySQL·MariaDB 서버 오류 번호(errno) 분류 (TRD §5.6).
  * https://dev.mysql.com/doc/mysql-errors/8.4/en/server-error-reference.html
+ * https://mariadb.com/kb/en/mariadb-error-code-reference/
  */
 const ERRNO_MAP = new Map<number, TargetErrorCode>([
   [1044, 'TARGET_AUTH_FAILED'], // ER_DBACCESS_DENIED_ERROR: DB 접근 권한 없음
@@ -24,6 +25,7 @@ const ERRNO_MAP = new Map<number, TargetErrorCode>([
   [2006, 'TARGET_UNREACHABLE'], // CR_SERVER_GONE_ERROR
   [2013, 'TARGET_UNREACHABLE'], // CR_SERVER_LOST
   [3024, 'TARGET_TIMEOUT'], // ER_QUERY_TIMEOUT: max_execution_time 초과
+  [1969, 'TARGET_TIMEOUT'], // MariaDB ER_STATEMENT_TIMEOUT: max_statement_time 초과
   [1317, 'TARGET_TIMEOUT'], // ER_QUERY_INTERRUPTED
   [1205, 'LOCK_TIMEOUT'], // ER_LOCK_WAIT_TIMEOUT: innodb_lock_wait_timeout 초과
   [3572, 'LOCK_TIMEOUT'], // ER_LOCK_NOWAIT
@@ -32,6 +34,7 @@ const ERRNO_MAP = new Map<number, TargetErrorCode>([
 /** `mysql2`가 errno 없이 던지는 코드 */
 const CODE_MAP = new Map<string, TargetErrorCode>([
   ['PROTOCOL_SEQUENCE_TIMEOUT', 'TARGET_TIMEOUT'], // 드라이버 쪽 쿼리 시간 제한
+  ['AUTH_SWITCH_PLUGIN_ERROR', 'TARGET_AUTH_FAILED'], // 드라이버가 모르는 인증 플러그인(MariaDB ed25519 등)
   ['PROTOCOL_CONNECTION_LOST', 'TARGET_UNREACHABLE'],
   ['PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR', 'TARGET_UNREACHABLE'],
   ['PROTOCOL_ENQUEUE_AFTER_QUIT', 'TARGET_UNREACHABLE'],
@@ -41,10 +44,16 @@ const CODE_MAP = new Map<string, TargetErrorCode>([
 const DEADLOCK = 1213;
 /** 고유 키 중복 (`ER_DUP_ENTRY`) */
 export const MYSQL_DUP_ENTRY = 'ER_DUP_ENTRY';
+/** 세션 변수 이름이 없음. MySQL과 MariaDB를 바꿔 고르면 시간 제한 변수에서 난다 */
+export const MYSQL_UNKNOWN_SYSTEM_VARIABLE = 1193;
+
+/** mysql2가 지원하지 않는 MariaDB 전용 인증 플러그인 (TRD §5.1) */
+const ED25519_MESSAGE =
+  '이 계정은 MariaDB ed25519 인증을 씁니다. quartz-admin은 이 인증 방식을 지원하지 않으니 mysql_native_password 계정을 쓰세요';
 
 const DETAIL_MAX = 500;
 
-function errnoOf(err: unknown): number | undefined {
+export function errnoOf(err: unknown): number | undefined {
   const errno = (err as { errno?: unknown } | null)?.errno;
   return typeof errno === 'number' ? errno : undefined;
 }
@@ -70,7 +79,9 @@ export function toMysqlTargetError(err: unknown, info: TargetConnectInfo): Targe
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, DETAIL_MAX);
+  const ed25519 = mapped === 'TARGET_AUTH_FAILED' && /client_ed25519/.test(raw);
   return new TargetError(mapped, {
+    ...(ed25519 ? { message: ED25519_MESSAGE } : {}),
     ...(code !== undefined
       ? { driverCode: code }
       : errno !== undefined

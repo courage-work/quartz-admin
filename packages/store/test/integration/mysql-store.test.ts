@@ -1,28 +1,39 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  MariadbAdapter,
   MysqlAdapter,
+  mariadbDialect,
   mysqlDialect,
   queryDbNowMillis,
   type TargetConn,
   type TargetConnectInfo,
 } from '../../src/index.js';
-import { MYSQL_VERSION, TEST_DB, startMysql, type MysqlFixture } from '../support/index.js';
+import {
+  TEST_DB,
+  TEST_DB_LABEL,
+  isMysqlFamily,
+  startMysql,
+  type MysqlFixture,
+} from '../support/index.js';
 
 const queryOptions = { connectTimeoutMs: 10_000, queryTimeoutMs: 10_000 };
 
+const flavor = TEST_DB === 'mariadb' ? 'mariadb' : 'mysql';
+const dialect = flavor === 'mariadb' ? mariadbDialect : mysqlDialect;
+
 /**
- * MySQL 어댑터 (B-28, TRD §5.2, §5.3). 타입 매핑, 자리 표시 변환, 트랜잭션 경계, 세션 설정(READ COMMITTED,
- * max_execution_time), 잠금 대기 제한과 원복, 오류 분류를 실제 서버로 확인한다. `QA_IT_DB=mysql`일 때만 돈다.
+ * MySQL·MariaDB 어댑터 (B-28, B-29, TRD §5.2, §5.3). 타입 매핑, 자리 표시 변환, 트랜잭션 경계, 세션 설정(READ COMMITTED,
+ * 시간 제한 변수), 잠금 대기 제한과 원복, 오류 분류를 실제 서버로 확인한다. `QA_IT_DB=mysql` 또는 `mariadb`일 때만 돈다.
  */
-describe.skipIf(TEST_DB !== 'mysql')(`@qa/store MySQL 어댑터 (MySQL ${MYSQL_VERSION})`, () => {
+describe.skipIf(!isMysqlFamily(TEST_DB))(`@qa/store MySQL 계열 어댑터 (${TEST_DB_LABEL})`, () => {
   let my: MysqlFixture;
   let info: TargetConnectInfo;
-  const adapter = new MysqlAdapter();
+  const adapter = flavor === 'mariadb' ? new MariadbAdapter() : new MysqlAdapter();
 
   beforeAll(async () => {
-    my = await startMysql();
+    my = await startMysql({ flavor });
     info = {
-      kind: 'mysql',
+      kind: flavor,
       host: my.host,
       port: my.port,
       username: my.user,
@@ -59,7 +70,7 @@ describe.skipIf(TEST_DB !== 'mysql')(`@qa/store MySQL 어댑터 (MySQL ${MYSQL_V
     }
   }
 
-  const p = (n: number) => mysqlDialect.param(n);
+  const p = (n: number) => dialect.param(n);
 
   describe('어댑터', () => {
     it('행은 별칭 그대로의 객체, BIGINT·COUNT(*)는 number, BLOB은 Buffer, VARCHAR(1) 불리언은 문자열', async () => {
@@ -82,13 +93,24 @@ describe.skipIf(TEST_DB !== 'mysql')(`@qa/store MySQL 어댑터 (MySQL ${MYSQL_V
       expect(rows).toEqual([{ A: 'two', B: 'one', C: 'two' }]);
     });
 
-    it('세션 격리 수준은 READ COMMITTED, 조회 제한은 max_execution_time', async () => {
-      const rows = await withConn((c) =>
-        c.query(
-          'SELECT @@SESSION.transaction_isolation AS `I`, @@SESSION.max_execution_time AS `M`',
-        ),
+    it('세션 격리 수준은 READ COMMITTED, 조회 제한은 MySQL max_execution_time(ms)·MariaDB max_statement_time(초)', async () => {
+      // MariaDB 10.3에는 transaction_isolation 별칭이 없다
+      const sql =
+        flavor === 'mariadb'
+          ? 'SELECT @@SESSION.tx_isolation AS `I`, @@SESSION.max_statement_time AS `M`'
+          : 'SELECT @@SESSION.transaction_isolation AS `I`, @@SESSION.max_execution_time AS `M`';
+      const rows = await withConn((c) => c.query(sql));
+      expect(rows).toEqual([{ I: 'READ-COMMITTED', M: flavor === 'mariadb' ? 10 : 10_000 }]);
+    });
+
+    it('다른 계열 어댑터로 붙으면 DB 종류를 바꾸라고 안내한다', async () => {
+      const other = flavor === 'mariadb' ? new MysqlAdapter() : new MariadbAdapter();
+      const err = await other.connect({ ...info, kind: other.kind }, queryOptions).then(
+        () => null,
+        (e: unknown) => e as Error & { code?: string },
       );
-      expect(rows).toEqual([{ I: 'READ-COMMITTED', M: 10_000 }]);
+      expect(err).toMatchObject({ code: 'TARGET_ERROR', driverCode: 'ER_UNKNOWN_SYSTEM_VARIABLE' });
+      expect(err!.message).toContain(flavor === 'mariadb' ? 'MariaDB' : 'MySQL');
     });
 
     it('잠그지 않는 조회는 트랜잭션을 열지 않고, 쓰기와 FOR UPDATE는 COMMIT·ROLLBACK까지 하나의 트랜잭션이다', async () => {
@@ -132,13 +154,13 @@ describe.skipIf(TEST_DB !== 'mysql')(`@qa/store MySQL 어댑터 (MySQL ${MYSQL_V
     });
 
     it('DB 현재 시각(ms)이 테스트 프로세스 시각과 가깝다', async () => {
-      const now = await withConn((c) => queryDbNowMillis(c, mysqlDialect));
+      const now = await withConn((c) => queryDbNowMillis(c, dialect));
       expect(Math.abs(now - Date.now())).toBeLessThan(60_000);
     });
 
     it('LIMIT … OFFSET 페이지네이션이 동작한다', async () => {
       const rows = await withConn((c) =>
-        c.query(mysqlDialect.paginate('SELECT id AS `ID` FROM qa_probe ORDER BY id', 1, 2), [1, 1]),
+        c.query(dialect.paginate('SELECT id AS `ID` FROM qa_probe ORDER BY id', 1, 2), [1, 1]),
       );
       expect(rows).toEqual([{ ID: 2 }]);
     });
@@ -149,12 +171,12 @@ describe.skipIf(TEST_DB !== 'mysql')(`@qa/store MySQL 어댑터 (MySQL ${MYSQL_V
         await holder.query('SELECT id FROM qa_probe WHERE id = 1 FOR UPDATE');
         const started = Date.now();
         await withConn(async (c) => {
-          await mysqlDialect.beforeLockedTx(c, 1);
+          await dialect.beforeLockedTx(c, 1);
           await expect(
-            c.query(`SELECT id FROM qa_probe WHERE id = 1 ${mysqlDialect.forUpdate(1)}`),
+            c.query(`SELECT id FROM qa_probe WHERE id = 1 ${dialect.forUpdate(1)}`),
           ).rejects.toMatchObject({ code: 'LOCK_TIMEOUT', driverCode: 'ER_LOCK_WAIT_TIMEOUT' });
           await c.rollback();
-          await mysqlDialect.afterLockedTx(c);
+          await dialect.afterLockedTx(c);
           expect(c.inTransaction).toBe(false);
           const [row] = await c.query('SELECT @@SESSION.innodb_lock_wait_timeout AS `W`');
           expect(row).toEqual({ W: 50 });
@@ -208,5 +230,34 @@ describe.skipIf(TEST_DB !== 'mysql')(`@qa/store MySQL 어댑터 (MySQL ${MYSQL_V
         code: 'TARGET_UNREACHABLE',
       });
     });
+
+    it.skipIf(flavor !== 'mariadb')(
+      'MariaDB ed25519 인증 계정은 TARGET_AUTH_FAILED이고 지원하지 않는다고 안내한다',
+      async () => {
+        const root = await my.connectRoot();
+        try {
+          await root.query("INSTALL SONAME 'auth_ed25519'");
+          // MariaDB 문서의 ed25519_password('secret') 값. 10.3에는 USING PASSWORD()가 없다
+          await root.query(
+            "CREATE USER 'ed_user'@'%' IDENTIFIED VIA ed25519 USING 'ZIgUREUg5PVgQ6LskhXmO+eZLS0nC8be6HPjYWR4YJY'",
+          );
+          await root.query("GRANT ALL ON quartz.* TO 'ed_user'@'%'");
+        } finally {
+          await root.end();
+        }
+        const err = await adapter
+          .connect({ ...info, username: 'ed_user', password: 'secret' }, queryOptions)
+          .then(
+            () => null,
+            (e: unknown) => e as Error & { code?: string },
+          );
+        expect(err).toMatchObject({
+          code: 'TARGET_AUTH_FAILED',
+          driverCode: 'AUTH_SWITCH_PLUGIN_ERROR',
+        });
+        expect(err!.message).toContain('ed25519');
+        expect(err!.message).toContain('mysql_native_password');
+      },
+    );
   });
 });
