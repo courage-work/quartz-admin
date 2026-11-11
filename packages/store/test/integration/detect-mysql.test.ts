@@ -184,6 +184,8 @@ describe.skipIf(!isMysqlFamily(TEST_DB))(
         boolFormatSource: 'values',
         writeCapable: true,
         missingPrivileges: [],
+        // 서버 기본 격리 수준이 REPEATABLE READ라 노드 설정을 확인하라는 경고가 붙는다 (TRD §5.3)
+        warnings: ['REPEATABLE_READ_MISFIRE_RACE'],
       });
     });
 
@@ -224,7 +226,18 @@ describe.skipIf(!isMysqlFamily(TEST_DB))(
       ]);
     });
 
-    it('lower_case_table_names=1 서버의 소문자 테이블을 실제 이름 그대로 감지한다', async () => {
+    it('lower_case_table_names=1 서버의 소문자 테이블을 실제 이름 그대로 감지하고, READ COMMITTED 서버에는 격리 수준 경고가 없다', async () => {
+      // 10.3에는 transaction_isolation 별칭이 없다
+      const root = await lower.connectRoot();
+      try {
+        await root.query(
+          flavor === 'mariadb'
+            ? "SET GLOBAL tx_isolation = 'READ-COMMITTED'"
+            : "SET GLOBAL transaction_isolation = 'READ-COMMITTED'",
+        );
+      } finally {
+        await root.end();
+      }
       const info: TargetConnectInfo = {
         kind: flavor,
         host: lower.host,
@@ -245,6 +258,7 @@ describe.skipIf(!isMysqlFamily(TEST_DB))(
         boolFormat: '10',
         boolFormatSource: 'default',
         writeCapable: true,
+        warnings: [],
       });
       expect(set.schedulers).toEqual([]);
     });

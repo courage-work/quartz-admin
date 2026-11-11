@@ -17,6 +17,7 @@ import {
 } from './table-sets.js';
 import type {
   DetectedTableSet,
+  DetectionWarning,
   QuartzDetection,
   QuartzFeatures,
   SchedulerCandidate,
@@ -59,6 +60,7 @@ export async function detectQuartz(
   );
 
   const dbNow = await queryDbNowMillis(conn, dialect);
+  const serverWarnings = await serverIsolationWarnings(conn, dialect);
   const multiplier = options.checkinMultiplier ?? 3;
   const tableSets: DetectedTableSet[] = [];
   const allUnusable: UnusableTableSet[] = [...unusable];
@@ -69,10 +71,41 @@ export async function detectQuartz(
       allUnusable.push({ prefix: set.prefix, reason: 'NO_SCHED_NAME', tables: withoutSchedName });
       continue;
     }
-    tableSets.push(await inspectTableSet(conn, dialect, schema, set, columns, dbNow, multiplier));
+    const inspected = await inspectTableSet(conn, dialect, schema, set, columns, dbNow, multiplier);
+    tableSets.push({ ...inspected, warnings: [...inspected.warnings, ...serverWarnings] });
   }
 
   return { schema, dbNow, tableSets, unusable: allUnusable };
+}
+
+/**
+ * 서버 기본 격리 수준으로 판단한 경고. REPEATABLE READ면 Quartz 노드의 misfire 처리(`doRecoverMisfires`)가
+ * 잠금을 잡기 전에 연 스냅샷으로, 도구나 다른 노드가 잠금 안에서 바꾼 일시정지를 덮어쓸 수 있다 (TRD §5.3)
+ */
+export function isolationWarning(value: unknown): DetectionWarning | null {
+  const level = readString(value)
+    ?.trim()
+    .toUpperCase()
+    .replace(/[\s_]+/g, '-');
+  return level === 'REPEATABLE-READ' ? 'REPEATABLE_READ_MISFIRE_RACE' : null;
+}
+
+async function serverIsolationWarnings(
+  conn: TargetConn,
+  dialect: QuartzDialect,
+): Promise<DetectionWarning[]> {
+  const sql = dialect.catalog.serverIsolation;
+  if (sql === undefined) return [];
+  let rows: Row[];
+  try {
+    rows = await conn.query(sql);
+  } catch (err) {
+    // 변수가 없는 오래된 서버. 연결·시간 문제는 감지 전체를 실패시킨다
+    if (err instanceof TargetError && err.code === 'TARGET_ERROR') return [];
+    throw err;
+  }
+  const warning = isolationWarning(rows[0]?.ISOLATION);
+  return warning === null ? [] : [warning];
 }
 
 async function resolveSchema(

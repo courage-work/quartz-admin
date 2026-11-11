@@ -44,7 +44,14 @@ export const PRIVILEGE_LABELS: Record<TablePrivilege, string> = {
 export const DETECTION_WARNING_LABELS: Record<DetectionWarning, string> = {
   BOOL_FORMAT_MIXED: '불리언 컬럼에 형식이 다른 값이 섞여 있어 가장 많은 형식을 골랐습니다',
   BOOL_FORMAT_UNKNOWN_VALUE: '불리언 컬럼에 알아볼 수 없는 값이 있습니다',
+  REPEATABLE_READ_MISFIRE_RACE:
+    '이 서버의 기본 격리 수준은 REPEATABLE READ입니다. 이 설정의 Quartz 노드는 misfire 처리 중에 일시정지(도구와 Quartz API 모두)를 되돌릴 수 있습니다. 노드에 org.quartz.jobStore.doubleCheckLockMisfireHandler=false를 넣거나 노드 커넥션을 READ COMMITTED로 쓰세요.',
 };
+
+/** 눈에 띄게 보여 줄 감지 경고(운영 위험) */
+export const PROMINENT_DETECTION_WARNINGS: ReadonlySet<DetectionWarning> = new Set([
+  'REPEATABLE_READ_MISFIRE_RACE',
+]);
 
 export function unusableReason(set: UnusableTableSet): string {
   return set.reason === 'MISSING_TABLES'

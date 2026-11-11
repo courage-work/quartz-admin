@@ -102,7 +102,12 @@ export type DetectionWarning =
   /** 불리언 컬럼에 형식이 다른 값이 섞여 있음. 가장 많이 보이는 형식을 골랐다 */
   | 'BOOL_FORMAT_MIXED'
   /** 불리언 컬럼에 알아볼 수 없는 값이 있음 */
-  | 'BOOL_FORMAT_UNKNOWN_VALUE';
+  | 'BOOL_FORMAT_UNKNOWN_VALUE'
+  /**
+   * MySQL·MariaDB 서버의 기본 격리 수준이 REPEATABLE READ. Quartz 노드의 misfire 처리가 잠금을 잡기 전에 읽은
+   * 스냅샷으로 일시정지를 되돌릴 수 있다. 노드 설정을 확인하라고 안내한다 (TRD §5.3)
+   */
+  | 'REPEATABLE_READ_MISFIRE_RACE';
 
 /** 감지한 Quartz 테이블 세트 하나(prefix 하나) */
 export interface DetectedTableSet {

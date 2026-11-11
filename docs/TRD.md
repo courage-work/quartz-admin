@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.27 (B-29 MariaDB 지원 반영) |
+| 문서 버전 | v0.28 (MySQL 계열 misfire 경합 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -41,6 +41,7 @@
 | v0.25 | 2026-11-11 | B-27: §5.2 pg 어댑터 세부(트랜잭션 경계, int8 파서, 시간 제한, 오류 분류), §5.3 PostgreSQL dialect 구현 메모와 잠금 행 재시도의 `SET LOCAL` 재설정, §12 통합 테스트를 DB 중립으로(`QA_IT_DB`, PostgreSQL 전용 스위트), CI에 PostgreSQL 잡 2개. §5.4·§7.5 즉시 실행 트리거의 JOB_DATA를 Quartz처럼 빈 바이트로(Oracle은 NULL로 저장) |
 | v0.26 | 2026-11-11 | B-28: §5.2 조회 제한을 MySQL 세션 `max_execution_time`으로(힌트와 같은 효과), mysql2 어댑터 세부(자리 표시 변환, 트랜잭션 경계, 세션 설정, `FOUND_ROWS`, 오류 분류), §5.3 MySQL dialect 구현 메모(대소문자 무시 정렬 규칙, `lower_case_table_names`), §5.5 MySQL 권한 오류, §12 `QA_IT_DB=mysql`과 CI에 MySQL 잡 2개, 테스트베드 MySQL 드라이버(mysql-connector-j 8.4) |
 | v0.27 | 2026-11-11 | B-29: §5.1 `ed25519` 계정 안내 확정, §5.2 MariaDB 어댑터 세부(`max_statement_time`, 1969, DB 종류를 잘못 고른 경우의 안내), §5.3 MariaDB dialect 메모, §5.4 MariaDB JOB_DATA, §12 `QA_IT_DB=mariadb`과 CI에 MariaDB 잡 2개, 테스트베드 MariaDB 드라이버(MariaDB Connector/J 3.5) |
+| v0.28 | 2026-11-11 | B-28·B-29 후속: §7.2 REPEATABLE READ에서 misfire 처리가 일시정지를 되돌리는 경합(main CI X-05 실패의 원인)과 노드 권장 설정, §5.3·§5.5 서버 기본 격리 수준 감지 경고(`REPEATABLE_READ_MISFIRE_RACE`), §12 MySQL 계열 테스트 노드에 권장 설정 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -349,6 +350,8 @@ MySQL dialect(B-28):
 
 MariaDB dialect(B-29): `mysqlDialect`에서 종류만 바꾼 `mariadbDialect`입니다. Quartz는 MariaDB에도 MySQL 스키마(`tables_mysql_innodb.sql`)를 쓰고, 도구가 쓰는 SQL(백틱, `LIMIT … OFFSET`, `innodb_lock_wait_timeout`과 `DEFAULT` 원복, `UNIX_TIMESTAMP(NOW(3))`, `information_schema`)은 10.3부터 MySQL과 같습니다. 10.3도 `FOR UPDATE WAIT n`을 지원하지만 MySQL과 같은 세션 변수 방식을 씁니다. 기본 정렬 규칙은 10.3이 `latin1_swedish_ci`, 11.4가 `utf8mb4_uca1400_ai_ci`로 둘 다 대소문자를 무시합니다(MySQL과 같은 주의 사항).
 
+MySQL 계열 dialect는 서버 기본 격리 수준 조회(`catalog.serverIsolation`: MySQL `@@GLOBAL.transaction_isolation`, MariaDB `@@GLOBAL.tx_isolation`)를 둡니다. 감지가 이 값으로 `REPEATABLE_READ_MISFIRE_RACE` 경고를 정합니다(§7.2). 변수가 없는 오래된 서버(MySQL 5.7.20 미만)는 조회가 실패하고 경고 없이 넘어갑니다.
+
 Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상 트리거 행도 `SELECT … FOR UPDATE WAIT 5`로 먼저 잠근 뒤 UPDATE합니다. 대기 초과는 Oracle 23에서 `ORA-00054`, 이전 버전에서 `ORA-30006`이며 둘 다 `LOCK_TIMEOUT`입니다.
 
 - Oracle 바인드 이름이 `:1`이 아니라 `:p1`인 이유: oracledb는 배열 바인드를 이름의 숫자가 아니라 SQL에 나온 순서대로 붙입니다. `OFFSET :2 ROWS FETCH NEXT :1 ROWS ONLY`에 `[limit, offset]`을 넘기면 둘이 뒤바뀝니다(S3에서 확인). 어댑터가 배열을 `{ p1, p2, … }` 이름 바인드로 바꿔 넘기므로 `param(n)`의 번호가 그대로 자리를 가리킵니다.
@@ -385,6 +388,7 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 4. **불리언 형식 감지**: `JOB_DETAILS.IS_DURABLE`의 컬럼 타입이 BOOLEAN(Oracle 23 `BOOLEAN`, PostgreSQL `bool`)이면 `native`로 봅니다. MySQL은 `VARCHAR(1)`이라 값으로 판정합니다. 문자·숫자 타입이면 `JOB_DETAILS`의 불리언 컬럼 4개(`IS_DURABLE`, `IS_NONCONCURRENT`, `IS_UPDATE_DATA`, `REQUESTS_RECOVERY`)의 DISTINCT 값으로 `10`/`YN`/`TF` 중 하나를 판정합니다(대소문자와 CHAR 공백 무시, `TRUE`/`FALSE`는 `TF`).
    - 값이 하나도 없으면(잡이 없음) `10`으로 둡니다. Quartz는 `setBoolean`으로 저장하므로 문자 컬럼에는 `'1'`/`'0'`이 들어갑니다. 판정 근거는 `boolFormatSource`(`column-type`/`values`/`default`)로 함께 돌려줍니다.
    - 형식이 섞여 있으면 가장 많이 보이는 형식을 고르고 `BOOL_FORMAT_MIXED`, 알아볼 수 없는 값이 있으면 `BOOL_FORMAT_UNKNOWN_VALUE` 경고를 붙입니다.
+   - MySQL·MariaDB는 서버 기본 격리 수준이 REPEATABLE READ면 모든 세트에 `REPEATABLE_READ_MISFIRE_RACE` 경고를 붙입니다(§7.2). 화면은 이 경고를 눈에 띄는 경고 상자로 보여 주고 노드 권장 설정을 안내합니다.
 5. **SCHED_NAME 목록**: `TRIGGERS`, `JOB_DETAILS`, `SCHEDULER_STATE`, `LOCKS`에서 DISTINCT `SCHED_NAME`을 모아 후보로 제시합니다. 각 후보에 잡 수, 트리거 수, `SCHEDULER_STATE` 행 수, 활성 노드 수(§9.2 정의, 배수 기본 3, 기준은 감지 시점의 DB 현재 시각)를 붙입니다. 잠금 행만 있는 SCHED_NAME(아직 잡을 등록하지 않은 스케줄러)도 후보입니다.
 6. **쓰기 권한 점검**: 트랜잭션 안에서 결과 행이 0개인 문장(`SELECT … WHERE 1 = 0`, `UPDATE … SET SCHED_NAME = SCHED_NAME WHERE 1 = 0`, `INSERT INTO t SELECT * FROM t WHERE 1 = 0`, `DELETE … WHERE 1 = 0`)을 실행한 뒤 ROLLBACK합니다. 권한 검사는 실행 단계에서 일어나므로 행을 건드리거나 행 잠금을 잡지 않고도 권한 유무를 판정할 수 있습니다. 하나라도 실패하면 `write_capable=false`로 두고 빠진 권한을 `missingPrivileges`로 돌려줍니다.
    - 실패한 문장마다 바로 ROLLBACK합니다. Oracle은 실패한 문장만 되돌리지만 PostgreSQL은 트랜잭션 전체가 중단돼 다음 문장이 실패하기 때문입니다.
@@ -571,7 +575,7 @@ S1(B-08)에서 Quartz 2.3.2와 2.5.2 소스로 확인한 내용입니다. 두 �
 | 일시정지와 재개 | `pauseTrigger`, `pauseJob`, `pauseJobs`, `pauseTriggers`, `pauseAll`, `resumeTrigger`, `resumeJob`, `resumeJobs`, `resumeTriggers`, `resumeAll` | |
 | 저장, 교체, 삭제 | `storeTrigger`, `storeJobAndTrigger`, `replaceTrigger`, `removeTrigger`, `removeJob` | `storeTrigger`는 `lockOnInsert=true`(기본) 또는 교체일 때만 잠금 |
 | 발화와 완료 | `triggersFired`, `triggeredJobComplete`, `releaseAcquiredTrigger` | |
-| misfire 처리 | `doRecoverMisfires` (MisfireHandler 스레드) | 잠금 전에 잠금 없이 건수를 먼저 셈(`doubleCheckLockMisfireHandler=true`) |
+| misfire 처리 | `doRecoverMisfires` (MisfireHandler 스레드) | 잠금 전에 잠금 없이 건수를 먼저 셈(`doubleCheckLockMisfireHandler=true`). MySQL 계열에서 경합의 원인(아래) |
 | 클러스터 복구 | `doCheckin` → `clusterRecover` | `STATE_ACCESS` 다음에 `TRIGGER_ACCESS` |
 | **트리거 획득** | `acquireNextTriggers` | `acquireTriggersWithinLock=true`이거나 `batchTriggerAcquisitionMaxCount > 1`일 때만 잠금. 기본 설정에서는 **잠금 없음** |
 
@@ -596,6 +600,9 @@ S1(B-08)에서 Quartz 2.3.2와 2.5.2 소스로 확인한 내용입니다. 두 �
 - **집힌 트리거를 고친 뒤의 클러스터 경합**: 상태를 WAITING으로 되돌려도, 새 스케줄의 실행 시각이 옛 발화 시각 F 직후면 **다른 노드가 F 전에 새 스케줄로 다시 집을 수 있습니다**. 그러면 상태가 다시 ACQUIRED가 되고, 처음 집은 노드는 F에 상태가 ACQUIRED인 것만 확인해(`JSS.triggerFired`는 누가 집었는지 보지 않음) 메모리의 옛 트리거로 발화한 뒤 행을 옛 스케줄로 덮어씁니다. 새 스케줄은 사라지고 옛 시각에 한 번 실행됩니다. 노드는 `idleWaitTime`(기본 30초) 앞까지 집으므로, F 이후 첫 새 실행 시각이 F + 30초보다 이르면 생길 수 있습니다. Quartz 2.5.2 CI에서 실패했고 2노드 테스트베드에서 3번 중 2번 재현했습니다. Quartz `rescheduleJob`도 같은 경합을 가집니다(호출한 노드의 스레드만 깨움). 도구는 이 경우를 거부합니다(§7.6 "집힌 트리거").
 - 남는 경합 창: 획득 2단계(읽기)와 3단계(UPDATE) 사이에 도구가 스케줄을 바꾸고 커밋하면, 노드는 옛 스케줄로 획득합니다. 이 창은 수 ms이고 Quartz 자체의 `rescheduleJob`에도 똑같이 있습니다(기본 설정의 Quartz가 감수하는 위험). 도구는 이 이상을 보장하지 않습니다.
 - 교착: 도구는 항상 "잠금 행 → 대상 행" 순서로 잠급니다. 잠금 없는 획득은 잠금 행을 기다리지 않고 트리거 행을 하나만 성공적으로 잠그므로, 단일 트리거 명령에서는 교착 순환이 생기지 않습니다. 여러 행을 바꾸는 명령(잡, 그룹)은 MySQL의 REPEATABLE READ에서 획득 쪽의 실패한 UPDATE가 행 잠금을 남길 수 있어 교착이 생길 수 있습니다. Quartz 자체의 `pauseTriggers`도 같은 위험을 가집니다. DB가 교착을 감지하면 한쪽을 롤백합니다. 도구 쪽이 롤백되면 `TARGET_ERROR`(재시도 가능)로 응답하고 대상 DB는 바뀌지 않습니다. Quartz 쪽이 롤백되면 노드가 다음 루프에서 다시 획득합니다(`QST.run`의 `acquiresFailed` 처리).
+- **MySQL·MariaDB REPEATABLE READ에서 misfire 처리가 일시정지를 되돌리는 경합** (B-28·B-29 뒤 main CI의 X-05 실패에서 발견): MisfireHandler(`JSS.doRecoverMisfires`)는 잠금을 잡기 **전에** 같은 트랜잭션에서 지난 트리거 수를 잠금 없이 셉니다. MySQL·MariaDB의 기본 격리 수준(REPEATABLE READ)에서는 이 첫 조회 때 스냅샷이 고정됩니다. 그 사이 도구(또는 다른 노드)가 `TRIGGER_ACCESS` 안에서 일시정지하고 커밋하면, 잠금을 기다리던 MisfireHandler는 일시정지 **전** 스냅샷으로 지난 WAITING 트리거와 `PAUSED_TRIGGER_GRPS`를 읽고, `storeTrigger(forceState=false)`로 그 트리거를 WAITING으로 덮어씁니다. 일시정지한 트리거가 그대로 다시 돕니다. Oracle·PostgreSQL(READ COMMITTED)은 문장마다 최신 데이터를 보므로 생기지 않습니다.
+  - 재현과 확인: 2노드 테스트베드(MySQL 8.4)에서 X-05만 돌리면 8번 중 4번 실패했고, 실패 때 50개를 PAUSED로 바꾼 뒤 1.5초 안에 19개가 WAITING으로 돌아가 계속 발화했습니다. 노드에 `org.quartz.jobStore.doubleCheckLockMisfireHandler=false`(잠금을 먼저 잡고 읽음)를 주면 5번 모두 통과했습니다. Quartz API의 일시정지는 7번 모두 통과했습니다. 같은 창이 있지만 잠금을 쥐는 시간이 짧아(노드 안에서 왕복 7번) 걸리기 어렵고, 도구는 다른 네트워크에서 왕복 10번을 해 창이 넓습니다. 왕복 수를 한두 번 줄여도 창은 거의 그대로라 도구 쪽 SQL은 바꾸지 않았습니다.
+  - 도구가 노드의 스냅샷을 바꿀 수는 없으므로 **노드 설정이 필요합니다**. MySQL·MariaDB의 Quartz 노드는 `org.quartz.jobStore.doubleCheckLockMisfireHandler=false`를 넣거나, 노드 커넥션의 격리 수준을 READ COMMITTED로 둡니다(JDBC URL `sessionVariables=transaction_isolation='READ-COMMITTED'`, MariaDB Connector/J는 `sessionVariables=tx_isolation='READ-COMMITTED'`, 또는 서버 기본값). 감지는 서버 기본 격리 수준이 REPEATABLE READ면 `REPEATABLE_READ_MISFIRE_RACE` 경고를 붙여 이 설정을 확인하라고 안내합니다(§5.5). 노드가 실제로 어떤 설정인지는 DB에서 알 수 없어, 노드를 이미 설정했어도 경고는 남습니다.
 - Quartz의 misfire 판정과 노드 장애 판정은 **노드의 시계**(`System.currentTimeMillis()`)를 씁니다. 도구는 DB 시각을 쓰므로, 노드와 DB의 시계 차이만큼 경계값 판정이 어긋날 수 있습니다. 도구는 경계값에 걸리는 판단을 하지 않도록 설계합니다(§7.4의 재개 거부 조건은 "지났는지"만 봄).
 
 ### 7.3 명령별 동작
@@ -1022,6 +1029,7 @@ S2에서 확인한 사항:
   - 테스트베드는 JDBC 드라이버 속성이 없으면(PostgreSQL) `driverProperties`를 넘기지 않습니다. 빈 값을 넘기면 Quartz가 null로 setter를 불러 기동이 실패합니다.
   - MySQL(B-28): 테스트베드 드라이버는 mysql-connector-j 8.4입니다(9.x는 5.7 지원을 뺐음). MySQL은 DDL 앞에서 스스로 커밋하므로 `TestConnection`도 DDL에서 트랜잭션을 닫은 것으로 봅니다. 5.7 이미지는 amd64 전용입니다.
   - MariaDB(B-29): 테스트베드 드라이버는 MariaDB Connector/J 3.5(`jdbc:mariadb://`)입니다. Quartz delegate는 MySQL과 같은 `StdJDBCDelegate`이고, 불리언은 `'1'`/`'0'`으로 저장됩니다(감지 테스트에서 확인).
+  - MySQL 계열 노드는 운영 권장 설정 `org.quartz.jobStore.doubleCheckLockMisfireHandler=false`로 띄웁니다(`MYSQL_FAMILY_QUARTZ_PROPERTIES`, §7.2). 기본값이면 X-05(계속 발화하는 그룹 일시정지)가 misfire 처리의 경합으로 실패합니다. 기본값을 보려면 `quartzProperties`로 `true`를 넘깁니다.
 - MVP 기능 개발 동안은 PR에서 CI를 돌리지 않습니다. 워크플로는 main 푸시와 수동 실행(`workflow_dispatch`)에만 돌고, main 브랜치 보호의 필수 검사(`verify`)도 해제했습니다. PR을 올리기 전에는 로컬에서 `pnpm format:check`, `build`, `lint`, `typecheck`, `test`(대상 DB 코드를 바꿨으면 `test:integration`도)를 돌립니다. MVP 이후 CI/CD를 정리할 때 PR 트리거와 필수 검사를 다시 켭니다.
 
 ### 12.3 구현 전 확인 항목 (스파이크)
