@@ -34,6 +34,7 @@ const BLOB_LITERAL = {
   oracle: "HEXTORAW('ACED0005')",
   postgres: "decode('ACED0005', 'hex')",
   mysql: "X'ACED0005'",
+  mariadb: "X'ACED0005'",
 } as const;
 
 /** 차등 테스트의 두 기준 인스턴스. 같은 초기 상태를 만들고 한쪽은 Quartz API, 다른 쪽은 도구로 명령한다 */

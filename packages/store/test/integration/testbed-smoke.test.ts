@@ -14,6 +14,7 @@ import {
   type QuartzCluster,
   type TestbedNode,
   TEST_DB,
+  isMysqlFamily,
   TEST_DB_LABEL,
   type TestConnection,
 } from '../support/index.js';
@@ -191,7 +192,7 @@ describe(`quartz-testbed 2노드 클러스터 (${TEST_DB_LABEL}, Quartz ${QUARTZ
     },
   );
 
-  it.skipIf(TEST_DB !== 'mysql')(
+  it.skipIf(!isMysqlFamily(TEST_DB))(
     '사용자 지정 prefix 스키마를 같은 DB에 만들 수 있고, 불리언은 VARCHAR(1)·BLOB은 BLOB이다',
     async () => {
       await initQuartzSchema(conn, { prefix: 'APP_' });

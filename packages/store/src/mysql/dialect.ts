@@ -67,3 +67,10 @@ export const mysqlDialect: QuartzDialect = {
   readLong,
   isDuplicateKey: (err) => err instanceof TargetError && err.driverCode === MYSQL_DUP_ENTRY,
 };
+
+/**
+ * MariaDB용 `QuartzDialect` (B-29). Quartz는 MariaDB에 MySQL 스키마(`tables_mysql_innodb.sql`)를 쓰고,
+ * 이 도구가 쓰는 SQL(백틱, `LIMIT … OFFSET`, `innodb_lock_wait_timeout`, `UNIX_TIMESTAMP(NOW(3))`,
+ * `information_schema`)은 10.3부터 MySQL과 같다. 다른 것은 세션 시간 제한 변수뿐이고 어댑터가 맡는다.
+ */
+export const mariadbDialect: QuartzDialect = { ...mysqlDialect, kind: 'mariadb' };

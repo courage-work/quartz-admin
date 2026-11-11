@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.26 (B-28 MySQL 지원 반영) |
+| 문서 버전 | v0.27 (B-29 MariaDB 지원 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -40,6 +40,7 @@
 | v0.24 | 2026-11-11 | B-25: §8 API에 채널·알림 센터, 규칙의 `channelIds`. §9.4 발송 구현(워커 주기·시간 제한·재시도, 요약 기준, 인앱 처리, 메시지 내용, 웹훅 URL 검사, 읽지 않음 정의, 확인, 발송 실패 표시, 채널 관리). §3.3 알림 보존 정리 구현. 감사 작업 종류 `channel.*`, `alert.ack` |
 | v0.25 | 2026-11-11 | B-27: §5.2 pg 어댑터 세부(트랜잭션 경계, int8 파서, 시간 제한, 오류 분류), §5.3 PostgreSQL dialect 구현 메모와 잠금 행 재시도의 `SET LOCAL` 재설정, §12 통합 테스트를 DB 중립으로(`QA_IT_DB`, PostgreSQL 전용 스위트), CI에 PostgreSQL 잡 2개. §5.4·§7.5 즉시 실행 트리거의 JOB_DATA를 Quartz처럼 빈 바이트로(Oracle은 NULL로 저장) |
 | v0.26 | 2026-11-11 | B-28: §5.2 조회 제한을 MySQL 세션 `max_execution_time`으로(힌트와 같은 효과), mysql2 어댑터 세부(자리 표시 변환, 트랜잭션 경계, 세션 설정, `FOUND_ROWS`, 오류 분류), §5.3 MySQL dialect 구현 메모(대소문자 무시 정렬 규칙, `lower_case_table_names`), §5.5 MySQL 권한 오류, §12 `QA_IT_DB=mysql`과 CI에 MySQL 잡 2개, 테스트베드 MySQL 드라이버(mysql-connector-j 8.4) |
+| v0.27 | 2026-11-11 | B-29: §5.1 `ed25519` 계정 안내 확정, §5.2 MariaDB 어댑터 세부(`max_statement_time`, 1969, DB 종류를 잘못 고른 경우의 안내), §5.3 MariaDB dialect 메모, §5.4 MariaDB JOB_DATA, §12 `QA_IT_DB=mariadb`과 CI에 MariaDB 잡 2개, 테스트베드 MariaDB 드라이버(MariaDB Connector/J 3.5) |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -248,7 +249,7 @@ quartz-admin/
 - Quartz 테스트 기준 버전은 **2.3.2**(사내 주력)와 **2.5.x 최신**입니다.
 - Oracle 12.1, 18c, 19c용 공식 컨테이너가 없어 CI에서는 검증하지 못합니다. 대신 SQL을 12.1 문법(`OFFSET … FETCH`, `FOR UPDATE WAIT n`) 안에서만 쓰고, 출시 전에 사내 19c(가능하면 12c) 인스턴스로 수동 점검합니다.
 - MySQL 5.7을 지원하므로 CTE, 윈도 함수, `SKIP LOCKED`/`NOWAIT`(8.0 이상)를 쓰지 않습니다.
-- `mysql2`는 MariaDB 전용 인증 플러그인 `ed25519`를 지원하지 않습니다. 이 플러그인을 쓰는 계정은 접속 테스트에서 안내합니다. 필요하면 `mariadb` 커넥터용 어댑터를 따로 추가합니다.
+- `mysql2`는 MariaDB 전용 인증 플러그인 `ed25519`를 지원하지 않습니다. 이 플러그인을 쓰는 계정으로 접속하면 `TARGET_AUTH_FAILED`로 실패하고, 메시지가 "이 인증 방식은 지원하지 않으니 `mysql_native_password` 계정을 쓰라"고 안내합니다(B-29, 연결 테스트 화면에 그대로 보임). `authPlugins`로 직접 붙이지 않은 이유: MariaDB `ed25519`는 비밀번호의 SHA-512를 서명 키로 바로 쓰는 변형이라 Node의 표준 Ed25519(32바이트 시드에서 키를 만듦)로는 서명할 수 없습니다. 필요하면 `mariadb` 커넥터용 어댑터를 따로 추가합니다.
 
 ### 5.2 커넥션 풀 관리 (NFR-PERF-04, NFR-REL-01)
 
@@ -298,6 +299,13 @@ MySQL 어댑터 세부(B-28, `packages/store/src/mysql/`):
 - **오류 분류**: errno로 나눕니다. 1044·1045 → `TARGET_AUTH_FAILED`, 1049(DB 없음)·1040·1053·1927·4031·2002·2003·2006·2013 → `TARGET_UNREACHABLE`, 3024·1317 → `TARGET_TIMEOUT`, 1205·3572 → `LOCK_TIMEOUT`, 1213(교착)은 다시 시도할 수 있는 `TARGET_ERROR`, 그 밖(1142 권한 없음, 1062 `ER_DUP_ENTRY` 등)은 `TARGET_ERROR`입니다. errno가 없는 mysql2 연결·시간 초과 오류(`PROTOCOL_*`, Node 소켓 오류)도 분류합니다. `driverCode`는 mysql2의 `code`(`ER_DUP_ENTRY` 등)입니다. 권한이 없는 계정은 없는 DB에도 1044로 답하므로(DB가 있는지 알려주지 않음) 인증 실패로 보입니다.
 - **값**: BIGINT·`COUNT(*)`는 number, DECIMAL은 number, BLOB은 Buffer, 날짜는 문자열(UTC)로 받습니다. Quartz MySQL 스키마의 불리언은 `VARCHAR(1)`이라 문자열 `'1'`/`'0'`입니다.
 
+MariaDB 어댑터 세부(B-29, `MariadbAdapter`):
+
+- MySQL 어댑터와 같은 `mysql2` 커넥션 코드를 쓰고, 종류(`mariadb`)와 세션 시간 제한 변수만 다릅니다. 자리 표시, 트랜잭션 경계, 격리 수준, `FOUND_ROWS`, 오류 분류는 같습니다.
+- **조회 제한**: MariaDB에는 `max_execution_time`이 없어 세션 `max_statement_time`(초, 소수 3자리)을 씁니다. 넘기면 1969 `ER_STATEMENT_TIMEOUT` → `TARGET_TIMEOUT`입니다. MySQL과 달리 SELECT뿐 아니라 쓰기 문장에도 걸리지만, 명령의 문장은 잠금 대기(`innodb_lock_wait_timeout`, 기본 5초)보다 짧게 끝나므로 10초 제한이 문제 되지 않습니다.
+- **DB 종류를 잘못 고른 경우**: MySQL로 등록한 MariaDB 서버(또는 반대)는 접속 직후 시간 제한 변수를 몰라 1193 `ER_UNKNOWN_SYSTEM_VARIABLE`이 납니다. 이때 "MariaDB(MySQL) 서버로 보입니다. 접속의 DB 종류를 바꾸세요"라는 `TARGET_ERROR`로 바꿔 연결 테스트에 보여 줍니다.
+- 격리 수준 확인 변수는 10.3에 `transaction_isolation` 별칭이 없어 `tx_isolation`입니다(설정 문장은 같음).
+
 ### 5.3 QuartzDialect
 
 ```ts
@@ -339,6 +347,8 @@ MySQL dialect(B-28):
 - 잠금 대기 제한은 세션 변수라 트랜잭션이 끝나도 남습니다. 그래서 `afterLockedTx`가 `SET SESSION innodb_lock_wait_timeout = DEFAULT`로 되돌리고, 풀에 돌아간 커넥션의 다른 요청에 영향을 주지 않습니다. 대기 초과는 1205 `ER_LOCK_WAIT_TIMEOUT` → `LOCK_TIMEOUT`입니다. InnoDB는 1205가 나도 트랜잭션을 되돌리지 않으므로(문장만 실패) 호출하는 쪽이 ROLLBACK합니다.
 - 고유 키 중복은 `ER_DUP_ENTRY`(1062)이며 `isDuplicateKey`가 이것으로 판정합니다.
 
+MariaDB dialect(B-29): `mysqlDialect`에서 종류만 바꾼 `mariadbDialect`입니다. Quartz는 MariaDB에도 MySQL 스키마(`tables_mysql_innodb.sql`)를 쓰고, 도구가 쓰는 SQL(백틱, `LIMIT … OFFSET`, `innodb_lock_wait_timeout`과 `DEFAULT` 원복, `UNIX_TIMESTAMP(NOW(3))`, `information_schema`)은 10.3부터 MySQL과 같습니다. 10.3도 `FOR UPDATE WAIT n`을 지원하지만 MySQL과 같은 세션 변수 방식을 씁니다. 기본 정렬 규칙은 10.3이 `latin1_swedish_ci`, 11.4가 `utf8mb4_uca1400_ai_ci`로 둘 다 대소문자를 무시합니다(MySQL과 같은 주의 사항).
+
 Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상 트리거 행도 `SELECT … FOR UPDATE WAIT 5`로 먼저 잠근 뒤 UPDATE합니다. 대기 초과는 Oracle 23에서 `ORA-00054`, 이전 버전에서 `ORA-30006`이며 둘 다 `LOCK_TIMEOUT`입니다.
 
 - Oracle 바인드 이름이 `:1`이 아니라 `:p1`인 이유: oracledb는 배열 바인드를 이름의 숫자가 아니라 SQL에 나온 순서대로 붙입니다. `OFFSET :2 ROWS FETCH NEXT :1 ROWS ONLY`에 `[limit, offset]`을 넘기면 둘이 뒤바뀝니다(S3에서 확인). 어댑터가 배열을 `{ p1, p2, … }` 이름 바인드로 바꿔 넘기므로 `param(n)`의 번호가 그대로 자리를 가리킵니다.
@@ -348,7 +358,7 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 
 - 시각 컬럼(NEXT_FIRE_TIME 등)은 epoch ms입니다. 값이 없을 때 Quartz가 저장하는 값은 경로마다 다릅니다. `NEXT_FIRE_TIME`은 INSERT(`Delegate.insertTrigger`)에서는 SQL `NULL`, UPDATE(`Delegate.updateTrigger`)에서는 `-1`이고, `PREV_FIRE_TIME`은 항상 `-1`, `END_TIME`은 `0`입니다. Quartz는 읽을 때 `> 0`인 값만 유효로 봅니다(`Delegate.selectTriggerStatus`). 도구도 `NULL`과 `0` 이하를 모두 `null`로 바꿉니다(`readTime`). 이 규칙은 시각 컬럼에만 씁니다. `REPEAT_COUNT`의 -1(무한 반복)이나 `TIMES_TRIGGERED`의 0처럼 의미 있는 값을 지우지 않도록, 정수 컬럼은 `readLong`(SQL `NULL`만 `null`)으로 읽습니다.
 - 불리언 컬럼은 읽을 때만 정규화합니다. MVP의 쓰기 작업은 불리언 컬럼을 건드리지 않습니다. 새로 넣는 행은 `TRIGGERS`, `SIMPLE_TRIGGERS`, `PAUSED_TRIGGER_GRPS`, `LOCKS`뿐이고, 이 테이블들에는 불리언 컬럼이 없습니다.
-- JOB_DATA(BLOB)는 읽기만 합니다. 즉시 실행 트리거의 JOB_DATA는 Quartz와 같게 넣습니다. Quartz는 맵이 비어 있으면 직렬화하지 않고(`Delegate.insertTrigger`의 `getJobDataMap().size() > 0` 검사) `StdJDBCDelegate.setBytes`가 null 대신 **빈 바이트 배열**을 씁니다. Oracle은 빈 값을 `NULL`로 저장하고, PostgreSQL(BYTEA)과 MySQL(BLOB)은 빈 값 그대로 저장합니다(B-27, B-28 차등 테스트에서 확인). 그래서 도구는 Oracle에서는 컬럼을 빼서 `NULL`, 그 밖의 DB에서는 빈 바이트를 넣습니다. 읽을 때는 둘 다 "데이터 없음"(`readBlob`이 `null`)입니다.
+- JOB_DATA(BLOB)는 읽기만 합니다. 즉시 실행 트리거의 JOB_DATA는 Quartz와 같게 넣습니다. Quartz는 맵이 비어 있으면 직렬화하지 않고(`Delegate.insertTrigger`의 `getJobDataMap().size() > 0` 검사) `StdJDBCDelegate.setBytes`가 null 대신 **빈 바이트 배열**을 씁니다. Oracle은 빈 값을 `NULL`로 저장하고, PostgreSQL(BYTEA)과 MySQL·MariaDB(BLOB)는 빈 값 그대로 저장합니다(B-27~B-29 차등 테스트에서 확인). 그래서 도구는 Oracle에서는 컬럼을 빼서 `NULL`, 그 밖의 DB에서는 빈 바이트를 넣습니다. 읽을 때는 둘 다 "데이터 없음"(`readBlob`이 `null`)입니다.
 - Oracle에서는 빈 문자열이 NULL이 되므로, DESCRIPTION 비교는 `IS NULL`과 함께 처리합니다.
 
 ### 5.5 자동 감지 (FR-CON-03, FR-CON-04)
@@ -984,13 +994,13 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 통합 테스트 헬퍼는 `packages/store/test/support/`에 있고 `pnpm test:integration`(Docker 필요)으로 돕니다. 단위 테스트(`pnpm test`)와는 분리돼 있습니다.
 
-화면이나 API를 손으로 확인할 때는 `pnpm --filter @qa/store testbed:up`으로 Oracle Free 23(`QA_IT_DB=postgres`면 PostgreSQL, `mysql`이면 MySQL)과 2노드 클러스터(잡 2개)를 띄웁니다. 접속 정보는 `packages/store/.testbed.json`에 쓰이고, 같은 위치에 `.testbed.stop` 파일을 만들거나 `QA_TESTBED_MINUTES`(기본 120)분이 지나면 끝납니다(두 파일은 git 제외 대상). CI에서는 돌리지 않습니다.
+화면이나 API를 손으로 확인할 때는 `pnpm --filter @qa/store testbed:up`으로 Oracle Free 23(`QA_IT_DB=postgres`면 PostgreSQL, `mysql`이면 MySQL, `mariadb`면 MariaDB)과 2노드 클러스터(잡 2개)를 띄웁니다. 접속 정보는 `packages/store/.testbed.json`에 쓰이고, 같은 위치에 `.testbed.stop` 파일을 만들거나 `QA_TESTBED_MINUTES`(기본 120)분이 지나면 끝납니다(두 파일은 git 제외 대상). CI에서는 돌리지 않습니다.
 
 | 헬퍼 | 내용 |
 | --- | --- |
 | `startOracle` | Oracle Free 23(`gvenzl/oracle-free:23-slim-faststart`) 기동, 앱 계정, SYSTEM 접속, 추가 계정 생성 |
 | `startPostgres` | PostgreSQL(`postgres:<QA_IT_POSTGRES_VERSION>-alpine`, 기본 17) 기동, 추가 역할과 같은 이름의 스키마 생성 |
-| `startMysql` | MySQL(`mysql:<QA_IT_MYSQL_VERSION>`, 기본 8.4) 기동, 앱 계정(quartz DB 전체 권한), root 접속, 권한 없는 추가 계정 생성, `lower_case_table_names=1` 변형 |
+| `startMysql` | MySQL(`mysql:<QA_IT_MYSQL_VERSION>`, 기본 8.4) 또는 MariaDB(`flavor: 'mariadb'`, `mariadb:<QA_IT_MARIADB_VERSION>`, 기본 11.4) 기동, 앱 계정(quartz DB 전체 권한), root 접속, 권한 없는 추가 계정 생성, `lower_case_table_names=1` 변형 |
 | `startTestDb` / `TestConnection` / `schedulerContext` | `QA_IT_DB`의 DB 기동, DB 중립 검증 SQL 연결, 테스트용 스케줄러 컨텍스트 |
 | `initQuartzSchema` / `dropQuartzSchema` | Quartz 스키마 생성·삭제(prefix, 대소문자, `oracle`/`oracle23`/`postgres`/`mysql` 변형) |
 | `startTestbedNode` / `startQuartzCluster` | 테스트베드 노드 기동, DB + 스키마 + N노드 클러스터(기본 2) 기동과 체크인 대기 |
@@ -1006,11 +1016,12 @@ S2에서 확인한 사항:
 ### 12.2 환경 메모
 
 - Apple Silicon: Oracle XE 21과 MySQL 5.7 이미지는 amd64 전용이라 로컬에서는 에뮬레이션으로 느리게 돕니다. 로컬 기본값은 Oracle Free 23과 각 DB 최신 버전으로 두고, 전체 매트릭스는 CI(x64 러너)에서 돌립니다. `gvenzl/oracle-free:23-slim-faststart`와 테스트베드 베이스 이미지는 arm64를 제공합니다.
-- CI는 GitHub Actions를 가정합니다. DB별로 잡을 나눠 병렬로 실행합니다. 지금은 `integration-oracle` 잡이 Quartz 2.3.2와 2.5.2 매트릭스로, `integration-postgres` 잡이 PostgreSQL 11 × Quartz 2.3.2와 PostgreSQL 17 × Quartz 2.5.2로, `integration-mysql` 잡이 MySQL 5.7 × Quartz 2.3.2와 MySQL 8.4 × Quartz 2.5.2로 테스트베드 이미지를 빌드하고(`QA_IT_TESTBED_IMAGE`) 통합 테스트를 돌립니다. DB·버전·Quartz의 전체 조합은 B-30에서 맞춥니다.
-- **DB 중립 통합 테스트**(B-27): 같은 테스트 파일이 `QA_IT_DB`(`oracle` 기본, `postgres`, `mysql`(B-28))로 고른 DB에서 돕니다. 테스트의 준비·검증 SQL은 `TestConnection`(oracledb `Connection`과 같은 모양)으로 실행하고, PostgreSQL에서는 `:1`·`:name` 바인드를 `$1`로(MySQL에서는 나온 순서대로 `?`로), `FOR UPDATE WAIT n`을 `FOR UPDATE`로 바꾸며 DDL은 Oracle처럼 바로 반영합니다. 테이블 이름은 따옴표 없는 대문자(`QRTZ_TRIGGERS`)로 써서 두 DB에서 같은 SQL이 돕니다. 스케줄러 컨텍스트는 `schedulerContext(db, schedName)`, 잠금 행이 풀렸는지는 `triggerAccessIsFree`로 봅니다. Oracle 전용(`oracle-store`, `detect`), PostgreSQL 전용(`postgres-store`, `detect-postgres`), MySQL 전용(`mysql-store`, `detect-mysql`) 스위트는 다른 DB에서 건너뜁니다.
+- CI는 GitHub Actions를 가정합니다. DB별로 잡을 나눠 병렬로 실행합니다. 지금은 `integration-oracle` 잡이 Quartz 2.3.2와 2.5.2 매트릭스로, `integration-postgres` 잡이 PostgreSQL 11 × Quartz 2.3.2와 PostgreSQL 17 × Quartz 2.5.2로, `integration-mysql` 잡이 MySQL 5.7 × Quartz 2.3.2와 MySQL 8.4 × Quartz 2.5.2로, `integration-mariadb` 잡이 MariaDB 10.3 × Quartz 2.3.2와 MariaDB 11.4 × Quartz 2.5.2로 테스트베드 이미지를 빌드하고(`QA_IT_TESTBED_IMAGE`) 통합 테스트를 돌립니다. DB·버전·Quartz의 전체 조합은 B-30에서 맞춥니다.
+- **DB 중립 통합 테스트**(B-27): 같은 테스트 파일이 `QA_IT_DB`(`oracle` 기본, `postgres`, `mysql`(B-28), `mariadb`(B-29))로 고른 DB에서 돕니다. 테스트의 준비·검증 SQL은 `TestConnection`(oracledb `Connection`과 같은 모양)으로 실행하고, PostgreSQL에서는 `:1`·`:name` 바인드를 `$1`로(MySQL에서는 나온 순서대로 `?`로), `FOR UPDATE WAIT n`을 `FOR UPDATE`로 바꾸며 DDL은 Oracle처럼 바로 반영합니다. 테이블 이름은 따옴표 없는 대문자(`QRTZ_TRIGGERS`)로 써서 두 DB에서 같은 SQL이 돕니다. 스케줄러 컨텍스트는 `schedulerContext(db, schedName)`, 잠금 행이 풀렸는지는 `triggerAccessIsFree`로 봅니다. Oracle 전용(`oracle-store`, `detect`), PostgreSQL 전용(`postgres-store`, `detect-postgres`), MySQL 계열 전용(`mysql-store`, `detect-mysql`, MySQL과 MariaDB에서 돎) 스위트는 다른 DB에서 건너뜁니다. MySQL과 MariaDB에서 다르게 확인할 것(세션 변수 이름, `ed25519`)만 테스트 안에서 나눕니다.
   - PostgreSQL 조회 성능 테스트(트리거 1만 개 p95)는 데이터를 넣은 뒤 `ANALYZE`합니다. 넣은 직후에는 통계가 없어 계획이 크게 틀리기 때문입니다(정렬·깊은 페이지가 1.4~3초). 운영 Quartz 테이블은 autovacuum이 통계를 채웁니다.
   - 테스트베드는 JDBC 드라이버 속성이 없으면(PostgreSQL) `driverProperties`를 넘기지 않습니다. 빈 값을 넘기면 Quartz가 null로 setter를 불러 기동이 실패합니다.
   - MySQL(B-28): 테스트베드 드라이버는 mysql-connector-j 8.4입니다(9.x는 5.7 지원을 뺐음). MySQL은 DDL 앞에서 스스로 커밋하므로 `TestConnection`도 DDL에서 트랜잭션을 닫은 것으로 봅니다. 5.7 이미지는 amd64 전용입니다.
+  - MariaDB(B-29): 테스트베드 드라이버는 MariaDB Connector/J 3.5(`jdbc:mariadb://`)입니다. Quartz delegate는 MySQL과 같은 `StdJDBCDelegate`이고, 불리언은 `'1'`/`'0'`으로 저장됩니다(감지 테스트에서 확인).
 - MVP 기능 개발 동안은 PR에서 CI를 돌리지 않습니다. 워크플로는 main 푸시와 수동 실행(`workflow_dispatch`)에만 돌고, main 브랜치 보호의 필수 검사(`verify`)도 해제했습니다. PR을 올리기 전에는 로컬에서 `pnpm format:check`, `build`, `lint`, `typecheck`, `test`(대상 DB 코드를 바꿨으면 `test:integration`도)를 돌립니다. MVP 이후 CI/CD를 정리할 때 PR 트리거와 필수 검사를 다시 켭니다.
 
 ### 12.3 구현 전 확인 항목 (스파이크)
@@ -1114,7 +1125,7 @@ B-17~B-21의 통합 테스트와 차등 테스트가 이 목록을 씁니다. �
 
 | ID | 초기 상태 | 명령 | 기대 결과 | 비교 |
 | --- | --- | --- | --- | --- |
-| T-01 | 잡 J, 일시정지 없음 | triggerJob J | 새 TRIGGERS 행: 그룹 `DEFAULT`, 이름 `MT_`로 시작, TYPE `SIMPLE`, 상태 `W`, PREV −1, END 0, PRIORITY 5, MISFIRE_INSTR 0, JOB_DATA 빈 값(Oracle NULL, PostgreSQL 빈 BYTEA, MySQL 빈 BLOB), CALENDAR NULL. SIMPLE_TRIGGERS (0, 0, 0). START_TIME = NFT ≈ dbNow | 차등 |
+| T-01 | 잡 J, 일시정지 없음 | triggerJob J | 새 TRIGGERS 행: 그룹 `DEFAULT`, 이름 `MT_`로 시작, TYPE `SIMPLE`, 상태 `W`, PREV −1, END 0, PRIORITY 5, MISFIRE_INSTR 0, JOB_DATA 빈 값(Oracle NULL, PostgreSQL 빈 BYTEA, MySQL·MariaDB 빈 BLOB), CALENDAR NULL. SIMPLE_TRIGGERS (0, 0, 0). START_TIME = NFT ≈ dbNow | 차등 |
 | T-02 | `PTG`에 `DEFAULT` | triggerJob J | 상태 `P`. `PTG` 변화 없음 | 차등 |
 | T-03 | `PTG`에 `ALL`만 | triggerJob J | 상태 `P`. `PTG`에 `DEFAULT` 행 INSERT | 차등 |
 | T-04 | JN 실행 중 | triggerJob JN | 상태 `B` | 차등 |

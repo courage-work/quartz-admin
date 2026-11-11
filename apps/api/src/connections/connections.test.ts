@@ -209,10 +209,16 @@ describe('접속 등록·조회 (FR-CON-01, 06)', () => {
       .expect(400);
     expect(JSON.stringify(both.body)).toContain('서비스 이름과 SID 중 하나만');
 
-    const mariadb = await t
-      .send('post', '/connections', { ...oracleInput, dbType: 'mariadb', database: 'q' }, cookie)
+    const unknownKind = await t
+      .send('post', '/connections', { ...oracleInput, dbType: 'sqlserver', database: 'q' }, cookie)
       .expect(400);
-    expect(JSON.stringify(mariadb.body)).toContain('아직 지원하지 않는 DB 종류');
+    expect(JSON.stringify(unknownKind.body)).toContain('DB 종류를 고르세요');
+
+    // MariaDB도 DB 이름이 필요하다 (B-29)
+    const mariaNoDb = await t
+      .send('post', '/connections', { ...oracleInput, dbType: 'mariadb', port: 3306 }, cookie)
+      .expect(400);
+    expect(JSON.stringify(mariaNoDb.body)).toContain('DB 이름을 입력하세요');
 
     // PostgreSQL은 DB 이름이 필요하다 (B-27)
     const pgNoDb = await t

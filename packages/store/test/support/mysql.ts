@@ -9,6 +9,11 @@ import {
 
 /** MySQL 버전. `QA_IT_MYSQL_VERSION`으로 바꾼다(예: 5.7). 이미지는 `mysql:<버전>` */
 export const MYSQL_VERSION = process.env.QA_IT_MYSQL_VERSION ?? '8.4';
+/** MariaDB 버전. `QA_IT_MARIADB_VERSION`으로 바꾼다(예: 10.3). 이미지는 `mariadb:<버전>` (B-29) */
+export const MARIADB_VERSION = process.env.QA_IT_MARIADB_VERSION ?? '11.4';
+
+/** MySQL 계열 서버 종류 */
+export type MysqlFlavor = 'mysql' | 'mariadb';
 
 const MYSQL_PORT = 3306;
 const DATABASE = 'quartz';
@@ -16,10 +21,12 @@ const DATABASE = 'quartz';
 const ROOT_PASSWORD = 'QaRoot_test1';
 
 export interface StartMysqlOptions {
+  /** 기본 `mysql` */
+  flavor?: MysqlFlavor;
   network?: StartedNetwork;
-  /** 기본 `mysql:<MYSQL_VERSION>` */
+  /** 기본 `mysql:<MYSQL_VERSION>` 또는 `mariadb:<MARIADB_VERSION>` */
   image?: string;
-  /** 네트워크 안 호스트 이름. 기본 `mysql` */
+  /** 네트워크 안 호스트 이름. 기본은 flavor 이름 */
   alias?: string;
   /** 앱 계정(quartz DB에 모든 권한). 기본 `quartz` */
   user?: string;
@@ -34,6 +41,9 @@ export interface MysqlCredentials {
 }
 
 export interface MysqlFixture {
+  readonly flavor: MysqlFlavor;
+  /** describe 제목용(`MySQL 8.4`, `MariaDB 11.4`) */
+  readonly label: string;
   readonly container: StartedTestContainer;
   readonly network: StartedNetwork;
   readonly host: string;
@@ -55,12 +65,17 @@ export interface MysqlFixture {
 }
 
 export async function startMysql(options: StartMysqlOptions = {}): Promise<MysqlFixture> {
+  const flavor = options.flavor ?? 'mysql';
   const ownNetwork = options.network === undefined;
   const network = options.network ?? (await new Network().start());
-  const alias = options.alias ?? 'mysql';
+  const alias = options.alias ?? flavor;
   const user = options.user ?? 'quartz';
   const password = options.password ?? 'Quartz_test1';
-  const image = options.image ?? process.env.QA_IT_MYSQL_IMAGE ?? `mysql:${MYSQL_VERSION}`;
+  const image =
+    options.image ??
+    (flavor === 'mariadb'
+      ? (process.env.QA_IT_MARIADB_IMAGE ?? `mariadb:${MARIADB_VERSION}`)
+      : (process.env.QA_IT_MYSQL_IMAGE ?? `mysql:${MYSQL_VERSION}`));
 
   let container = new GenericContainer(image)
     .withNetwork(network)
@@ -72,7 +87,8 @@ export async function startMysql(options: StartMysqlOptions = {}): Promise<Mysql
       MYSQL_USER: user,
       MYSQL_PASSWORD: password,
     })
-    // 초기화용 임시 서버는 port: 0으로, 실제 서버는 port: 3306으로 준비를 알린다(X Plugin의 33060은 제외)
+    // 초기화용 임시 서버는 port: 0으로, 실제 서버는 port: 3306으로 준비를 알린다(X Plugin의 33060은 제외).
+    // MariaDB 이미지도 MYSQL_* 변수와 같은 로그 형식을 쓴다
     .withWaitStrategy(Wait.forLogMessage(/port: 3306\s/))
     .withStartupTimeout(180_000);
   if (options.lowerCaseTableNames) {
@@ -97,12 +113,17 @@ export async function startMysql(options: StartMysqlOptions = {}): Promise<Mysql
     });
 
   return {
+    flavor,
+    label: flavor === 'mariadb' ? `MariaDB ${MARIADB_VERSION}` : `MySQL ${MYSQL_VERSION}`,
     container: started,
     network,
     host,
     port,
     database: DATABASE,
-    jdbcUrl: `jdbc:mysql://${alias}:${MYSQL_PORT}/${DATABASE}?useSSL=false&allowPublicKeyRetrieval=true`,
+    jdbcUrl:
+      flavor === 'mariadb'
+        ? `jdbc:mariadb://${alias}:${MYSQL_PORT}/${DATABASE}`
+        : `jdbc:mysql://${alias}:${MYSQL_PORT}/${DATABASE}?useSSL=false&allowPublicKeyRetrieval=true`,
     user,
     password,
     connect: (c = { user, password }) => open(c.user, c.password),

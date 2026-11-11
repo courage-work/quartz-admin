@@ -5,24 +5,30 @@ import type { StartedNetwork, StartedTestContainer } from 'testcontainers';
 import type { TargetConnectInfo } from '../../src/adapter.js';
 import type { DbKind } from '../../src/db-kind.js';
 import type { QuartzDialect } from '../../src/dialect.js';
-import { mysqlDialect } from '../../src/mysql/dialect.js';
+import { mariadbDialect, mysqlDialect } from '../../src/mysql/dialect.js';
 import { oracleDialect } from '../../src/oracle/dialect.js';
 import { postgresDialect } from '../../src/postgres/dialect.js';
-import { MYSQL_VERSION, startMysql, type MysqlFixture } from './mysql.js';
+import { MARIADB_VERSION, MYSQL_VERSION, startMysql, type MysqlFixture } from './mysql.js';
 import { startOracle, type OracleFixture, type StartOracleOptions } from './oracle.js';
 import { POSTGRES_VERSION, startPostgres, type PostgresFixture } from './postgres.js';
 
 /**
- * 통합 테스트를 돌릴 DB. `QA_IT_DB`로 고른다(`oracle` 기본, `postgres`, `mysql`). 버전은 `QA_IT_POSTGRES_VERSION`,
- * `QA_IT_MYSQL_VERSION`으로 바꾼다. 같은 테스트 파일이 모든 DB에서 그대로 돌도록 이 파일의 {@link TestConnection}과
+ * 통합 테스트를 돌릴 DB. `QA_IT_DB`로 고른다(`oracle` 기본, `postgres`, `mysql`, `mariadb`). 버전은
+ * `QA_IT_POSTGRES_VERSION`, `QA_IT_MYSQL_VERSION`, `QA_IT_MARIADB_VERSION`으로 바꾼다. 같은 테스트 파일이 모든 DB에서 그대로 돌도록 이 파일의 {@link TestConnection}과
  * {@link DbFixture}만 쓴다.
  */
-export type TestDbKind = 'oracle' | 'postgres' | 'mysql';
+export type TestDbKind = 'oracle' | 'postgres' | 'mysql' | 'mariadb';
 
-export const TEST_DB: TestDbKind =
-  process.env.QA_IT_DB === 'postgres' || process.env.QA_IT_DB === 'mysql'
-    ? process.env.QA_IT_DB
-    : 'oracle';
+const TEST_DB_KINDS: readonly TestDbKind[] = ['oracle', 'postgres', 'mysql', 'mariadb'];
+
+export const TEST_DB: TestDbKind = TEST_DB_KINDS.includes(process.env.QA_IT_DB as TestDbKind)
+  ? (process.env.QA_IT_DB as TestDbKind)
+  : 'oracle';
+
+/** MySQL 계열(MySQL, MariaDB). SQL과 드라이버가 같아 테스트 분기도 같다 */
+export function isMysqlFamily(kind: TestDbKind): kind is 'mysql' | 'mariadb' {
+  return kind === 'mysql' || kind === 'mariadb';
+}
 
 /** describe 제목에 붙이는 DB 이름 */
 export const TEST_DB_LABEL =
@@ -30,7 +36,9 @@ export const TEST_DB_LABEL =
     ? `PostgreSQL ${POSTGRES_VERSION}`
     : TEST_DB === 'mysql'
       ? `MySQL ${MYSQL_VERSION}`
-      : 'Oracle Free 23';
+      : TEST_DB === 'mariadb'
+        ? `MariaDB ${MARIADB_VERSION}`
+        : 'Oracle Free 23';
 
 export type Binds = readonly unknown[] | Record<string, unknown>;
 
@@ -104,7 +112,9 @@ export interface StartTestDbOptions {
 
 export async function startTestDb(options: StartTestDbOptions = {}): Promise<DbFixture> {
   const network = options.network ? { network: options.network } : {};
-  if (TEST_DB === 'mysql') return mysqlFixture(await startMysql(network));
+  if (isMysqlFamily(TEST_DB)) {
+    return mysqlFixture(await startMysql({ ...network, flavor: TEST_DB }));
+  }
   return TEST_DB === 'postgres'
     ? postgresFixture(await startPostgres(network))
     : oracleFixture(
@@ -441,9 +451,9 @@ function wrapMysql(conn: mysql.Connection): TestConnection {
 function mysqlFixture(m: MysqlFixture): DbFixture {
   const connect = async (c?: DbCredentials) => wrapMysql(await m.connect(c));
   return {
-    kind: 'mysql',
-    dbKind: 'mysql',
-    dialect: mysqlDialect,
+    kind: m.flavor,
+    dbKind: m.flavor,
+    dialect: m.flavor === 'mariadb' ? mariadbDialect : mysqlDialect,
     container: m.container,
     network: m.network,
     jdbcUrl: m.jdbcUrl,
@@ -452,7 +462,7 @@ function mysqlFixture(m: MysqlFixture): DbFixture {
     schema: m.database,
     mysql: m,
     targetInfo: (c = { user: m.user, password: m.password }) => ({
-      kind: 'mysql',
+      kind: m.flavor,
       host: m.host,
       port: m.port,
       username: c.user,
@@ -487,7 +497,7 @@ export async function triggerAccessIsFree(
   try {
     if (db.kind === 'postgres') {
       await conn.execute(`SET LOCAL lock_timeout = '${waitSec}s'`);
-    } else if (db.kind === 'mysql') {
+    } else if (isMysqlFamily(db.kind)) {
       await conn.execute(`SET SESSION innodb_lock_wait_timeout = ${waitSec}`);
     }
     await conn.execute(
@@ -509,6 +519,8 @@ export async function triggerAccessIsFree(
     throw err;
   } finally {
     await conn.rollback();
-    if (db.kind === 'mysql') await conn.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT');
+    if (isMysqlFamily(db.kind)) {
+      await conn.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT');
+    }
   }
 }

@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  MariadbAdapter,
   MysqlAdapter,
   TargetPoolManager,
   createTableSet,
   detectQuartz,
   listNodes,
   listTriggers,
+  mariadbDialect,
   mysqlDialect,
   queryDbNowMillis,
   type DetectedTableSet,
@@ -14,11 +16,12 @@ import {
   type TargetConnectInfo,
 } from '../../src/index.js';
 import {
-  MYSQL_VERSION,
   QUARTZ_TABLES,
   QUARTZ_VERSION,
   TEST_DB,
+  TEST_DB_LABEL,
   initQuartzSchema,
+  isMysqlFamily,
   quartzTableName,
   startMysql,
   startQuartzCluster,
@@ -29,15 +32,18 @@ import {
   type TestConnection,
 } from '../support/index.js';
 
+const flavor = TEST_DB === 'mariadb' ? 'mariadb' : 'mysql';
+const dialect = flavor === 'mariadb' ? mariadbDialect : mysqlDialect;
+
 /**
- * 자동 감지 (B-28, TRD §5.5)를 MySQL에서. quartz DB에 다음을 둔다.
+ * 자동 감지 (B-28, B-29, TRD §5.5)를 MySQL·MariaDB에서. quartz DB에 다음을 둔다.
  * - 테스트베드 2노드 클러스터의 `QRTZ_`, SQL로 채운 `BATCH_`(SCHED_NAME 2개, 불리언 `Y`/`N`), 필수 테이블이 빠진 `BROKEN_`
  * - reader: SELECT 권한만 있는 계정, nolock: LOCKS의 UPDATE만 없는 계정
  * 그리고 `lower_case_table_names=1` 서버를 따로 띄워 소문자로 저장된 테이블을 감지한다.
- * `QA_IT_DB=mysql`일 때만 돈다.
+ * `QA_IT_DB=mysql` 또는 `mariadb`일 때만 돈다.
  */
-describe.skipIf(TEST_DB !== 'mysql')(
-  `자동 감지 (MySQL ${MYSQL_VERSION}, Quartz ${QUARTZ_VERSION})`,
+describe.skipIf(!isMysqlFamily(TEST_DB))(
+  `자동 감지 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`,
   () => {
     let cluster: QuartzCluster;
     let lower: MysqlFixture;
@@ -52,9 +58,7 @@ describe.skipIf(TEST_DB !== 'mysql')(
       info: cluster.db.targetInfo(credentials),
     });
     const detect = (credentials: DbCredentials, schema?: string): Promise<QuartzDetection> =>
-      pools.withConnection(target(credentials), (conn) =>
-        detectQuartz(conn, mysqlDialect, { schema }),
-      );
+      pools.withConnection(target(credentials), (conn) => detectQuartz(conn, dialect, { schema }));
     const setOf = (detection: QuartzDetection, prefix: string): DetectedTableSet => {
       const set = detection.tableSets.find((s) => s.prefix === prefix);
       if (!set) throw new Error(`${prefix} 세트를 찾지 못했습니다: ${JSON.stringify(detection)}`);
@@ -66,18 +70,16 @@ describe.skipIf(TEST_DB !== 'mysql')(
     beforeAll(async () => {
       [cluster, lower] = await Promise.all([
         startQuartzCluster({ nodes: 2 }),
-        startMysql({ lowerCaseTableNames: true }),
+        startMysql({ flavor, lowerCaseTableNames: true }),
       ]);
       owner = { user: cluster.db.user, password: cluster.db.password };
-      pools = new TargetPoolManager([new MysqlAdapter()]);
+      pools = new TargetPoolManager([new MysqlAdapter(), new MariadbAdapter()]);
 
       await cluster.nodes[0]!.client.scheduleJob({
         job: { name: 'detect-job', group: 'detect', type: 'RecordingJob', data: { k: 'v' } },
         trigger: { name: 'detect-trigger', group: 'detect', type: 'simple', intervalMs: 3_600_000 },
       });
-      const dbNow = await pools.withConnection(target(owner), (c) =>
-        queryDbNowMillis(c, mysqlDialect),
-      );
+      const dbNow = await pools.withConnection(target(owner), (c) => queryDbNowMillis(c, dialect));
 
       await cluster.db.withConnection(async (conn) => {
         await initQuartzSchema(conn, batch);
@@ -224,7 +226,7 @@ describe.skipIf(TEST_DB !== 'mysql')(
 
     it('lower_case_table_names=1 서버의 소문자 테이블을 실제 이름 그대로 감지한다', async () => {
       const info: TargetConnectInfo = {
-        kind: 'mysql',
+        kind: flavor,
         host: lower.host,
         port: lower.port,
         username: lower.user,
@@ -232,7 +234,7 @@ describe.skipIf(TEST_DB !== 'mysql')(
         database: lower.database,
       };
       const detection = await pools.withConnection({ id: 'lower', info }, (conn) =>
-        detectQuartz(conn, mysqlDialect),
+        detectQuartz(conn, dialect),
       );
       const set = setOf(detection, 'qrtz_');
       expect(set.tableNames).toMatchObject({
@@ -271,8 +273,8 @@ describe.skipIf(TEST_DB !== 'mysql')(
       const detection = await detect(owner);
       const set = setOf(detection, 'QRTZ_');
       const ctx = {
-        dialect: mysqlDialect,
-        tables: createTableSet(mysqlDialect, { schema: detection.schema, tables: set.tableNames }),
+        dialect: dialect,
+        tables: createTableSet(dialect, { schema: detection.schema, tables: set.tableNames }),
         features: set.features,
         schedName: cluster.schedulerName,
       };

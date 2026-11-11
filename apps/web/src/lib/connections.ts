@@ -61,7 +61,8 @@ export const TEST_FAILURE_HINTS: Record<string, string> = {
   TARGET_TIMEOUT:
     'DB가 10초 안에 응답하지 않았습니다. 네트워크 경로와 DB 부하를 확인하고 다시 시도하세요.',
   TARGET_BUSY: '이 접속의 커넥션이 모두 사용 중입니다. 잠시 후 다시 시도하세요.',
-  TARGET_ERROR: '접속은 됐지만 카탈로그를 읽지 못했습니다. 스키마 이름과 조회 권한을 확인하세요.',
+  TARGET_ERROR:
+    '접속한 뒤 세션 설정이나 카탈로그 조회에서 실패했습니다. 위 안내와 함께 DB 종류, 스키마 이름, 조회 권한을 확인하세요.',
 };
 
 /** `host:port/service`, `host:port:SID`, `host:port/database` */
