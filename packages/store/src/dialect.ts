@@ -12,6 +12,11 @@ export interface CatalogQueries {
   readonly currentSchema: string;
   readonly tables: string;
   readonly columns: string;
+  /**
+   * 서버 기본(전역) 트랜잭션 격리 수준을 `ISOLATION` 컬럼 하나로 돌려주는 쿼리. MySQL 계열만 둔다.
+   * Quartz 노드가 따로 정하지 않으면 이 값을 쓰므로 감지 경고(`REPEATABLE_READ_MISFIRE_RACE`)에 쓴다
+   */
+  readonly serverIsolation?: string;
 }
 
 /** DB별 SQL 차이 (TRD §5.3). 쿼리 빌더는 이 인터페이스만 보고 SQL을 만든다 */

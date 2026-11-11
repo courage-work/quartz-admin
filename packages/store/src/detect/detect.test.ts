@@ -5,6 +5,7 @@ import { oracleDialect } from '../oracle/dialect.js';
 import { QUARTZ_REQUIRED_TABLES, type QuartzTableKey } from '../quartz-tables.js';
 import { createTableSet } from '../table-set.js';
 import { decideBoolFormat } from './bool-format.js';
+import { isolationWarning } from './detect.js';
 import { checkWritePrivileges } from './privileges.js';
 import {
   detectFeatures,
@@ -242,5 +243,15 @@ describe('checkWritePrivileges', () => {
       code: 'TARGET_UNREACHABLE',
     });
     expect(conn.log.at(-1)).toBe('ROLLBACK');
+  });
+});
+
+describe('isolationWarning (서버 기본 격리 수준)', () => {
+  it('REPEATABLE READ면 misfire 경합 경고, 그 밖은 없음', () => {
+    expect(isolationWarning('REPEATABLE-READ')).toBe('REPEATABLE_READ_MISFIRE_RACE');
+    expect(isolationWarning('repeatable read')).toBe('REPEATABLE_READ_MISFIRE_RACE');
+    expect(isolationWarning('READ-COMMITTED')).toBeNull();
+    expect(isolationWarning('SERIALIZABLE')).toBeNull();
+    expect(isolationWarning(null)).toBeNull();
   });
 });

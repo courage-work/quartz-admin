@@ -82,6 +82,16 @@ export interface TestbedNode {
   stop(): Promise<void>;
 }
 
+const MYSQL_FAMILY_URL = /^jdbc:(mysql|mariadb):/i;
+
+/**
+ * MySQL·MariaDB 노드의 권장 설정 (TRD §5.3). 기본 격리 수준(REPEATABLE READ)에서 misfire 처리가 잠금 전에 연 스냅샷으로
+ * 일시정지를 되돌리지 않게, 잠금을 먼저 잡고 읽게 한다. 기본값을 보려면 `quartzProperties`로 `true`를 넘긴다
+ */
+export const MYSQL_FAMILY_QUARTZ_PROPERTIES: Readonly<Record<string, string>> = {
+  'org.quartz.jobStore.doubleCheckLockMisfireHandler': 'false',
+};
+
 function propertiesText(props: Record<string, string>): string {
   return Object.entries(props)
     .map(([k, v]) => `${k}=${v}`)
@@ -109,8 +119,12 @@ export async function startTestbedNode(options: StartTestbedNodeOptions): Promis
     env.TESTBED_MISFIRE_THRESHOLD_MS = String(options.misfireThresholdMs);
   }
   if (options.executionsTable) env.TESTBED_EXECUTIONS_TABLE = options.executionsTable;
-  if (options.quartzProperties) {
-    env.TESTBED_QUARTZ_PROPERTIES = propertiesText(options.quartzProperties);
+  const quartzProperties = {
+    ...(MYSQL_FAMILY_URL.test(options.db.jdbcUrl) ? MYSQL_FAMILY_QUARTZ_PROPERTIES : {}),
+    ...options.quartzProperties,
+  };
+  if (Object.keys(quartzProperties).length > 0) {
+    env.TESTBED_QUARTZ_PROPERTIES = propertiesText(quartzProperties);
   }
   if (options.dbProperties) {
     env.TESTBED_DB_PROPERTIES = propertiesText(options.dbProperties);

@@ -31,6 +31,7 @@ import {
   BOOL_FORMAT_LABELS,
   CONNECTIONS_KEY,
   DETECTION_WARNING_LABELS,
+  PROMINENT_DETECTION_WARNINGS,
   PRIVILEGE_LABELS,
   TEST_FAILURE_HINTS,
   unusableReason,
@@ -87,11 +88,18 @@ function TableSetCard({
               . 이 세트의 스케줄러는 조회만 할 수 있습니다.
             </p>
           ) : null}
-          {set.warnings.map((w) => (
-            <p key={w} className="text-sm text-muted-foreground">
-              {DETECTION_WARNING_LABELS[w]}
-            </p>
-          ))}
+          {set.warnings.map((w) =>
+            PROMINENT_DETECTION_WARNINGS.has(w) ? (
+              <Alert key={w} variant="warning">
+                <AlertTitle>일시정지가 되돌려질 수 있는 설정입니다</AlertTitle>
+                <AlertDescription>{DETECTION_WARNING_LABELS[w]}</AlertDescription>
+              </Alert>
+            ) : (
+              <p key={w} className="text-sm text-muted-foreground">
+                {DETECTION_WARNING_LABELS[w]}
+              </p>
+            ),
+          )}
           {set.schedulers.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               테이블은 있지만 아직 SCHED_NAME이 없습니다. Quartz 노드를 한 번 띄우면 나타납니다.

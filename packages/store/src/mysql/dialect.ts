@@ -16,6 +16,8 @@ const CATALOG: CatalogQueries = {
   columns:
     'SELECT TABLE_NAME AS `TABLE_NAME`, COLUMN_NAME AS `COLUMN_NAME`, DATA_TYPE AS `DATA_TYPE` ' +
     'FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = :p1 ORDER BY TABLE_NAME, ORDINAL_POSITION',
+  // 5.7.20부터 있는 이름. 그보다 오래된 5.7에서는 쿼리가 실패하고 감지는 경고 없이 계속한다
+  serverIsolation: 'SELECT @@GLOBAL.transaction_isolation AS `ISOLATION`',
 };
 
 /** DB 현재 시각(epoch ms). `UNIX_TIMESTAMP`는 세션 시간대와 상관없이 UTC 기준이다. 5.7 문법만 쓴다 */
@@ -73,4 +75,9 @@ export const mysqlDialect: QuartzDialect = {
  * 이 도구가 쓰는 SQL(백틱, `LIMIT … OFFSET`, `innodb_lock_wait_timeout`, `UNIX_TIMESTAMP(NOW(3))`,
  * `information_schema`)은 10.3부터 MySQL과 같다. 다른 것은 세션 시간 제한 변수뿐이고 어댑터가 맡는다.
  */
-export const mariadbDialect: QuartzDialect = { ...mysqlDialect, kind: 'mariadb' };
+export const mariadbDialect: QuartzDialect = {
+  ...mysqlDialect,
+  kind: 'mariadb',
+  // MariaDB 10.3에는 transaction_isolation 별칭이 없다(11.1에서 추가)
+  catalog: { ...CATALOG, serverIsolation: 'SELECT @@GLOBAL.tx_isolation AS `ISOLATION`' },
+};
