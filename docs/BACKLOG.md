@@ -2,9 +2,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.31 |
+| 문서 버전 | v0.32 |
 | 작성일 | 2026-11-05 |
-| 상위 문서 | PRD v0.5(`docs/PRD.md`), TRD v0.25(`docs/TRD.md`) |
+| 상위 문서 | PRD v0.5(`docs/PRD.md`), TRD v0.26(`docs/TRD.md`) |
 | 작업 단위 | 기능 단위. 작업 하나는 API, 화면, 테스트를 모두 포함한 하나의 PR |
 | 추정 | 하지 않음. 순서와 의존성만 관리 |
 | 저장소·CI | GitHub(`courage-work/quartz-admin`, 공개), GitHub Actions |
@@ -46,6 +46,7 @@
 | v0.29 | 2026-11-10 | B-24: 상위 문서를 TRD v0.23으로 갱신 |
 | v0.30 | 2026-11-11 | B-25: 상위 문서를 TRD v0.24로 갱신 |
 | v0.31 | 2026-11-11 | B-27: 상위 문서를 TRD v0.25로 갱신 |
+| v0.32 | 2026-11-11 | B-28: 상위 문서를 TRD v0.26으로 갱신, B-28 범위의 조회 제한을 세션 `max_execution_time`으로 |
 
 ---
 
@@ -166,7 +167,7 @@ M1의 B-08과 B-09는 서로 의존하지 않아 M0 작업과 함께 AI 세션 �
 | B-25 | 알림 채널과 발송 | M3 | P0 | B-24 | 완료 |
 | B-26 | 알림 음소거 | M3 | P1 | B-25 | 대기 |
 | B-27 | PostgreSQL 지원 | M4 | P0 | B-18, B-19, B-20, B-21, B-25 | 완료 |
-| B-28 | MySQL 지원 | M4 | P0 | B-27 | 대기 |
+| B-28 | MySQL 지원 | M4 | P0 | B-27 | 완료 |
 | B-29 | MariaDB 지원 | M4 | P0 | B-28 | 대기 |
 | B-30 | CI DB 매트릭스 완성 | M4 | P0 | B-29 | 대기 |
 | B-31 | 성능·규모 검증 | M5 | P0 | B-25, B-30 | 대기 |
@@ -531,7 +532,7 @@ M1의 B-08과 B-09는 서로 의존하지 않아 M0 작업과 함께 AI 세션 �
 #### B-28 MySQL 지원
 
 - **참조**: TRD §5.1~5.3
-- **범위**: `mysql2` 어댑터, 세션 `innodb_lock_wait_timeout` 설정과 원복, 격리 수준 READ COMMITTED, `MAX_EXECUTION_TIME` 힌트, `lower_case_table_names` 0/1 변형, 5.7 문법 제약 확인
+- **범위**: `mysql2` 어댑터, 세션 `innodb_lock_wait_timeout` 설정과 원복, 격리 수준 READ COMMITTED, 세션 `max_execution_time`(힌트와 같은 효과, TRD §5.2), `lower_case_table_names` 0/1 변형, 5.7 문법 제약 확인
 - **완료 기준**: MySQL 5.7과 8.4에서 전체 통합·차등 테스트가 통과한다
 
 #### B-29 MariaDB 지원

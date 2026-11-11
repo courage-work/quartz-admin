@@ -127,6 +127,49 @@ jobs:
       - name: Integration test
         run: pnpm turbo run test:integration --filter=@qa/store
 
+  # MySQL 5.7·8.4 (B-28). 전체 버전 매트릭스는 B-30에서 넓힌다
+  integration-mysql:
+    name: integration (mysql ${{ matrix.mysql }}, quartz ${{ matrix.quartz }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mysql: '5.7'
+            quartz: '2.3.2'
+          - mysql: '8.4'
+            quartz: '2.5.2'
+    env:
+      QA_IT_DB: mysql
+      QA_IT_MYSQL_VERSION: ${{ matrix.mysql }}
+      QA_IT_QUARTZ_VERSION: ${{ matrix.quartz }}
+      QA_IT_TESTBED_IMAGE: quartz-testbed:${{ matrix.quartz }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build quartz-testbed image
+        run: >-
+          docker build
+          --build-arg QUARTZ_VERSION=${{ matrix.quartz }}
+          -t "$QA_IT_TESTBED_IMAGE"
+          tools/quartz-testbed
+
+      - name: Pull MySQL
+        run: docker pull mysql:${{ matrix.mysql }}
+
+      - name: Integration test
+        run: pnpm turbo run test:integration --filter=@qa/store
+
   container:
     name: container (docker compose smoke)
     runs-on: ubuntu-latest

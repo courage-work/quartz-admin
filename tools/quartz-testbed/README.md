@@ -4,7 +4,7 @@ quartz-admin 통합 테스트용 Quartz 노드입니다(TRD §12.1). 실제 Quar
 
 - Java 17, Quartz 2.3.2(기본) 또는 2.5.x(빌드 인자)
 - JDBC JobStore(`JobStoreTX`) 클러스터 모드, HikariCP
-- Oracle(ojdbc11)과 PostgreSQL(postgresql 42.7.7) 드라이버를 넣었습니다. MySQL, MariaDB 드라이버는 B-28~B-29에서 추가합니다.
+- Oracle(ojdbc11), PostgreSQL(postgresql 42.7.7), MySQL(mysql-connector-j 8.4.0) 드라이버를 넣었습니다. MySQL 드라이버는 5.7을 지원하는 마지막 계열인 8.4로 둡니다(9.x는 5.7 지원을 뺐음). MariaDB 드라이버는 B-29에서 추가합니다.
 
 ## 빌드
 
@@ -185,17 +185,18 @@ docker run -i --rm quartz-testbed:2.3.2 cron-vectors < cases.json > vectors.json
 
 `schema/`의 SQL은 Quartz 2.5.2 jar의 `org/quartz/impl/jdbcjobstore/`에서 그대로 가져왔습니다(Apache License 2.0).
 
-| 파일                  | 내용                                                                                                |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| `tables_oracle.sql`   | 기본 Oracle 스키마. 2.3.2와 주석 오타 하나만 다름. 불리언은 `VARCHAR2(1)`                           |
-| `tables_oracle23.sql` | 2.5.x에 추가된 Oracle 23 스키마. 불리언 컬럼이 `BOOLEAN`                                            |
-| `tables_postgres.sql` | PostgreSQL 스키마(2.3.2와 같음). 불리언은 `BOOL`, BLOB은 `BYTEA`, 이름은 따옴표 없음(소문자로 저장) |
+| 파일                      | 내용                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `tables_oracle.sql`       | 기본 Oracle 스키마. 2.3.2와 주석 오타 하나만 다름. 불리언은 `VARCHAR2(1)`                              |
+| `tables_oracle23.sql`     | 2.5.x에 추가된 Oracle 23 스키마. 불리언 컬럼이 `BOOLEAN`                                               |
+| `tables_postgres.sql`     | PostgreSQL 스키마(2.3.2와 같음). 불리언은 `BOOL`, BLOB은 `BYTEA`, 이름은 따옴표 없음(소문자로 저장)    |
+| `tables_mysql_innodb.sql` | MySQL InnoDB 스키마(2.3.2와 같음). 불리언은 `VARCHAR(1)`, JOB_DATA는 `BLOB`, 이름은 대문자. 주석은 `#` |
 
 통합 테스트 헬퍼(`packages/store/test/support/quartz-schema.ts`)가 이 파일에서 CREATE 문만 골라 prefix와 대소문자를 바꿔 실행합니다.
 
 ## 통합 테스트에서 쓰기
 
-`packages/store/test/support/`의 헬퍼가 DB 컨테이너(Oracle Free 23 또는 PostgreSQL), 스키마 초기화, 테스트베드 노드 기동, 실행 기록 조회를 맡습니다.
+`packages/store/test/support/`의 헬퍼가 DB 컨테이너(Oracle Free 23, PostgreSQL, MySQL), 스키마 초기화, 테스트베드 노드 기동, 실행 기록 조회를 맡습니다.
 
 ```bash
 pnpm test:integration                                   # Docker 필요. 테스트베드 이미지를 직접 빌드
@@ -204,6 +205,8 @@ QA_IT_TESTBED_IMAGE=quartz-testbed:2.3.2 pnpm test:integration  # 미리 빌드�
 QA_IT_LOGS=1 pnpm test:integration                      # 노드 로그를 stderr로
 QA_IT_DB=postgres pnpm test:integration                 # PostgreSQL 17로
 QA_IT_DB=postgres QA_IT_POSTGRES_VERSION=11 pnpm test:integration  # PostgreSQL 11로
+QA_IT_DB=mysql pnpm test:integration                    # MySQL 8.4로
+QA_IT_DB=mysql QA_IT_MYSQL_VERSION=5.7 pnpm test:integration  # MySQL 5.7로(amd64 이미지)
 ```
 
 | 변수                     | 기본값                                 | 설명                                                                  |
@@ -212,6 +215,8 @@ QA_IT_DB=postgres QA_IT_POSTGRES_VERSION=11 pnpm test:integration  # PostgreSQL 
 | `QA_IT_TESTBED_IMAGE`    |                                        | 미리 빌드한 이미지. 없으면 `quartz-admin-testbed:<버전>-local`로 빌드 |
 | `QA_IT_ORACLE_IMAGE`     | `gvenzl/oracle-free:23-slim-faststart` | Oracle 이미지(amd64, arm64)                                           |
 | `QA_IT_LOGS`             |                                        | `1`이면 노드 로그 출력                                                |
-| `QA_IT_DB`               | `oracle`                               | 통합 테스트 DB. `postgres`면 PostgreSQL                               |
+| `QA_IT_DB`               | `oracle`                               | 통합 테스트 DB. `postgres`면 PostgreSQL, `mysql`이면 MySQL            |
 | `QA_IT_POSTGRES_VERSION` | `17`                                   | PostgreSQL 버전(이미지 `postgres:<버전>-alpine`)                      |
 | `QA_IT_POSTGRES_IMAGE`   |                                        | PostgreSQL 이미지를 직접 지정                                         |
+| `QA_IT_MYSQL_VERSION`    | `8.4`                                  | MySQL 버전(이미지 `mysql:<버전>`)                                     |
+| `QA_IT_MYSQL_IMAGE`      |                                        | MySQL 이미지를 직접 지정                                              |

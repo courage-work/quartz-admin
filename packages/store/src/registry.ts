@@ -1,19 +1,22 @@
 import type { DriverAdapter } from './adapter.js';
 import type { DbKind } from './db-kind.js';
 import type { QuartzDialect } from './dialect.js';
+import { MysqlAdapter } from './mysql/adapter.js';
+import { mysqlDialect } from './mysql/dialect.js';
 import { OracleAdapter } from './oracle/adapter.js';
 import { oracleDialect } from './oracle/dialect.js';
 import { PostgresAdapter } from './postgres/adapter.js';
 import { postgresDialect } from './postgres/dialect.js';
 
-/** 지금 지원하는 드라이버 어댑터. MySQL, MariaDB는 B-28~B-29에서 추가한다 */
+/** 지금 지원하는 드라이버 어댑터. MariaDB는 B-29에서 추가한다 */
 export function createDriverAdapters(): DriverAdapter[] {
-  return [new OracleAdapter(), new PostgresAdapter()];
+  return [new OracleAdapter(), new PostgresAdapter(), new MysqlAdapter()];
 }
 
 const DIALECTS: Partial<Record<DbKind, QuartzDialect>> = {
   oracle: oracleDialect,
   postgresql: postgresDialect,
+  mysql: mysqlDialect,
 };
 
 /** DB 종류의 `QuartzDialect`. 아직 없는 종류면 `undefined` */
