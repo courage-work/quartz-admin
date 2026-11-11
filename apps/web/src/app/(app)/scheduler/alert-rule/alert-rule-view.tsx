@@ -6,6 +6,8 @@ import {
   alertRuleInputSchema,
   type AlertRulesResponse,
   type AlertRuleType,
+  type ChannelDto,
+  type ChannelsResponse,
   type SchedulerDetailDto,
   SEVERITIES,
 } from '@qa/shared';
@@ -42,6 +44,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -71,6 +74,7 @@ import {
   toRuleRequest,
 } from '@/lib/alerts';
 import { api, isApiError } from '@/lib/api';
+import { CHANNEL_TYPE_LABELS, CHANNELS_KEY } from '@/lib/channels';
 import { applyApiError } from '@/lib/form-errors';
 import { parseId } from '@/lib/navigation';
 import { usePageTitle } from '@/lib/page-title';
@@ -312,15 +316,74 @@ function EnabledField({ form }: { form: Form }) {
   );
 }
 
-const FIELDS = ['type', 'minutes', 'failures', 'groups', 'severity', 'renotify'] as const;
+const FIELDS = [
+  'type',
+  'minutes',
+  'failures',
+  'groups',
+  'severity',
+  'renotify',
+  'channelIds',
+] as const;
+
+/** 보낼 채널. 꺼진 채널도 고를 수 있지만 그 채널로는 보내지 않는다 */
+function ChannelsField({ form, channels }: { form: Form; channels: ChannelDto[] }) {
+  const labelId = useId();
+  return (
+    <Controller
+      control={form.control}
+      name="channelIds"
+      render={({ field }) => (
+        <FormRow label="보낼 채널" labelId={labelId}>
+          <div className="flex flex-col gap-3 md:pt-2" role="group" aria-labelledby={labelId}>
+            {channels.map((c) => {
+              const id = `${labelId}-${c.id}`;
+              const checked = field.value.includes(c.id);
+              return (
+                <Field key={c.id} orientation="horizontal">
+                  <Checkbox
+                    id={id}
+                    checked={checked}
+                    onCheckedChange={(v) =>
+                      field.onChange(
+                        v === true ? [...field.value, c.id] : field.value.filter((x) => x !== c.id),
+                      )
+                    }
+                  />
+                  <FieldLabel htmlFor={id}>
+                    {c.name}
+                    <span className="text-muted-foreground">
+                      {' '}
+                      · {CHANNEL_TYPE_LABELS[c.type]}
+                      {c.enabled ? '' : ' · 꺼짐'}
+                    </span>
+                  </FieldLabel>
+                </Field>
+              );
+            })}
+            <FieldDescription>
+              하나도 고르지 않으면 알림 상태만 기록하고 보내지 않습니다. 채널은{' '}
+              <Link href="/channels" className="underline underline-offset-4">
+                알림 채널
+              </Link>
+              에서 추가합니다.
+            </FieldDescription>
+          </div>
+        </FormRow>
+      )}
+    />
+  );
+}
 
 function RuleForm({
   scheduler,
   rule,
+  channels,
   back,
 }: {
   scheduler: SchedulerDetailDto;
   rule: AlertRuleDto | undefined;
+  channels: ChannelDto[];
   back: string;
 }) {
   const router = useRouter();
@@ -328,7 +391,10 @@ function RuleForm({
   const form = useForm<RuleFormValues>({
     mode: 'onSubmit',
     resolver: ruleResolver,
-    defaultValues: ruleFormValues(rule),
+    defaultValues: ruleFormValues(
+      rule,
+      channels.filter((c) => c.type === 'inapp').map((c) => c.id),
+    ),
   });
   const [type, minutesText, failuresText] = useWatch({
     control: form.control,
@@ -421,7 +487,9 @@ function RuleForm({
       <Card>
         <CardHeader>
           <CardTitle>알림</CardTitle>
-          <CardDescription>규칙에 연결된 채널(지금은 인앱 알림)로 보냅니다.</CardDescription>
+          <CardDescription>
+            고른 채널로 보냅니다. 같은 회차에 한 채널로 6건 넘게 나가면 요약 하나로 묶습니다.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <FormRows>
@@ -435,6 +503,7 @@ function RuleForm({
               layout="row"
               size="short"
             />
+            <ChannelsField form={form} channels={channels} />
             <EnabledField form={form} />
           </FormRows>
         </CardContent>
@@ -490,6 +559,10 @@ export function AlertRuleView() {
       api<AlertRulesResponse>(`/schedulers/${schedulerId}/alert-rules`, { signal }),
     enabled: schedulerId !== null && ruleId !== null,
   });
+  const channels = useQuery({
+    queryKey: CHANNELS_KEY,
+    queryFn: ({ signal }) => api<ChannelsResponse>('/channels', { signal }),
+  });
   const back = schedulerId === null ? '/' : `/scheduler?id=${schedulerId}&tab=alerts`;
   const title = ruleId === null ? '알림 규칙 추가' : '알림 규칙 수정';
   usePageTitle(detail.data ? `${detail.data.displayName} ${title}` : undefined);
@@ -499,8 +572,15 @@ export function AlertRuleView() {
     ...(detail.data ? [{ label: detail.data.displayName, href: back }] : []),
   ];
   const waitingRule = ruleId !== null && (rules.isPending || rules.isError);
-  if (schedulerId === null || detail.isError || detail.isPending || waitingRule) {
-    const error = detail.error ?? rules.error;
+  const waitingChannels = channels.isPending || channels.isError;
+  if (
+    schedulerId === null ||
+    detail.isError ||
+    detail.isPending ||
+    waitingRule ||
+    waitingChannels
+  ) {
+    const error = detail.error ?? rules.error ?? channels.error;
     return (
       <>
         <PageHeader trail={trail} title={title} />
@@ -532,7 +612,13 @@ export function AlertRuleView() {
       {ruleId !== null && !rule ? (
         <NotFound what="알림 규칙" back={back} />
       ) : (
-        <RuleForm key={rule?.id ?? 'new'} scheduler={s} rule={rule} back={back} />
+        <RuleForm
+          key={rule?.id ?? 'new'}
+          scheduler={s}
+          rule={rule}
+          channels={channels.data.channels}
+          back={back}
+        />
       )}
     </>
   );

@@ -1,5 +1,4 @@
 import {
-  type AlertAffected,
   type AlertDto,
   type AlertRuleDto,
   type AlertRuleInput,
@@ -16,15 +15,8 @@ export const alertRulesKey = (schedulerId: number) =>
 export const schedulerAlertsKey = (schedulerId: number) =>
   ['schedulers', schedulerId, 'alerts'] as const;
 
-/** 규칙 타입 이름 (TRD §9.2) */
-export const ALERT_RULE_LABELS: Record<AlertRuleType, string> = {
-  OVERDUE: '실행 지연',
-  TRIGGER_ERROR: 'ERROR 트리거',
-  BLOCKED_LONG: 'BLOCKED 장기 지속',
-  NODE_MISSING: '노드 이탈',
-  CLUSTER_DOWN: '클러스터 다운',
-  MONITOR_UNREACHABLE: '감시 불가',
-};
+/** 규칙 타입 이름과 대상 요약은 Slack·이메일 메시지와 같아야 해서 `@qa/shared`에 둔다 */
+export { ALERT_RULE_LABELS, describeAffected } from '@qa/shared';
 
 /** 규칙 추가 화면에서 고르는 순서 */
 export const ALERT_RULE_ORDER: readonly AlertRuleType[] = [
@@ -88,23 +80,6 @@ export function describeRenotify(minutes: number | null): string {
   return `${minutes}분마다`;
 }
 
-/** 알림 대상을 한 줄로 */
-export function describeAffected(affected: AlertAffected | null): string {
-  if (!affected) return '';
-  switch (affected.kind) {
-    case 'triggers': {
-      const [first] = affected.triggers;
-      if (!first) return `트리거 ${affected.total}개`;
-      const name = `${first.group}.${first.name}`;
-      return affected.total === 1 ? name : `${name} 외 ${affected.total - 1}개`;
-    }
-    case 'nodes':
-      return `활성 노드 ${affected.active}개 / 기대 ${affected.expected}개`;
-    case 'monitor':
-      return `연속 ${affected.failures}회 실패${affected.errorMessage ? ` · ${affected.errorMessage}` : ''}`;
-  }
-}
-
 /** 알림 상태 칸의 글. 억제·발송 전이면 그 사정을 덧붙인다 */
 export function describeAlertStatus(
   alert: Pick<AlertDto, 'status' | 'suppressed' | 'notified'>,
@@ -151,6 +126,8 @@ export interface RuleFormValues {
   /** 비우면 재알림하지 않는다 */
   renotify: string;
   enabled: boolean;
+  /** 보낼 채널 */
+  channelIds: number[];
 }
 
 const DEFAULT_SEVERITY: Record<AlertRuleType, AlertRuleInput['severity']> = {
@@ -166,7 +143,11 @@ export function defaultSeverity(type: AlertRuleType): AlertRuleInput['severity']
   return DEFAULT_SEVERITY[type];
 }
 
-export function ruleFormValues(rule?: AlertRuleDto): RuleFormValues {
+/** 새 규칙은 `defaultChannelIds`(인앱 채널)를 골라 둔다 */
+export function ruleFormValues(
+  rule?: AlertRuleDto,
+  defaultChannelIds: number[] = [],
+): RuleFormValues {
   if (!rule) {
     return {
       type: 'OVERDUE',
@@ -178,6 +159,7 @@ export function ruleFormValues(rule?: AlertRuleDto): RuleFormValues {
       severity: DEFAULT_SEVERITY.OVERDUE,
       renotify: '',
       enabled: true,
+      channelIds: [...defaultChannelIds],
     };
   }
   return {
@@ -193,6 +175,7 @@ export function ruleFormValues(rule?: AlertRuleDto): RuleFormValues {
     severity: rule.severity,
     renotify: rule.renotifyMinutes === null ? '' : String(rule.renotifyMinutes),
     enabled: rule.enabled,
+    channelIds: [...rule.channelIds],
   };
 }
 
@@ -232,6 +215,7 @@ export function toRuleRequest(v: RuleFormValues): unknown {
     severity: v.severity,
     renotifyMinutes: v.renotify.trim() === '' ? null : v.renotify.trim(),
     enabled: v.enabled,
+    channelIds: v.channelIds,
   };
 }
 
@@ -253,6 +237,8 @@ export function ruleFormPathOf(path: readonly PropertyKey[]): string | null {
     return 'scopeKind';
   }
   if (head === 'renotifyMinutes') return 'renotify';
-  if (head === 'severity' || head === 'type' || head === 'enabled') return head;
+  if (head === 'severity' || head === 'type' || head === 'enabled' || head === 'channelIds') {
+    return head;
+  }
   return null;
 }

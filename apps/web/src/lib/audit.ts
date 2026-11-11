@@ -54,6 +54,7 @@ export function describeTarget(log: Pick<AuditLogDto, 'targetType' | 'target'>):
   const nameKey: Record<string, string[]> = {
     user: ['username'],
     connection: ['name'],
+    channel: ['name'],
     scheduler: ['displayName', 'schedName'],
   };
   // 제어 명령은 SCHED_NAME과 대상 키(트리거·잡은 그룹과 이름, 그룹은 이름)를 남긴다
@@ -67,11 +68,12 @@ export function describeTarget(log: Pick<AuditLogDto, 'targetType' | 'target'>):
     const group = field(log.target, 'group');
     if (typeof group === 'string') return group;
   }
-  // 알림 규칙은 규칙 종류 이름(규칙에는 따로 붙인 이름이 없다)
-  if (log.targetType === 'alert_rule') {
+  // 알림 규칙과 알림은 규칙 종류 이름(따로 붙인 이름이 없다)
+  if (log.targetType === 'alert_rule' || log.targetType === 'alert') {
     const type = field(log.target, 'type');
     if (typeof type === 'string' && type in ALERT_RULE_LABELS) {
-      return `${ALERT_RULE_LABELS[type as keyof typeof ALERT_RULE_LABELS]} 규칙`;
+      const label = ALERT_RULE_LABELS[type as keyof typeof ALERT_RULE_LABELS];
+      return log.targetType === 'alert' ? `${label} 알림` : `${label} 규칙`;
     }
   }
   const keys = log.targetType ? nameKey[log.targetType] : undefined;

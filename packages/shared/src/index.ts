@@ -14,3 +14,4 @@ export * from './quartz.js';
 export * from './views.js';
 export * from './monitor.js';
 export * from './alerts.js';
+export * from './channels.js';

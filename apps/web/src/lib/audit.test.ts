@@ -60,6 +60,18 @@ describe('isCodeTarget', () => {
     expect(describeTarget({ targetType: 'alert_rule', target: { id: 3, type: 'OVERDUE' } })).toBe(
       '실행 지연 규칙',
     );
+    expect(
+      describeTarget({
+        targetType: 'alert',
+        target: { id: 9, schedulerId: 1, type: 'NODE_MISSING' },
+      }),
+    ).toBe('노드 이탈 알림');
+    expect(
+      describeTarget({
+        targetType: 'channel',
+        target: { id: 2, type: 'slack', name: '운영 Slack' },
+      }),
+    ).toBe('운영 Slack');
     expect(isCodeTarget({ targetType: 'user' })).toBe(true);
     expect(isCodeTarget({ targetType: 'trigger' })).toBe(true);
     expect(isCodeTarget({ targetType: 'connection' })).toBe(false);
@@ -99,6 +111,6 @@ describe('작업 종류 라벨', () => {
   });
 
   it('모르는 작업 종류는 원래 값을 보여 준다', () => {
-    expect(auditActionLabel('alert.ack')).toBe('alert.ack');
+    expect(auditActionLabel('future.action')).toBe('future.action');
   });
 });

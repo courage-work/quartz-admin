@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.23 (B-24 알림 규칙 엔진 반영) |
+| 문서 버전 | v0.24 (B-25 알림 채널과 발송 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -37,6 +37,7 @@
 | v0.21 | 2026-11-10 | §7.2·§7.6: 집힌(ACQUIRED) 트리거를 고친 뒤 다른 노드가 새 스케줄로 다시 집으면 옛 노드가 옛 스케줄로 발화하고 수정이 사라지는 경합을 확인(Quartz 2.5.2 CI 실패, 로컬 재현). 새 실행 시각이 옛 발화 시각부터 35초 안이면 `TRIGGER_ACQUIRED`(409)로 거부. 부록 A.6 C-05·S-07 조건을 경합 구간 밖으로 바꾸고 C-14·S-08 추가 |
 | v0.22 | 2026-11-10 | B-21: §7.1 명령 형식에 `deleteTrigger`·`deleteJob`, 계획의 삭제(`deletions`)와 적용 순서, 삭제 전 스냅샷(감사 `before.snapshot`), 경고(`JOB_ALSO_DELETED`, `DELETING_EXECUTING`), 감사 작업 종류 `trigger.delete`·`job.delete`. §7.3 삭제 세부(하위 테이블, durable 판정, 스냅샷 내용) 확정 |
 | v0.23 | 2026-11-10 | B-24: §8 스케줄러 API에 알림 규칙·알림 목록. §9.1 연체 목록 상한 50 → 500(적용 범위·재개 제외가 목록을 거름). §9.2 판정 세부(적용 범위는 수집 목록을 거름, BLOCKED와 PAUSED_BLOCKED, 감시 실패 회차, 기본 규칙과 기존 스케줄러 채우기). §9.3 엔진 구현(억제 순서, 억제가 풀린 뒤 `fire`, 지우거나 끈 규칙, 발송 큐까지), 감사 작업 종류 `alert_rule.create`·`update`·`delete` |
+| v0.24 | 2026-11-11 | B-25: §8 API에 채널·알림 센터, 규칙의 `channelIds`. §9.4 발송 구현(워커 주기·시간 제한·재시도, 요약 기준, 인앱 처리, 메시지 내용, 웹훅 URL 검사, 읽지 않음 정의, 확인, 발송 실패 표시, 채널 관리). §3.3 알림 보존 정리 구현. 감사 작업 종류 `channel.*`, `alert.ack` |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -170,7 +171,7 @@ quartz-admin/
 | 대상 | 기본 보존 기간 | 설정 |
 | --- | --- | --- |
 | `audit_logs` | 365일 | `QA_AUDIT_RETENTION_DAYS` (PRD FR-AUD-04) |
-| 해소된 `alerts`, `notifications` | 90일 | `QA_ALERT_RETENTION_DAYS` |
+| 해소된 `alerts`, `notifications` | 90일 | `QA_ALERT_RETENTION_DAYS`. 해소 시각이 지난 알림(발송 기록·읽음 포함)과, 마지막 시도가 지난 끝난 발송을 지운다(B-25) |
 | 만료된 `sessions` | 즉시 | |
 
 ## 4. 보안
@@ -405,6 +406,16 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 | PUT | `/alert-rules/:id` | 규칙 수정. 타입은 바꿀 수 없다(400) |
 | DELETE | `/alert-rules/:id` | 규칙 삭제. 그 규칙의 열린 알림은 발송 없이 해소하고 기록은 남긴다 |
 | GET | `/schedulers/:id/alerts` | 해소 전 알림(심각도·최근 순)과 최근 해소된 알림 20개. 억제 중 여부(`suppressed`)와 발송 여부(`notified`) 포함 |
+| GET | `/channels` | 알림 채널 목록(인앱 먼저, 이름순)과 SMTP 설정 여부. 웹훅 URL은 가린 값(`hooks.slack.com/…/AbCd`)만 |
+| POST | `/channels` | Slack·이메일 채널 추가. 인앱 채널은 도구가 만든 하나뿐이다 |
+| PUT | `/channels/:id` | 채널 수정. 웹훅 URL을 비우면 지금 값을 쓴다. 종류는 바꿀 수 없고(400), 인앱 채널은 바꿀 수 없다(409). 끄면 아직 보내지 않은 발송을 버린다 |
+| DELETE | `/channels/:id` | 채널 삭제. 규칙 연결과 발송 기록은 외래키 cascade로 함께 지워진다. 인앱 채널은 지울 수 없다(409) |
+| POST | `/channels/:id/test` | 예시 알림을 바로 보낸다(발송 큐를 거치지 않음). 실패도 200으로 `{ ok: false, message }` |
+| GET | `/alerts` | 알림 센터 목록(`status`: active·resolved·all, 50개씩). 스케줄러 이름·환경, 이 사용자의 읽지 않음, 확인한 사람 포함 |
+| GET | `/alerts/summary` | 읽지 않은 수, 해소 전 수, 최근 7일 발송 실패 수. 화면이 30초마다 읽는다 |
+| GET | `/alerts/delivery-failures` | 최근 7일 안에 끝내 보내지 못한 발송 50개 |
+| POST | `/alerts/:id/read`, `/alerts/read-all` | 읽음 처리(사용자별). 감사 기록을 남기지 않는다 |
+| POST | `/alerts/:id/ack` | 확인(ack). 해소된 알림은 409 |
 
 - **입력 검증**: 지금은 `SUPPORTED_DB_KINDS`(Oracle)만 받습니다. Oracle은 서비스 이름과 SID 중 정확히 하나, 다른 DB는 DB 이름이 필요합니다. 호스트·서비스 이름·SID는 접속 기술자를 깨뜨리는 문자(괄호, 등호, 공백)를 받지 않습니다. 환경 라벨은 소문자로 맞추고(`prod`, `stage`, `dev`), 태그는 10개·30자까지이며 중복을 없앱니다. 접속 이름은 고유합니다(409 `CONNECTION_NAME_TAKEN`).
 - **비밀번호 저장**: §4.1대로 빈 값으로 INSERT한 뒤 같은 트랜잭션에서 행 ID를 AAD로 암호화해 UPDATE합니다.
@@ -829,6 +840,21 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 - **이메일**: nodemailer로 SMTP(`QA_SMTP_*`)를 통해 보냅니다. 본문은 텍스트와 HTML을 함께 담고, 수신자는 채널 설정에 둡니다.
 - **인앱**: 화면이 30초마다 `GET /alerts/summary`(읽지 않은 수)를 폴링하고, 알림 센터 목록은 `GET /alerts`로 읽습니다.
 - 채널마다 테스트 발송 API(`POST /channels/:id/test`)를 둡니다.
+- **구현** (B-25, `apps/api/src/alerts/`)
+  - **워커**(`NotificationWorker`): 5초마다 시각이 된 `pending`을 200개까지 꺼내 채널별로 보냅니다. 앞 회차가 끝나지 않았으면 겹쳐 돌리지 않습니다. 보내는 동안 SQLite를 잡지 않고, 한 번 보낼 때 10초까지만 기다리므로(Slack은 `fetch` 시간 제한, SMTP는 nodemailer의 연결·인사·소켓 시간 제한) Slack이나 SMTP가 멈춰도 감시 루프는 밀리지 않습니다. 끝난 발송의 `next_attempt_at`은 마지막으로 시도한 시각입니다.
+  - **요약**: 한 회차에 같은 채널로 나갈 발송이 5건을 넘으면 메시지 하나로 보냅니다(알림마다 한 줄, 알림 센터 링크). 요약이 실패하면 묶인 발송이 모두 같이 다시 시도됩니다.
+  - **인앱**: 보낼 것이 없어 바로 `sent`로 둡니다. 인앱 알림은 인앱 채널로 들어간 발송 기록으로 셉니다.
+  - **메시지**(`messages.ts`): 제목은 `[심각] 정산 배치 · ERROR 트리거 발생`(이벤트: 발생, 대상 늘어남, 계속됨, 해소)이고, 스케줄러, 환경 라벨, 요약, 대상 상위 10개, 스케줄러 알림 탭 링크(`QA_PUBLIC_URL`)를 넣습니다. Slack은 attachment 색(심각 빨강, 경고 주황, 해소 초록)과 Block Kit, 이메일은 텍스트와 HTML(값은 모두 이스케이프)입니다. 해소 알림도 발송이므로 `last_notified_at`을 갱신합니다.
+  - **웹훅 URL**: https만 받습니다. 개발·테스트용으로 `localhost`·`127.0.0.1`만 http를 허용하고, URL 안 자격증명과 리다이렉트는 거부합니다. 호스트는 제한하지 않습니다(사내 Slack 호환 서버). 도구 서버가 사용자가 넣은 주소로 요청한다는 점은 B-32 보안 점검에서 다시 봅니다.
+  - **발송 오류 문구**: 큐의 `last_error`와 화면에 그대로 보이므로 웹훅 URL을 넣지 않습니다. Slack은 상태 코드와 응답 본문 앞 100자, SMTP는 서버 응답이나 오류 코드입니다.
+  - **채널 설정 저장**: `config_enc`에 Slack은 `{ webhookUrl }`, 이메일은 `{ recipients }`, 인앱은 `{}`를 암호화해 둡니다(AAD `channels:<id>`). 감사 기록에는 가린 웹훅 URL만 남깁니다. 인앱 채널은 기동할 때 없으면 만듭니다.
+  - **SMTP 미설정**: 이메일 채널은 만들 수 있지만 보내면 "SMTP를 설정하지 않았습니다"로 실패합니다. 화면은 채널 목록과 폼에서 미리 알립니다.
+  - **읽지 않음**: 사용자마다 셉니다. 인앱 채널로 들어간 발송 중 그 사용자가 마지막으로 읽은 뒤의 것이 있으면 읽지 않은 알림입니다. 억제돼 한 번도 보내지 않은 알림, 인앱 채널을 고르지 않은 규칙의 알림은 세지 않습니다. 대상이 늘거나(`update`) 해소되면 다시 읽지 않음이 됩니다.
+  - **확인(ack)**: `open` → `acked`, 확인한 사람과 시각을 남기고 읽음으로도 둡니다. 재알림만 멈추고 갱신·해소 발송은 그대로입니다(§9.3). 감사 기록(`alert.ack`)을 남깁니다.
+  - **발송 실패 표시**: 끝내 `failed`가 된 발송은 최근 7일 것을 알림 센터 위에 경고로 보여 주고, 상단 바 알림 버튼에 점을 붙입니다.
+  - **규칙의 채널**(`channelIds`): 추가에서 빼면 인앱 채널, 수정에서 빼면 지금 연결을 그대로 둡니다. 빈 목록이면 알림 상태만 기록합니다. 없는 채널은 400입니다.
+  - 채널 추가·수정·삭제·테스트 발송은 감사 로그(`channel.create`, `channel.update`, `channel.delete`, `channel.test`, 대상 종류 `channel`)에 남깁니다.
+- **화면**: 상단 바에 알림 센터 버튼(읽지 않은 수 배지, 30초마다 갱신). 알림 센터(`/alerts`)는 해소 전·해소·모두로 나눠 보고 읽음·모두 읽음·확인을 합니다. 알림 채널(`/channels`)은 목록(보낼 곳, 연결된 규칙 수, 마지막 발송), 줄 메뉴의 테스트 발송·수정·삭제, 추가(`/channels/new`)·수정(`/channel/edit?id=N`) 화면입니다. 알림 규칙 화면에서 보낼 채널을 고릅니다.
 
 ## 10. 감사 로그 (FR-AUD)
 

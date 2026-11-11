@@ -31,6 +31,7 @@
     "drizzle-orm": "catalog:",
     "helmet": "catalog:",
     "nestjs-pino": "catalog:",
+    "nodemailer": "catalog:",
     "pino": "catalog:",
     "pino-http": "catalog:",
     "reflect-metadata": "catalog:",

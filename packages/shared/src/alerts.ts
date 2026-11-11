@@ -5,7 +5,13 @@
  * 스케줄러 단위 규칙(`NODE_MISSING`, `CLUSTER_DOWN`, `MONITOR_UNREACHABLE`)은 늘 스케줄러 전체가 대상이다.
  */
 import { z } from 'zod';
-import { SEVERITIES, type AlertRuleType, type AlertStatus, type Severity } from './domain.js';
+import {
+  SEVERITIES,
+  type AlertRuleType,
+  type AlertStatus,
+  type NotificationEvent,
+  type Severity,
+} from './domain.js';
 import type { TriggerRef } from './monitor.js';
 
 const NAME_MAX = 200;
@@ -64,11 +70,22 @@ const intIn = (label: string, min: number, max: number) =>
     .min(min, { error: `${label}은(는) ${min} 이상이어야 합니다` })
     .max(max, { error: `${label}은(는) ${max} 이하여야 합니다` });
 
+/** 규칙 하나에 연결하는 채널 수 상한 */
+export const RULE_CHANNELS_MAX = 20;
+
 const common = {
   severity: z.enum(SEVERITIES),
   /** null이면 재알림하지 않는다 */
   renotifyMinutes: intIn('재알림 간격', 1, RENOTIFY_MINUTES_MAX).nullable(),
   enabled: z.boolean(),
+  /**
+   * 보낼 채널 (FR-ALT-06). 빼면 추가는 인앱 채널, 수정은 지금 연결을 그대로 둔다.
+   * 빈 목록이면 어디에도 보내지 않는다(알림 상태는 기록)
+   */
+  channelIds: z
+    .array(z.number().int().positive())
+    .max(RULE_CHANNELS_MAX, { error: `채널은 ${RULE_CHANNELS_MAX}개까지 고를 수 있습니다` })
+    .optional(),
 };
 const allScope = z.object({ kind: z.literal('all') }).default({ kind: 'all' });
 const noParams = z.object({}).default({});
@@ -98,6 +115,22 @@ export const alertRuleInputSchema = z.discriminatedUnion('type', [
   }),
 ]);
 export type AlertRuleInput = z.infer<typeof alertRuleInputSchema>;
+
+/** 규칙 타입 이름. 화면과 Slack·이메일 메시지가 함께 쓴다 */
+export const ALERT_RULE_LABELS: Record<AlertRuleType, string> = {
+  OVERDUE: '실행 지연',
+  TRIGGER_ERROR: 'ERROR 트리거',
+  BLOCKED_LONG: 'BLOCKED 장기 지속',
+  NODE_MISSING: '노드 이탈',
+  CLUSTER_DOWN: '클러스터 다운',
+  MONITOR_UNREACHABLE: '감시 불가',
+};
+
+export const SEVERITY_LABELS: Record<Severity, string> = {
+  info: '정보',
+  warning: '경고',
+  critical: '심각',
+};
 
 /** 규칙 타입별 매개변수 */
 export interface AlertRuleParams {
@@ -204,3 +237,78 @@ export interface AlertRulesResponse {
 }
 
 export const ALERT_RESOLVED_LISTED = 20;
+
+/** 알림 대상을 한 줄로 (화면 표, Slack·이메일 요약) */
+export function describeAffected(affected: AlertAffected | null): string {
+  if (!affected) return '';
+  switch (affected.kind) {
+    case 'triggers': {
+      const [first] = affected.triggers;
+      if (!first) return `트리거 ${affected.total}개`;
+      const name = `${first.group}.${first.name}`;
+      return affected.total === 1 ? name : `${name} 외 ${affected.total - 1}개`;
+    }
+    case 'nodes':
+      return `활성 노드 ${affected.active}개 / 기대 ${affected.expected}개`;
+    case 'monitor':
+      return `연속 ${affected.failures}회 실패${affected.errorMessage ? ` · ${affected.errorMessage}` : ''}`;
+  }
+}
+
+// ── 알림 센터 (FR-ALT-07, TRD §9.4) ─────────────────────────────
+
+export const ALERT_CENTER_STATUSES = ['active', 'resolved', 'all'] as const;
+export type AlertCenterStatus = (typeof ALERT_CENTER_STATUSES)[number];
+export const ALERT_CENTER_PAGE_SIZE = 50;
+
+/** `GET /alerts` */
+export const alertCenterQuerySchema = z.object({
+  /** active: 열림·확인함(기본), resolved: 해소, all: 모두 */
+  status: z.enum(ALERT_CENTER_STATUSES).default('active'),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+});
+export type AlertCenterQuery = z.infer<typeof alertCenterQuerySchema>;
+
+export interface AlertCenterItemDto extends AlertDto {
+  schedulerName: string;
+  envLabel: string | null;
+  /** 인앱으로 받은 뒤 이 사용자가 읽지 않았으면 true */
+  unread: boolean;
+  /** 확인한 사용자 이름 */
+  ackedBy: string | null;
+}
+
+export interface AlertCenterPage {
+  items: AlertCenterItemDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** `GET /alerts/summary`. 화면이 30초마다 읽는다 */
+export interface AlertSummaryDto {
+  /** 인앱으로 받고 읽지 않은 알림 수 */
+  unread: number;
+  /** 해소 전 알림 수 */
+  open: number;
+  /** 최근 7일 안에 끝내 보내지 못한 발송 수 */
+  failedDeliveries: number;
+}
+
+/** 끝내 보내지 못한 발송 (`GET /alerts/delivery-failures`) */
+export interface DeliveryFailureDto {
+  id: number;
+  alertId: number;
+  alertType: AlertRuleType;
+  schedulerId: number;
+  schedulerName: string;
+  channelId: number;
+  channelName: string;
+  event: NotificationEvent;
+  attempts: number;
+  lastError: string | null;
+  createdAt: number;
+}
+
+/** 최근 이 기간 안의 발송 실패를 센다 */
+export const DELIVERY_FAILURE_WINDOW_MS = 7 * 24 * 3_600_000;
