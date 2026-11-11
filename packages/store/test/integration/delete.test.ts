@@ -1,15 +1,11 @@
 import type { CommandExpected, QuartzCommand } from '@qa/shared';
-import type oracledb from 'oracledb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   CommandRejection,
-  OracleAdapter,
-  QUARTZ_REQUIRED_TABLES,
   TargetPoolManager,
-  createTableSet,
+  createDriverAdapters,
   executeCommand,
   expectedOf,
-  oracleDialect,
   previewCommand,
   queryDbNowMillis,
   type CommandOutcome,
@@ -21,11 +17,16 @@ import {
   QUARTZ_VERSION,
   listExecutions,
   quartzTableName,
-  startOracleQuartzCluster,
+  startQuartzCluster,
   waitFor,
-  type OracleQuartzCluster,
+  type QuartzCluster,
   type TestbedClient,
   type TestbedNode,
+  TEST_DB,
+  TEST_DB_LABEL,
+  schedulerContext,
+  triggerAccessIsFree,
+  type TestConnection,
 } from '../support/index.js';
 
 /** 차등 테스트의 두 기준 인스턴스. 같은 초기 상태를 만들고 한쪽은 Quartz API, 다른 쪽은 도구로 명령한다 */
@@ -33,43 +34,23 @@ const REF_QUARTZ = 'DeleteQuartz';
 const REF_TOOL = 'DeleteTool';
 const T = (name: string) => quartzTableName(name as Parameters<typeof quartzTableName>[0]);
 
-const features = {
-  simpropTriggers: true,
-  triggerPriority: true,
-  firedPriority: true,
-  firedSchedTime: true,
-  jobNonconcurrent: true,
-  jobUpdateData: true,
-  cronTimeZone: true,
-};
-
 /**
  * 트리거·잡 삭제 (B-21, TRD §7.3, 부록 A.7 D-01~D-07, DJ-01~DJ-03).
- * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 Oracle 스키마에 띄운다.
+ * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 DB 스키마에 띄운다.
  */
-describe(`삭제 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
-  let cluster: OracleQuartzCluster;
+describe(`삭제 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
+  let cluster: QuartzCluster;
   let refQuartz: TestbedNode;
   let refTool: TestbedNode;
-  let conn: oracledb.Connection;
+  let conn: TestConnection;
   let pools: TargetPoolManager;
   let target: PoolTarget;
 
-  const ctxFor = (schedName: string): SchedulerCommandContext => ({
-    dialect: oracleDialect,
-    tables: createTableSet(oracleDialect, {
-      schema: cluster.oracle.user,
-      tables: {
-        ...Object.fromEntries(QUARTZ_REQUIRED_TABLES.map((t) => [t, `QRTZ_${t}`])),
-        SIMPROP_TRIGGERS: 'QRTZ_SIMPROP_TRIGGERS',
-      },
-    }),
-    features,
-    schedName,
-  });
+  const ctxFor = (schedName: string): SchedulerCommandContext =>
+    schedulerContext(cluster.db, schedName);
 
   const run = <R>(fn: (c: TargetConn) => Promise<R>) => pools.withConnection(target, fn);
-  const dbNow = () => run((c) => queryDbNowMillis(c, oracleDialect));
+  const dbNow = () => run((c) => queryDbNowMillis(c, cluster.db.dialect));
 
   const toolRun = (
     schedName: string,
@@ -83,22 +64,11 @@ describe(`삭제 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
     });
 
   async function lockIsFree(schedName: string): Promise<boolean> {
-    try {
-      await conn.execute(
-        `SELECT LOCK_NAME FROM ${T('LOCKS')} WHERE SCHED_NAME = :1 AND LOCK_NAME = 'TRIGGER_ACCESS' FOR UPDATE WAIT 3`,
-        [schedName],
-      );
-      return true;
-    } catch (err) {
-      if (/ORA-(30006|00054)/.test(String(err))) return false;
-      throw err;
-    } finally {
-      await conn.rollback();
-    }
+    return triggerAccessIsFree(conn, cluster.db, schedName, T('LOCKS'));
   }
 
   async function count(sql: string, binds: unknown[]): Promise<number> {
-    const res = await conn.execute<[number]>(sql, binds as oracledb.BindParameters);
+    const res = await conn.execute<[number]>(sql, binds);
     return res.rows?.[0]?.[0] ?? 0;
   }
 
@@ -131,23 +101,16 @@ describe(`삭제 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
     );
 
   beforeAll(async () => {
-    cluster = await startOracleQuartzCluster({ nodes: 2 });
+    cluster = await startQuartzCluster({ nodes: 2 });
     [refQuartz, refTool] = await Promise.all([
       cluster.addReference(REF_QUARTZ),
       cluster.addReference(REF_TOOL),
     ]);
-    conn = await cluster.oracle.connect();
-    pools = new TargetPoolManager([new OracleAdapter()]);
+    conn = await cluster.db.connect();
+    pools = new TargetPoolManager(createDriverAdapters());
     target = {
       id: 'delete',
-      info: {
-        kind: 'oracle',
-        host: cluster.oracle.container.getHost(),
-        port: cluster.oracle.container.getMappedPort(1521),
-        username: cluster.oracle.user,
-        password: cluster.oracle.password,
-        oracleServiceName: 'FREEPDB1',
-      },
+      info: cluster.db.targetInfo(),
     };
   });
 
@@ -264,15 +227,19 @@ describe(`삭제 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
         `VALUES (:sched, 'cal', 'd04', 'MINUTE', 5)`,
       insertTrigger('blob', 'BLOB'),
       `INSERT INTO ${T('BLOB_TRIGGERS')} (SCHED_NAME, TRIGGER_NAME, TRIGGER_GROUP, BLOB_DATA) ` +
-        `VALUES (:sched, 'blob', 'd04', HEXTORAW('ACED0005'))`,
+        `VALUES (:sched, 'blob', 'd04', ${TEST_DB === 'postgres' ? "decode('ACED0005', 'hex')" : "HEXTORAW('ACED0005')"})`,
     ]);
     await differential(unschedule('d04', 'cal'), delTrigger('d04', 'cal'));
     await differential(unschedule('d04', 'blob'), delTrigger('d04', 'blob'));
-    const left = await count(
-      `SELECT (SELECT COUNT(*) FROM ${T('SIMPROP_TRIGGERS')} WHERE SCHED_NAME = :1 AND TRIGGER_GROUP = 'd04') + ` +
-        `(SELECT COUNT(*) FROM ${T('BLOB_TRIGGERS')} WHERE SCHED_NAME = :2 AND TRIGGER_GROUP = 'd04') FROM DUAL`,
-      [REF_TOOL, REF_TOOL],
-    );
+    const left =
+      (await count(
+        `SELECT COUNT(*) FROM ${T('SIMPROP_TRIGGERS')} WHERE SCHED_NAME = :1 AND TRIGGER_GROUP = 'd04'`,
+        [REF_TOOL],
+      )) +
+      (await count(
+        `SELECT COUNT(*) FROM ${T('BLOB_TRIGGERS')} WHERE SCHED_NAME = :1 AND TRIGGER_GROUP = 'd04'`,
+        [REF_TOOL],
+      ));
     expect(left).toBe(0);
   });
 
@@ -361,7 +328,12 @@ describe(`삭제 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
       );
       await toolRun(sched(), delTrigger('d05'));
       await waitFor(async () => (await dbNow()) > oldFire + 3_000, { timeoutMs: 40_000 });
-      expect(await listExecutions(conn, { schedName: sched(), triggerGroup: 'd05' })).toEqual([]);
+      // 매분 트리거라 앞 회차(노드가 4초 안쪽에 집어 건너뛴 회차)는 지우기 전에 정상으로 실행됐을 수 있다.
+      // 지운 회차(oldFire)부터 실행이 없어야 한다
+      const late = (await listExecutions(conn, { schedName: sched(), triggerGroup: 'd05' })).filter(
+        (e) => (e.scheduledFireTime ?? e.fireTime) >= oldFire,
+      );
+      expect(late).toEqual([]);
       // 노드는 발화 시각에 상태가 ACQUIRED가 아니면 발화하지 않고 획득 기록을 지운다(releaseAcquiredTrigger)
       await waitFor(async () => (await firedRows(sched(), 'd05', 't')) === 0, {
         timeoutMs: 30_000,

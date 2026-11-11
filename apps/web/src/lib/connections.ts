@@ -55,7 +55,7 @@ export function unusableReason(set: UnusableTableSet): string {
 /** 연결 테스트 실패 원인별 다음 행동 (FR-CON-02) */
 export const TEST_FAILURE_HINTS: Record<string, string> = {
   TARGET_UNREACHABLE:
-    '호스트, 포트, 서비스 이름(SID)이 맞는지, 도구 서버에서 DB로 가는 방화벽이 열려 있는지 확인하세요.',
+    '호스트, 포트, 서비스 이름(SID)이나 DB 이름이 맞는지, 도구 서버에서 DB로 가는 방화벽이 열려 있는지 확인하세요.',
   TARGET_AUTH_FAILED:
     '계정과 비밀번호가 맞는지, 계정이 잠기거나 비밀번호가 만료되지 않았는지 확인하세요.',
   TARGET_TIMEOUT:

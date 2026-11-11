@@ -48,6 +48,8 @@ export async function acquireTriggerAccess(
     } catch (err) {
       if (attempt === 0 && d.isDuplicateKey(err)) {
         await conn.rollback();
+        // ROLLBACK으로 트랜잭션 범위 설정(PostgreSQL `SET LOCAL lock_timeout`)도 사라졌다. 다시 건다
+        await d.beforeLockedTx(conn, waitSec);
         continue;
       }
       throw err;

@@ -85,6 +85,15 @@ class TestbedConfigTest {
   void Oracle이_아니면_드라이버_속성을_넣지_않는다() {
     Map<String, String> env = new java.util.HashMap<>(BASE);
     env.put("TESTBED_DB_URL", "jdbc:postgresql://db/quartz");
-    assertEquals(0, TestbedConfig.fromEnv(env).driverProperties.size());
+    TestbedConfig cfg = TestbedConfig.fromEnv(env);
+    assertEquals(0, cfg.driverProperties.size());
+    // 빈 속성을 넘기면 Quartz가 null로 setter를 불러 기동이 실패한다(B-27에서 확인)
+    assertEquals(
+        null, cfg.toQuartzProperties().getProperty("org.quartz.dataSource.testbed.driverProperties"));
+  }
+
+  @Test
+  void 드라이버_속성이_null이어도_ConnectionProvider를_설정할_수_있다() throws Exception {
+    new HikariConnectionProvider().setDriverProperties(null);
   }
 }

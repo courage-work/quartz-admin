@@ -5,7 +5,7 @@ export type { TargetErrorCode } from '@qa/shared';
 /** 코드별 화면 문구. 드라이버 원문은 접속 정보가 섞일 수 있어 쓰지 않는다 (TRD §5.6) */
 export const TARGET_ERROR_MESSAGES: Record<TargetErrorCode, string> = {
   TARGET_UNREACHABLE:
-    '대상 DB에 연결할 수 없습니다. 호스트, 포트, 서비스 이름과 네트워크를 확인하세요',
+    '대상 DB에 연결할 수 없습니다. 호스트, 포트, 서비스 이름(또는 DB 이름)과 네트워크를 확인하세요',
   TARGET_AUTH_FAILED:
     '대상 DB 계정으로 로그인하지 못했습니다. 계정, 비밀번호, 접속 권한을 확인하세요',
   TARGET_TIMEOUT: '대상 DB가 제한 시간 안에 응답하지 않았습니다',

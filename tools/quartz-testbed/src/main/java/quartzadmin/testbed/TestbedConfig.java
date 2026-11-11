@@ -142,7 +142,10 @@ public final class TestbedConfig {
     p.setProperty(ds + "user", dbUser);
     p.setProperty(ds + "password", dbPassword);
     p.setProperty(ds + "maxConnections", Integer.toString(maxConnections));
-    p.setProperty(ds + "driverProperties", driverPropertiesText());
+    String driverProps = driverPropertiesText();
+    if (!driverProps.isEmpty()) {
+      p.setProperty(ds + "driverProperties", driverProps);
+    }
 
     p.putAll(parseProperties(extraQuartzProperties, "TESTBED_QUARTZ_PROPERTIES"));
     return p;

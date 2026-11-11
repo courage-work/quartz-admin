@@ -24,11 +24,13 @@
   "dependencies": {
     "@qa/core": "workspace:*",
     "@qa/shared": "workspace:*",
-    "oracledb": "catalog:"
+    "oracledb": "catalog:",
+    "pg": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/oracledb": "catalog:",
+    "@types/pg": "catalog:",
     "eslint": "catalog:",
     "testcontainers": "catalog:",
     "typescript": "catalog:",

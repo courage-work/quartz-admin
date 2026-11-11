@@ -1,16 +1,12 @@
 import type { CommandExpected, QuartzCommand } from '@qa/shared';
-import type oracledb from 'oracledb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   ALL_GROUPS_PAUSED,
   CommandRejection,
-  OracleAdapter,
-  QUARTZ_REQUIRED_TABLES,
   TargetPoolManager,
-  createTableSet,
+  createDriverAdapters,
   executeCommand,
   expectedOf,
-  oracleDialect,
   previewCommand,
   queryDbNowMillis,
   type CommandOutcome,
@@ -23,13 +19,17 @@ import {
   listExecutions,
   quartzTableName,
   sleep,
-  startOracleQuartzCluster,
+  startQuartzCluster,
   waitFor,
   waitForExecutions,
-  type OracleQuartzCluster,
+  type QuartzCluster,
   type TestbedClient,
   type TestbedNode,
   type TriggerSpec,
+  TEST_DB_LABEL,
+  schedulerContext,
+  triggerAccessIsFree,
+  type TestConnection,
 } from '../support/index.js';
 
 /** 차등 테스트의 두 기준 인스턴스. 같은 초기 상태를 만들고 한쪽은 Quartz API, 다른 쪽은 도구로 명령한다 */
@@ -39,41 +39,21 @@ const T = (name: string) => quartzTableName(name as Parameters<typeof quartzTabl
 /** 클러스터 노드의 misfireThreshold. 수렴 테스트가 MisfireHandler를 오래 기다리지 않게 줄인다 */
 const MISFIRE_THRESHOLD_MS = 5_000;
 
-const features = {
-  simpropTriggers: true,
-  triggerPriority: true,
-  firedPriority: true,
-  firedSchedTime: true,
-  jobNonconcurrent: true,
-  jobUpdateData: true,
-  cronTimeZone: true,
-};
-
 /**
  * 일시정지와 재개 (B-18, TRD §7.3·§7.4, 부록 A.2 P-05, A.3, A.4 G-01~G-10, A.8 X-05).
- * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 Oracle 스키마에 띄운다.
+ * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 DB 스키마에 띄운다.
  */
-describe(`일시정지와 재개 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
-  let cluster: OracleQuartzCluster;
+describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
+  let cluster: QuartzCluster;
   let refQuartz: TestbedNode;
   let refTool: TestbedNode;
   let node1: TestbedNode;
-  let conn: oracledb.Connection;
+  let conn: TestConnection;
   let pools: TargetPoolManager;
   let target: PoolTarget;
 
-  const ctxFor = (schedName: string): SchedulerCommandContext => ({
-    dialect: oracleDialect,
-    tables: createTableSet(oracleDialect, {
-      schema: cluster.oracle.user,
-      tables: {
-        ...Object.fromEntries(QUARTZ_REQUIRED_TABLES.map((t) => [t, `QRTZ_${t}`])),
-        SIMPROP_TRIGGERS: 'QRTZ_SIMPROP_TRIGGERS',
-      },
-    }),
-    features,
-    schedName,
-  });
+  const ctxFor = (schedName: string): SchedulerCommandContext =>
+    schedulerContext(cluster.db, schedName);
 
   const run = <R>(fn: (c: TargetConn) => Promise<R>) => pools.withConnection(target, fn);
 
@@ -85,7 +65,7 @@ describe(`일시정지와 재개 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, ()
   const now = () => Date.now() + skewMs;
   /** Docker VM 시계는 호스트와 점점 어긋날 수 있어 시각에 민감한 단계 앞에서 다시 맞춘다 */
   const syncClock = async () => {
-    skewMs = (await run((c) => queryDbNowMillis(c, oracleDialect))) - Date.now();
+    skewMs = (await run((c) => queryDbNowMillis(c, cluster.db.dialect))) - Date.now();
   };
 
   /** 화면처럼 미리보기의 기대 상태를 붙여 실행한다 */
@@ -108,18 +88,7 @@ describe(`일시정지와 재개 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, ()
 
   /** TRIGGER_ACCESS가 풀려 있는지(부록 A.1 공통 사후 조건). 클러스터 노드가 잠깐씩 잡으므로 3초까지 기다린다 */
   async function lockIsFree(schedName: string): Promise<boolean> {
-    try {
-      await conn.execute(
-        `SELECT LOCK_NAME FROM ${T('LOCKS')} WHERE SCHED_NAME = :1 AND LOCK_NAME = 'TRIGGER_ACCESS' FOR UPDATE WAIT 3`,
-        [schedName],
-      );
-      return true;
-    } catch (err) {
-      if (/ORA-(30006|00054)/.test(String(err))) return false;
-      throw err;
-    } finally {
-      await conn.rollback();
-    }
+    return triggerAccessIsFree(conn, cluster.db, schedName, T('LOCKS'));
   }
 
   interface TriggerRow {
@@ -157,7 +126,7 @@ describe(`일시정지와 재개 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, ()
   }
 
   beforeAll(async () => {
-    cluster = await startOracleQuartzCluster({
+    cluster = await startQuartzCluster({
       nodes: 2,
       node: { misfireThresholdMs: MISFIRE_THRESHOLD_MS },
     });
@@ -166,18 +135,11 @@ describe(`일시정지와 재개 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, ()
       cluster.addReference(REF_TOOL),
     ]);
     node1 = cluster.nodes[0]!;
-    conn = await cluster.oracle.connect();
-    pools = new TargetPoolManager([new OracleAdapter()]);
+    conn = await cluster.db.connect();
+    pools = new TargetPoolManager(createDriverAdapters());
     target = {
       id: 'pause-resume',
-      info: {
-        kind: 'oracle',
-        host: cluster.oracle.container.getHost(),
-        port: cluster.oracle.container.getMappedPort(1521),
-        username: cluster.oracle.user,
-        password: cluster.oracle.password,
-        oracleServiceName: 'FREEPDB1',
-      },
+      info: cluster.db.targetInfo(),
     };
     await syncClock();
   });

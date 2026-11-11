@@ -39,6 +39,8 @@ export { createTableSet, type TableNames, type TableSet } from './table-set.js';
 export { OracleAdapter } from './oracle/adapter.js';
 export { oracleDialect } from './oracle/dialect.js';
 export { oracleConnectString } from './oracle/connect-string.js';
+export { PostgresAdapter } from './postgres/adapter.js';
+export { postgresDialect } from './postgres/dialect.js';
 export { createDriverAdapters, dialectFor } from './registry.js';
 export { detectQuartz, type DetectOptions } from './detect/detect.js';
 export { REQUIRED_PRIVILEGES } from './detect/privileges.js';

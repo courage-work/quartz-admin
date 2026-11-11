@@ -1,4 +1,3 @@
-import type oracledb from 'oracledb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   QUARTZ_TABLES,
@@ -9,22 +8,25 @@ import {
   quartzCatalogName,
   quartzTableName,
   sleep,
-  startOracleQuartzCluster,
+  startQuartzCluster,
   waitFor,
   waitForExecutions,
-  type OracleQuartzCluster,
+  type QuartzCluster,
   type TestbedNode,
+  TEST_DB,
+  TEST_DB_LABEL,
+  type TestConnection,
 } from '../support/index.js';
 
-describe(`quartz-testbed 2노드 클러스터 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
-  let cluster: OracleQuartzCluster;
-  let conn: oracledb.Connection;
+describe(`quartz-testbed 2노드 클러스터 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
+  let cluster: QuartzCluster;
+  let conn: TestConnection;
   let node1: TestbedNode;
   let node2: TestbedNode;
 
   beforeAll(async () => {
-    cluster = await startOracleQuartzCluster({ nodes: 2 });
-    conn = await cluster.oracle.connect();
+    cluster = await startQuartzCluster({ nodes: 2 });
+    conn = await cluster.db.connect();
     [node1, node2] = cluster.nodes as [TestbedNode, TestbedNode];
   });
 
@@ -136,28 +138,56 @@ describe(`quartz-testbed 2노드 클러스터 (Oracle Free 23, Quartz ${QUARTZ_V
     );
   });
 
-  it('스키마 변형(사용자 지정 prefix, 소문자, oracle23)을 같은 스키마에 만들 수 있다', async () => {
-    await initQuartzSchema(conn, { prefix: 'APP_' });
-    await initQuartzSchema(conn, { prefix: 'qa_', tableCase: 'lower' });
-    await initQuartzSchema(conn, { prefix: 'B23_', variant: 'oracle23' });
+  it.skipIf(TEST_DB !== 'oracle')(
+    '스키마 변형(사용자 지정 prefix, 소문자, oracle23)을 같은 스키마에 만들 수 있다',
+    async () => {
+      await initQuartzSchema(conn, { prefix: 'APP_' });
+      await initQuartzSchema(conn, { prefix: 'qa_', tableCase: 'lower' });
+      await initQuartzSchema(conn, { prefix: 'B23_', variant: 'oracle23' });
 
-    const result = await conn.execute<[string]>('SELECT TABLE_NAME FROM USER_TABLES');
-    const tables = new Set((result.rows ?? []).map(([name]) => name));
-    for (const schema of [
-      {},
-      { prefix: 'APP_' },
-      { prefix: 'qa_', tableCase: 'lower' as const },
-      { prefix: 'B23_' },
-    ]) {
-      for (const table of QUARTZ_TABLES) {
-        expect(tables).toContain(quartzCatalogName(table, schema));
+      const result = await conn.execute<[string]>('SELECT TABLE_NAME FROM USER_TABLES');
+      const tables = new Set((result.rows ?? []).map(([name]) => name));
+      for (const schema of [
+        {},
+        { prefix: 'APP_' },
+        { prefix: 'qa_', tableCase: 'lower' as const },
+        { prefix: 'B23_' },
+      ]) {
+        for (const table of QUARTZ_TABLES) {
+          expect(tables).toContain(quartzCatalogName(table, schema));
+        }
       }
-    }
-    expect(tables).toContain('TESTBED_EXECUTIONS');
+      expect(tables).toContain('TESTBED_EXECUTIONS');
 
-    const boolType = await conn.execute<[string]>(
-      `SELECT DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = 'B23_JOB_DETAILS' AND COLUMN_NAME = 'IS_DURABLE'`,
-    );
-    expect(boolType.rows?.[0]?.[0]).toBe('BOOLEAN');
-  });
+      const boolType = await conn.execute<[string]>(
+        `SELECT DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = 'B23_JOB_DETAILS' AND COLUMN_NAME = 'IS_DURABLE'`,
+      );
+      expect(boolType.rows?.[0]?.[0]).toBe('BOOLEAN');
+    },
+  );
+
+  it.skipIf(TEST_DB !== 'postgres')(
+    '사용자 지정 prefix 스키마를 같은 스키마에 만들 수 있고, 불리언은 BOOL·BLOB은 BYTEA다',
+    async () => {
+      await initQuartzSchema(conn, { prefix: 'APP_' });
+      const result = await conn.execute<[string]>(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
+      );
+      const tables = new Set((result.rows ?? []).map(([name]) => name));
+      for (const schema of [{}, { prefix: 'APP_' }]) {
+        for (const table of QUARTZ_TABLES) {
+          expect(tables).toContain(quartzCatalogName(table, schema));
+        }
+      }
+      expect(tables).toContain('testbed_executions');
+      const types = await conn.execute<[string, string]>(
+        `SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_name = 'app_job_details' AND column_name IN ('is_durable', 'job_data') ORDER BY column_name`,
+      );
+      expect(types.rows).toEqual([
+        ['is_durable', 'boolean'],
+        ['job_data', 'bytea'],
+      ]);
+    },
+  );
 });
