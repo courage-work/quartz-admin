@@ -84,6 +84,49 @@ jobs:
       - name: Integration test
         run: pnpm turbo run test:integration --filter=@qa/store
 
+  # B-27: PostgreSQL 최소·최신 버전을 Quartz 두 버전에 하나씩 맞춘다. 전체 조합은 B-30(CI DB 매트릭스)에서
+  integration-postgres:
+    name: integration (postgres ${{ matrix.postgres }}, quartz ${{ matrix.quartz }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres: '11'
+            quartz: '2.3.2'
+          - postgres: '17'
+            quartz: '2.5.2'
+    env:
+      QA_IT_DB: postgres
+      QA_IT_POSTGRES_VERSION: ${{ matrix.postgres }}
+      QA_IT_QUARTZ_VERSION: ${{ matrix.quartz }}
+      QA_IT_TESTBED_IMAGE: quartz-testbed:${{ matrix.quartz }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build quartz-testbed image
+        run: >-
+          docker build
+          --build-arg QUARTZ_VERSION=${{ matrix.quartz }}
+          -t "$QA_IT_TESTBED_IMAGE"
+          tools/quartz-testbed
+
+      - name: Pull PostgreSQL
+        run: docker pull postgres:${{ matrix.postgres }}-alpine
+
+      - name: Integration test
+        run: pnpm turbo run test:integration --filter=@qa/store
+
   container:
     name: container (docker compose smoke)
     runs-on: ubuntu-latest

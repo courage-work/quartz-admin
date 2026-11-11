@@ -209,10 +209,16 @@ describe('접속 등록·조회 (FR-CON-01, 06)', () => {
       .expect(400);
     expect(JSON.stringify(both.body)).toContain('서비스 이름과 SID 중 하나만');
 
-    const pg = await t
-      .send('post', '/connections', { ...oracleInput, dbType: 'postgresql', database: 'q' }, cookie)
+    const mysql = await t
+      .send('post', '/connections', { ...oracleInput, dbType: 'mysql', database: 'q' }, cookie)
       .expect(400);
-    expect(JSON.stringify(pg.body)).toContain('아직 지원하지 않는 DB 종류');
+    expect(JSON.stringify(mysql.body)).toContain('아직 지원하지 않는 DB 종류');
+
+    // PostgreSQL은 DB 이름이 필요하다 (B-27)
+    const pgNoDb = await t
+      .send('post', '/connections', { ...oracleInput, dbType: 'postgresql', port: 5432 }, cookie)
+      .expect(400);
+    expect(JSON.stringify(pgNoDb.body)).toContain('DB 이름을 입력하세요');
 
     // 오류 응답에도 입력값(비밀번호)을 넣지 않는다
     expectNoPassword(res.body);

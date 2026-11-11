@@ -17,6 +17,7 @@
     <!-- 빌드 인자로 바꾼다: mvn -Dquartz.version=2.5.2 package -->
     <quartz.version>2.3.2</quartz.version>
     <ojdbc.version>23.26.3.0.0</ojdbc.version>
+    <postgresql.version>42.7.7</postgresql.version>
     <hikaricp.version>7.0.2</hikaricp.version>
     <jackson.version>2.22.2</jackson.version>
     <slf4j.version>2.0.17</slf4j.version>
@@ -64,6 +65,11 @@
       <groupId>com.oracle.database.jdbc</groupId>
       <artifactId>ojdbc11</artifactId>
       <version>${ojdbc.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>${postgresql.version}</version>
     </dependency>
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>

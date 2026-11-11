@@ -1,10 +1,10 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { it } from 'vitest';
-import { QUARTZ_VERSION, sleep, startOracleQuartzCluster } from '../support/index.js';
+import { QUARTZ_VERSION, TEST_DB_LABEL, sleep, startQuartzCluster } from '../support/index.js';
 
 /**
  * 화면·API를 손으로 확인할 때 쓰는 테스트베드 클러스터 (`pnpm --filter @qa/store testbed:up`).
- * Oracle Free 23과 Quartz 2노드를 띄우고, 접속 정보를 `QA_TESTBED_INFO`(기본 `.testbed.json`)에 쓴 뒤
+ * `QA_IT_DB`의 DB(기본 Oracle Free 23, `postgres`면 PostgreSQL)와 Quartz 2노드를 띄우고, 접속 정보를 `QA_TESTBED_INFO`(기본 `.testbed.json`)에 쓴 뒤
  * `QA_TESTBED_STOP` 파일이 생기거나 `QA_TESTBED_MINUTES`(기본 120)분이 지날 때까지 기다린다.
  * 프로세스를 끝내면 Testcontainers가 컨테이너를 지운다.
  */
@@ -12,9 +12,9 @@ const INFO = process.env.QA_TESTBED_INFO ?? '.testbed.json';
 const STOP = process.env.QA_TESTBED_STOP ?? '.testbed.stop';
 const MINUTES = Number(process.env.QA_TESTBED_MINUTES ?? 120);
 
-it(`테스트베드 클러스터 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, async () => {
+it(`테스트베드 클러스터 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, async () => {
   rmSync(STOP, { force: true });
-  const cluster = await startOracleQuartzCluster({ nodes: 2 });
+  const cluster = await startQuartzCluster({ nodes: 2 });
   try {
     const client = cluster.nodes[0]!.client;
     await client.scheduleJob({
@@ -26,13 +26,16 @@ it(`테스트베드 클러스터 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, as
       trigger: { name: 'every-10s', group: 'demo', type: 'simple', intervalMs: 10_000 },
     });
 
+    const target = cluster.db.targetInfo();
     const info = {
-      dbType: 'oracle',
-      host: cluster.oracle.container.getHost(),
-      port: cluster.oracle.container.getMappedPort(1521),
-      oracleServiceName: 'FREEPDB1',
-      username: cluster.oracle.user,
-      password: cluster.oracle.password,
+      dbType: target.kind,
+      host: target.host,
+      port: target.port,
+      ...(target.oracleServiceName
+        ? { oracleServiceName: target.oracleServiceName }
+        : { database: target.database }),
+      username: target.username,
+      password: target.password,
       schedulerName: cluster.schedulerName,
       nodes: cluster.nodes.length,
     };

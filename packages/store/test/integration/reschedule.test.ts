@@ -1,16 +1,12 @@
 import type { CommandExpected, QuartzCommand } from '@qa/shared';
-import type oracledb from 'oracledb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   ALL_GROUPS_PAUSED,
   CommandRejection,
-  OracleAdapter,
-  QUARTZ_REQUIRED_TABLES,
   TargetPoolManager,
-  createTableSet,
+  createDriverAdapters,
   executeCommand,
   expectedOf,
-  oracleDialect,
   previewCommand,
   queryDbNowMillis,
   type CommandOutcome,
@@ -23,13 +19,17 @@ import {
   listExecutions,
   quartzTableName,
   sleep,
-  startOracleQuartzCluster,
+  startQuartzCluster,
   waitFor,
-  type OracleQuartzCluster,
+  type QuartzCluster,
   type RowSnapshot,
   type TestbedClient,
   type TestbedNode,
   type TriggerSpec,
+  TEST_DB_LABEL,
+  schedulerContext,
+  triggerAccessIsFree,
+  type TestConnection,
 } from '../support/index.js';
 
 /** 차등 테스트의 두 기준 인스턴스. 같은 초기 상태를 만들고 한쪽은 Quartz API, 다른 쪽은 도구로 명령한다 */
@@ -37,16 +37,6 @@ const REF_QUARTZ = 'ReschedQuartz';
 const REF_TOOL = 'ReschedTool';
 const T = (name: string) => quartzTableName(name as Parameters<typeof quartzTableName>[0]);
 const DAY = 86_400_000;
-
-const features = {
-  simpropTriggers: true,
-  triggerPriority: true,
-  firedPriority: true,
-  firedSchedTime: true,
-  jobNonconcurrent: true,
-  jobUpdateData: true,
-  cronTimeZone: true,
-};
 
 /**
  * 행 스냅샷에서 뺄 컬럼을 지우고 다시 정렬한다. 스케줄 수정의 차등 비교는 PREV_FIRE_TIME과 START_TIME(CRON),
@@ -69,31 +59,21 @@ function normalize(snapshot: RowSnapshot, drop: string[]): Record<string, string
 
 /**
  * 스케줄 수정 (B-20, TRD §7.6, 부록 A.6 C-01~C-13, S-01~S-07).
- * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 Oracle 스키마에 띄운다.
+ * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 DB 스키마에 띄운다.
  */
-describe(`스케줄 수정 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
-  let cluster: OracleQuartzCluster;
+describe(`스케줄 수정 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
+  let cluster: QuartzCluster;
   let refQuartz: TestbedNode;
   let refTool: TestbedNode;
-  let conn: oracledb.Connection;
+  let conn: TestConnection;
   let pools: TargetPoolManager;
   let target: PoolTarget;
 
-  const ctxFor = (schedName: string): SchedulerCommandContext => ({
-    dialect: oracleDialect,
-    tables: createTableSet(oracleDialect, {
-      schema: cluster.oracle.user,
-      tables: {
-        ...Object.fromEntries(QUARTZ_REQUIRED_TABLES.map((t) => [t, `QRTZ_${t}`])),
-        SIMPROP_TRIGGERS: 'QRTZ_SIMPROP_TRIGGERS',
-      },
-    }),
-    features,
-    schedName,
-  });
+  const ctxFor = (schedName: string): SchedulerCommandContext =>
+    schedulerContext(cluster.db, schedName);
 
   const run = <R>(fn: (c: TargetConn) => Promise<R>) => pools.withConnection(target, fn);
-  const dbNow = () => run((c) => queryDbNowMillis(c, oracleDialect));
+  const dbNow = () => run((c) => queryDbNowMillis(c, cluster.db.dialect));
 
   const toolRun = (
     schedName: string,
@@ -113,18 +93,7 @@ describe(`스케줄 수정 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
     );
 
   async function lockIsFree(schedName: string): Promise<boolean> {
-    try {
-      await conn.execute(
-        `SELECT LOCK_NAME FROM ${T('LOCKS')} WHERE SCHED_NAME = :1 AND LOCK_NAME = 'TRIGGER_ACCESS' FOR UPDATE WAIT 3`,
-        [schedName],
-      );
-      return true;
-    } catch (err) {
-      if (/ORA-(30006|00054)/.test(String(err))) return false;
-      throw err;
-    } finally {
-      await conn.rollback();
-    }
+    return triggerAccessIsFree(conn, cluster.db, schedName, T('LOCKS'));
   }
 
   async function row(schedName: string, group: string, name: string) {
@@ -138,23 +107,16 @@ describe(`스케줄 수정 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
   }
 
   beforeAll(async () => {
-    cluster = await startOracleQuartzCluster({ nodes: 2 });
+    cluster = await startQuartzCluster({ nodes: 2 });
     [refQuartz, refTool] = await Promise.all([
       cluster.addReference(REF_QUARTZ),
       cluster.addReference(REF_TOOL),
     ]);
-    conn = await cluster.oracle.connect();
-    pools = new TargetPoolManager([new OracleAdapter()]);
+    conn = await cluster.db.connect();
+    pools = new TargetPoolManager(createDriverAdapters());
     target = {
       id: 'reschedule',
-      info: {
-        kind: 'oracle',
-        host: cluster.oracle.container.getHost(),
-        port: cluster.oracle.container.getMappedPort(1521),
-        username: cluster.oracle.user,
-        password: cluster.oracle.password,
-        oracleServiceName: 'FREEPDB1',
-      },
+      info: cluster.db.targetInfo(),
     };
   });
 

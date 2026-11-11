@@ -1,4 +1,4 @@
-import oracledb from 'oracledb';
+import type { TestConnection } from './db.js';
 import { waitFor, type WaitOptions } from './wait.js';
 
 /** 테스트베드 잡이 `TESTBED_EXECUTIONS`에 남긴 실행 기록 한 건 */
@@ -106,16 +106,16 @@ function toRecord(row: Row): ExecutionRecord {
   };
 }
 
-/** 조건에 맞는 실행 기록을 시작 시각 순으로 돌려준다(Oracle). */
+/** 조건에 맞는 실행 기록을 시작 시각 순으로 돌려준다 */
 export async function listExecutions(
-  conn: oracledb.Connection,
+  conn: TestConnection,
   filter: ExecutionFilter = {},
 ): Promise<ExecutionRecord[]> {
   const { sql, binds } = where(filter);
   const result = await conn.execute<Row>(
     `SELECT * FROM ${tableName(filter)}${sql} ORDER BY STARTED_AT, FIRE_INSTANCE_ID`,
     binds,
-    { outFormat: oracledb.OUT_FORMAT_OBJECT },
+    { outFormat: 'object' },
   );
   return (result.rows ?? []).map(toRecord);
 }
@@ -127,7 +127,7 @@ export interface WaitForExecutionsOptions extends WaitOptions {
 
 /** 실행 기록이 `min`건 이상 쌓일 때까지 기다린다. */
 export function waitForExecutions(
-  conn: oracledb.Connection,
+  conn: TestConnection,
   filter: ExecutionFilter,
   options: WaitForExecutionsOptions = {},
 ): Promise<ExecutionRecord[]> {
@@ -143,12 +143,11 @@ export function waitForExecutions(
 
 /** 조건에 맞는 실행 기록을 지운다. */
 export async function clearExecutions(
-  conn: oracledb.Connection,
+  conn: TestConnection,
   filter: ExecutionFilter = {},
 ): Promise<number> {
   const { sql, binds } = where(filter);
-  const result = await conn.execute(`DELETE FROM ${tableName(filter)}${sql}`, binds, {
-    autoCommit: true,
-  });
+  const result = await conn.execute(`DELETE FROM ${tableName(filter)}${sql}`, binds);
+  await conn.commit();
   return result.rowsAffected ?? 0;
 }

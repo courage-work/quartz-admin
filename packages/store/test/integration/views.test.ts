@@ -1,12 +1,9 @@
-import type oracledb from 'oracledb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   ALL_GROUPS_PAUSED,
-  OracleAdapter,
   collectMonitorData,
-  QUARTZ_REQUIRED_TABLES,
   TargetPoolManager,
-  createTableSet,
+  createDriverAdapters,
   getJobDetail,
   listExecuting,
   listGroups,
@@ -14,12 +11,18 @@ import {
   listNodes,
   listPausedGroups,
   listTriggers,
-  oracleDialect,
   queryDbNowMillis,
   type PoolTarget,
   type SchedulerViewContext,
 } from '../../src/index.js';
-import { initQuartzSchema, startOracle, type OracleFixture } from '../support/index.js';
+import {
+  TEST_DB_LABEL,
+  initQuartzSchema,
+  schedulerContext,
+  startTestDb,
+  type DbFixture,
+  type TestConnection,
+} from '../support/index.js';
 
 const SCHED = 'Views';
 const TRIGGER_COUNT = 10_000;
@@ -29,22 +32,12 @@ const SPECIAL_NAMES = ['a%b', 'a_b', 'a/b', 'axb'];
 /** 일반 트리거 + 특수 문자 그룹 + 정확히 일치 검증용 decoy 1개 */
 const TOTAL = TRIGGER_COUNT + SPECIAL_NAMES.length + 1;
 
-const features = {
-  simpropTriggers: true,
-  triggerPriority: true,
-  firedPriority: true,
-  firedSchedTime: true,
-  jobNonconcurrent: true,
-  jobUpdateData: true,
-  cronTimeZone: true,
-};
-
 /**
  * 조회 API의 쿼리 (B-14, TRD §8). 트리거 10,000개 스케줄러에서 목록 응답 시간과
  * `%`, `_`, `/`가 들어간 그룹·이름 조회를 확인한다.
  */
-describe('조회 쿼리 (Oracle Free 23)', () => {
-  let oracle: OracleFixture;
+describe(`조회 쿼리 (${TEST_DB_LABEL})`, () => {
+  let db: DbFixture;
   let pools: TargetPoolManager;
   let target: PoolTarget;
   let ctx: SchedulerViewContext;
@@ -55,41 +48,22 @@ describe('조회 쿼리 (Oracle Free 23)', () => {
   ) => pools.withConnection(target, fn);
 
   beforeAll(async () => {
-    oracle = await startOracle();
-    pools = new TargetPoolManager([new OracleAdapter()]);
-    target = {
-      id: 'views',
-      info: {
-        kind: 'oracle',
-        host: oracle.container.getHost(),
-        port: oracle.container.getMappedPort(1521),
-        username: oracle.user,
-        password: oracle.password,
-        oracleServiceName: 'FREEPDB1',
-      },
-    };
-    ctx = {
-      dialect: oracleDialect,
-      tables: createTableSet(oracleDialect, {
-        schema: oracle.user,
-        tables: {
-          ...Object.fromEntries(QUARTZ_REQUIRED_TABLES.map((t) => [t, `QRTZ_${t}`])),
-          SIMPROP_TRIGGERS: 'QRTZ_SIMPROP_TRIGGERS',
-        },
-      }),
-      features,
-      schedName: SCHED,
-    };
-    dbNow = await run((c) => queryDbNowMillis(c, oracleDialect));
-    await oracle.withConnection(async (conn) => {
+    db = await startTestDb();
+    pools = new TargetPoolManager(createDriverAdapters());
+    target = { id: 'views', info: db.targetInfo() };
+    ctx = schedulerContext(db, SCHED);
+    dbNow = await run((c) => queryDbNowMillis(c, db.dialect));
+    await db.withConnection(async (conn) => {
       await initQuartzSchema(conn);
       await seed(conn, dbNow);
+      // PostgreSQL은 방금 넣은 1만 행의 통계가 없어 계획이 크게 틀린다. 운영에서는 autovacuum이 통계를 채운다
+      if (db.kind === 'postgres') await conn.execute('ANALYZE');
     });
   });
 
   afterAll(async () => {
     await pools?.closeAll();
-    await oracle?.stop();
+    await db?.stop();
   });
 
   it('트리거 10,000개 스케줄러에서 목록 페이지 응답이 p95 2초 이내다', async () => {
@@ -109,7 +83,7 @@ describe('조회 쿼리 (Oracle Free 23)', () => {
         const started = performance.now();
         // API와 같이 DB 시각을 먼저 읽고 목록을 읽는다
         const result = await run(async (conn) => {
-          await queryDbNowMillis(conn, oracleDialect);
+          await queryDbNowMillis(conn, db.dialect);
           return listTriggers(conn, ctx, query);
         });
         timings.push(performance.now() - started);
@@ -230,7 +204,7 @@ describe('조회 쿼리 (Oracle Free 23)', () => {
     // 시드의 다음 실행 시각은 모두 미래(seed dbNow + 1초 간격)다. 연체 기준을 seed dbNow + 4.5초로 옮겨
     // 앞쪽 트리거(i=0~3)만 연체가 되게 한다. 앞선 테스트로 DB 시각이 흘렀으므로 지금 시각에서 거꾸로 계산한다
     const data = await run(async (c) => {
-      const current = await queryDbNowMillis(c, oracleDialect);
+      const current = await queryDbNowMillis(c, db.dialect);
       return collectMonitorData(c, ctx, {
         checkinMultiplier: 3,
         overdueAfterMs: current - (dbNow + 4_500),
@@ -287,7 +261,7 @@ describe('조회 쿼리 (Oracle Free 23)', () => {
 });
 
 /** Quartz 테이블에 조회용 데이터를 넣는다. 트리거는 executeMany로 한 번에 넣는다 */
-async function seed(conn: oracledb.Connection, now: number): Promise<void> {
+async function seed(conn: TestConnection, now: number): Promise<void> {
   const serialized = Buffer.from([0xac, 0xed, 0x00, 0x05, 0x73, 0x72, 0x00, 0x15]);
   const properties = Buffer.from('#Quartz\nowner=ops\nretry=3\n', 'latin1');
   await conn.executeMany(

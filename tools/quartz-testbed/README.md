@@ -4,7 +4,7 @@ quartz-admin 통합 테스트용 Quartz 노드입니다(TRD §12.1). 실제 Quar
 
 - Java 17, Quartz 2.3.2(기본) 또는 2.5.x(빌드 인자)
 - JDBC JobStore(`JobStoreTX`) 클러스터 모드, HikariCP
-- 지금은 Oracle만 지원합니다. PostgreSQL, MySQL, MariaDB 드라이버는 B-27~B-29에서 추가합니다.
+- Oracle(ojdbc11)과 PostgreSQL(postgresql 42.7.7) 드라이버를 넣었습니다. MySQL, MariaDB 드라이버는 B-28~B-29에서 추가합니다.
 
 ## 빌드
 
@@ -28,23 +28,23 @@ docker build --build-arg QUARTZ_VERSION=2.5.2 -t quartz-testbed:2.5.2 tools/quar
 
 ## 환경변수 (`server`)
 
-| 변수                                     | 기본값               | 설명                                                     |
-| ---------------------------------------- | -------------------- | -------------------------------------------------------- |
-| `TESTBED_DB_URL`                         | (필수)               | JDBC URL. 예: `jdbc:oracle:thin:@//oracle:1521/FREEPDB1` |
-| `TESTBED_DB_USER`, `TESTBED_DB_PASSWORD` | (필수)               | DB 계정                                                  |
-| `TESTBED_SCHEDULER_NAME`                 | `TestbedScheduler`   | `SCHED_NAME` (`org.quartz.scheduler.instanceName`)       |
-| `TESTBED_INSTANCE_ID`                    | `AUTO`               | 노드 인스턴스 ID                                         |
-| `TESTBED_TABLE_PREFIX`                   | `QRTZ_`              | `org.quartz.jobStore.tablePrefix`                        |
-| `TESTBED_DRIVER_DELEGATE`                | URL로 판단           | Oracle은 `OracleDelegate`, 그 외 `StdJDBCDelegate`       |
-| `TESTBED_THREAD_COUNT`                   | `5`                  | 작업 스레드 수                                           |
-| `TESTBED_CLUSTER_CHECKIN_INTERVAL_MS`    | `7500`               | 클러스터 체크인 간격(Quartz 기본값과 같음)               |
-| `TESTBED_MISFIRE_THRESHOLD_MS`           | `60000`              | misfire 판정 기준                                        |
-| `TESTBED_MAX_CONNECTIONS`                | 스레드 수 + 3        | Quartz 커넥션 풀 크기                                    |
-| `TESTBED_HTTP_PORT`                      | `8080`               | 제어 API 포트                                            |
-| `TESTBED_EXECUTIONS_TABLE`               | `TESTBED_EXECUTIONS` | 실행 기록 테이블                                         |
-| `TESTBED_DB_PROPERTIES`                  |                      | JDBC 드라이버 속성(properties 형식, 줄 단위)             |
-| `TESTBED_QUARTZ_PROPERTIES`              |                      | 덮어쓸 Quartz 설정(properties 형식, 줄 단위)             |
-| `TESTBED_START`                          | `true`               | `false`면 `start()`하지 않는 기준 인스턴스(차등 테스트)  |
+| 변수                                     | 기본값               | 설명                                                                              |
+| ---------------------------------------- | -------------------- | --------------------------------------------------------------------------------- |
+| `TESTBED_DB_URL`                         | (필수)               | JDBC URL. 예: `jdbc:oracle:thin:@//oracle:1521/FREEPDB1`                          |
+| `TESTBED_DB_USER`, `TESTBED_DB_PASSWORD` | (필수)               | DB 계정                                                                           |
+| `TESTBED_SCHEDULER_NAME`                 | `TestbedScheduler`   | `SCHED_NAME` (`org.quartz.scheduler.instanceName`)                                |
+| `TESTBED_INSTANCE_ID`                    | `AUTO`               | 노드 인스턴스 ID                                                                  |
+| `TESTBED_TABLE_PREFIX`                   | `QRTZ_`              | `org.quartz.jobStore.tablePrefix`                                                 |
+| `TESTBED_DRIVER_DELEGATE`                | URL로 판단           | Oracle `OracleDelegate`, PostgreSQL `PostgreSQLDelegate`, 그 외 `StdJDBCDelegate` |
+| `TESTBED_THREAD_COUNT`                   | `5`                  | 작업 스레드 수                                                                    |
+| `TESTBED_CLUSTER_CHECKIN_INTERVAL_MS`    | `7500`               | 클러스터 체크인 간격(Quartz 기본값과 같음)                                        |
+| `TESTBED_MISFIRE_THRESHOLD_MS`           | `60000`              | misfire 판정 기준                                                                 |
+| `TESTBED_MAX_CONNECTIONS`                | 스레드 수 + 3        | Quartz 커넥션 풀 크기                                                             |
+| `TESTBED_HTTP_PORT`                      | `8080`               | 제어 API 포트                                                                     |
+| `TESTBED_EXECUTIONS_TABLE`               | `TESTBED_EXECUTIONS` | 실행 기록 테이블                                                                  |
+| `TESTBED_DB_PROPERTIES`                  |                      | JDBC 드라이버 속성(properties 형식, 줄 단위)                                      |
+| `TESTBED_QUARTZ_PROPERTIES`              |                      | 덮어쓸 Quartz 설정(properties 형식, 줄 단위)                                      |
+| `TESTBED_START`                          | `true`               | `false`면 `start()`하지 않는 기준 인스턴스(차등 테스트)                           |
 
 Oracle이면 `oracle.jdbc.sendBooleanAsNativeBoolean=false`를 기본으로 넣습니다. ojdbc 23은 Oracle 23에 접속하면 불리언을 네이티브 BOOLEAN으로 보내는데, Quartz 기본 스키마(`tables_oracle.sql`)의 불리언 컬럼은 `VARCHAR2(1)`이라 `ORA-12899`로 실패합니다. false로 두면 이전 드라이버처럼 1/0을 보내 운영(19c 이하)과 같은 `'1'`/`'0'`이 저장됩니다. 2.5.x의 `tables_oracle23.sql`(BOOLEAN 컬럼)을 쓸 때는 `TESTBED_DB_PROPERTIES=oracle.jdbc.sendBooleanAsNativeBoolean=true`로 바꿉니다.
 
@@ -185,27 +185,33 @@ docker run -i --rm quartz-testbed:2.3.2 cron-vectors < cases.json > vectors.json
 
 `schema/`의 SQL은 Quartz 2.5.2 jar의 `org/quartz/impl/jdbcjobstore/`에서 그대로 가져왔습니다(Apache License 2.0).
 
-| 파일                  | 내용                                                                      |
-| --------------------- | ------------------------------------------------------------------------- |
-| `tables_oracle.sql`   | 기본 Oracle 스키마. 2.3.2와 주석 오타 하나만 다름. 불리언은 `VARCHAR2(1)` |
-| `tables_oracle23.sql` | 2.5.x에 추가된 Oracle 23 스키마. 불리언 컬럼이 `BOOLEAN`                  |
+| 파일                  | 내용                                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------------------- |
+| `tables_oracle.sql`   | 기본 Oracle 스키마. 2.3.2와 주석 오타 하나만 다름. 불리언은 `VARCHAR2(1)`                           |
+| `tables_oracle23.sql` | 2.5.x에 추가된 Oracle 23 스키마. 불리언 컬럼이 `BOOLEAN`                                            |
+| `tables_postgres.sql` | PostgreSQL 스키마(2.3.2와 같음). 불리언은 `BOOL`, BLOB은 `BYTEA`, 이름은 따옴표 없음(소문자로 저장) |
 
 통합 테스트 헬퍼(`packages/store/test/support/quartz-schema.ts`)가 이 파일에서 CREATE 문만 골라 prefix와 대소문자를 바꿔 실행합니다.
 
 ## 통합 테스트에서 쓰기
 
-`packages/store/test/support/`의 헬퍼가 Oracle Free 23 컨테이너, 스키마 초기화, 테스트베드 노드 기동, 실행 기록 조회를 맡습니다.
+`packages/store/test/support/`의 헬퍼가 DB 컨테이너(Oracle Free 23 또는 PostgreSQL), 스키마 초기화, 테스트베드 노드 기동, 실행 기록 조회를 맡습니다.
 
 ```bash
 pnpm test:integration                                   # Docker 필요. 테스트베드 이미지를 직접 빌드
 QA_IT_QUARTZ_VERSION=2.5.2 pnpm test:integration        # Quartz 2.5.2로
 QA_IT_TESTBED_IMAGE=quartz-testbed:2.3.2 pnpm test:integration  # 미리 빌드한 이미지 사용
 QA_IT_LOGS=1 pnpm test:integration                      # 노드 로그를 stderr로
+QA_IT_DB=postgres pnpm test:integration                 # PostgreSQL 17로
+QA_IT_DB=postgres QA_IT_POSTGRES_VERSION=11 pnpm test:integration  # PostgreSQL 11로
 ```
 
-| 변수                   | 기본값                                 | 설명                                                                  |
-| ---------------------- | -------------------------------------- | --------------------------------------------------------------------- |
-| `QA_IT_QUARTZ_VERSION` | `2.3.2`                                | 테스트베드 Quartz 버전                                                |
-| `QA_IT_TESTBED_IMAGE`  |                                        | 미리 빌드한 이미지. 없으면 `quartz-admin-testbed:<버전>-local`로 빌드 |
-| `QA_IT_ORACLE_IMAGE`   | `gvenzl/oracle-free:23-slim-faststart` | Oracle 이미지(amd64, arm64)                                           |
-| `QA_IT_LOGS`           |                                        | `1`이면 노드 로그 출력                                                |
+| 변수                     | 기본값                                 | 설명                                                                  |
+| ------------------------ | -------------------------------------- | --------------------------------------------------------------------- |
+| `QA_IT_QUARTZ_VERSION`   | `2.3.2`                                | 테스트베드 Quartz 버전                                                |
+| `QA_IT_TESTBED_IMAGE`    |                                        | 미리 빌드한 이미지. 없으면 `quartz-admin-testbed:<버전>-local`로 빌드 |
+| `QA_IT_ORACLE_IMAGE`     | `gvenzl/oracle-free:23-slim-faststart` | Oracle 이미지(amd64, arm64)                                           |
+| `QA_IT_LOGS`             |                                        | `1`이면 노드 로그 출력                                                |
+| `QA_IT_DB`               | `oracle`                               | 통합 테스트 DB. `postgres`면 PostgreSQL                               |
+| `QA_IT_POSTGRES_VERSION` | `17`                                   | PostgreSQL 버전(이미지 `postgres:<버전>-alpine`)                      |
+| `QA_IT_POSTGRES_IMAGE`   |                                        | PostgreSQL 이미지를 직접 지정                                         |

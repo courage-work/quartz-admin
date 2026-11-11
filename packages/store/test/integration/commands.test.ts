@@ -1,16 +1,12 @@
 import type { CommandExpected, QuartzCommand } from '@qa/shared';
-import type oracledb from 'oracledb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   CommandRejection,
-  OracleAdapter,
-  QUARTZ_REQUIRED_TABLES,
   TargetPoolManager,
+  createDriverAdapters,
   acquireTriggerAccess,
-  createTableSet,
   executeCommand,
   expectedOf,
-  oracleDialect,
   previewCommand,
   queryDbNowMillis,
   type PoolTarget,
@@ -22,12 +18,16 @@ import {
   listExecutions,
   quartzTableName,
   sleep,
-  startOracleQuartzCluster,
+  startQuartzCluster,
   startTcpProxy,
   waitFor,
   waitForExecutions,
-  type OracleQuartzCluster,
+  type QuartzCluster,
   type TestbedNode,
+  TEST_DB_LABEL,
+  schedulerContext,
+  triggerAccessIsFree,
+  type TestConnection,
 } from '../support/index.js';
 
 /** 차등 테스트의 두 기준 인스턴스. 같은 초기 상태를 만들고 한쪽은 Quartz API, 다른 쪽은 도구로 명령한다 */
@@ -35,42 +35,22 @@ const REF_QUARTZ = 'DiffQuartz';
 const REF_TOOL = 'DiffTool';
 const T = (name: string) => quartzTableName(name as Parameters<typeof quartzTableName>[0]);
 
-const features = {
-  simpropTriggers: true,
-  triggerPriority: true,
-  firedPriority: true,
-  firedSchedTime: true,
-  jobNonconcurrent: true,
-  jobUpdateData: true,
-  cronTimeZone: true,
-};
-
 /**
  * 제어 명령 프레임워크 (B-17, TRD §7.1~7.3, 부록 A.2 P-01~P-04, A.8 X-01~X-04).
  * 일시정지와 재개의 나머지 케이스(B-18)는 `pause-resume.test.ts`에 있다.
- * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 Oracle 스키마에 띄운다.
+ * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 DB 스키마에 띄운다.
  */
-describe(`제어 명령 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
-  let cluster: OracleQuartzCluster;
+describe(`제어 명령 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
+  let cluster: QuartzCluster;
   let refQuartz: TestbedNode;
   let refTool: TestbedNode;
   let node1: TestbedNode;
-  let conn: oracledb.Connection;
+  let conn: TestConnection;
   let pools: TargetPoolManager;
   let target: PoolTarget;
 
-  const ctxFor = (schedName: string): SchedulerCommandContext => ({
-    dialect: oracleDialect,
-    tables: createTableSet(oracleDialect, {
-      schema: cluster.oracle.user,
-      tables: {
-        ...Object.fromEntries(QUARTZ_REQUIRED_TABLES.map((t) => [t, `QRTZ_${t}`])),
-        SIMPROP_TRIGGERS: 'QRTZ_SIMPROP_TRIGGERS',
-      },
-    }),
-    features,
-    schedName,
-  });
+  const ctxFor = (schedName: string): SchedulerCommandContext =>
+    schedulerContext(cluster.db, schedName);
 
   const run = <R>(fn: (c: TargetConn) => Promise<R>) => pools.withConnection(target, fn);
 
@@ -84,18 +64,7 @@ describe(`제어 명령 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
 
   /** TRIGGER_ACCESS가 풀려 있는지(부록 A.1 공통 사후 조건). 클러스터 노드가 잠깐씩 잡으므로 3초까지 기다린다 */
   async function lockIsFree(schedName: string): Promise<boolean> {
-    try {
-      await conn.execute(
-        `SELECT LOCK_NAME FROM ${T('LOCKS')} WHERE SCHED_NAME = :1 AND LOCK_NAME = 'TRIGGER_ACCESS' FOR UPDATE WAIT 3`,
-        [schedName],
-      );
-      return true;
-    } catch (err) {
-      if (/ORA-(30006|00054)/.test(String(err))) return false;
-      throw err;
-    } finally {
-      await conn.rollback();
-    }
+    return triggerAccessIsFree(conn, cluster.db, schedName, T('LOCKS'));
   }
 
   async function state(schedName: string, group: string, name: string): Promise<string | null> {
@@ -107,24 +76,17 @@ describe(`제어 명령 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
   }
 
   beforeAll(async () => {
-    cluster = await startOracleQuartzCluster({ nodes: 2 });
+    cluster = await startQuartzCluster({ nodes: 2 });
     [refQuartz, refTool] = await Promise.all([
       cluster.addReference(REF_QUARTZ),
       cluster.addReference(REF_TOOL),
     ]);
     node1 = cluster.nodes[0]!;
-    conn = await cluster.oracle.connect();
-    pools = new TargetPoolManager([new OracleAdapter()]);
+    conn = await cluster.db.connect();
+    pools = new TargetPoolManager(createDriverAdapters());
     target = {
       id: 'commands',
-      info: {
-        kind: 'oracle',
-        host: cluster.oracle.container.getHost(),
-        port: cluster.oracle.container.getMappedPort(1521),
-        username: cluster.oracle.user,
-        password: cluster.oracle.password,
-        oracleServiceName: 'FREEPDB1',
-      },
+      info: cluster.db.targetInfo(),
     };
   });
 
@@ -339,7 +301,7 @@ describe(`제어 명령 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
             [sched()],
           );
           // 프로세스가 죽은 것과 같이 소켓을 끊는다. 커밋은 하지 않았다
-          cutAt = await queryDbNowMillis(c, oracleDialect);
+          cutAt = await queryDbNowMillis(c, cluster.db.dialect);
           await proxy.close();
         })
         .catch(() => undefined);

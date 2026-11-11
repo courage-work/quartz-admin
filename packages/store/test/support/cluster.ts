@@ -1,5 +1,4 @@
-import type oracledb from 'oracledb';
-import { startOracle, type OracleFixture, type StartOracleOptions } from './oracle.js';
+import { startTestDb, type DbFixture, type StartTestDbOptions, type TestConnection } from './db.js';
 import { initQuartzSchema, quartzTableName, type QuartzSchemaOptions } from './quartz-schema.js';
 import {
   startTestbedNode,
@@ -10,7 +9,7 @@ import {
 } from './testbed.js';
 import { waitFor } from './wait.js';
 
-export interface StartOracleClusterOptions {
+export interface StartClusterOptions {
   /** 기본 2 */
   nodes?: number;
   /** 기본 {@link QUARTZ_VERSION} */
@@ -19,7 +18,7 @@ export interface StartOracleClusterOptions {
   schedulerName?: string;
   /** 스키마 prefix와 변형. Quartz 노드를 붙이므로 tableCase는 upper만 의미가 있다 */
   schema?: Omit<QuartzSchemaOptions, 'tableCase'>;
-  oracle?: StartOracleOptions;
+  db?: StartTestDbOptions;
   /** 노드마다 덧붙일 옵션 */
   node?: Omit<
     StartTestbedNodeOptions,
@@ -27,8 +26,9 @@ export interface StartOracleClusterOptions {
   >;
 }
 
-export interface OracleQuartzCluster {
-  readonly oracle: OracleFixture;
+export interface QuartzCluster {
+  /** `QA_IT_DB`로 고른 DB(Oracle 또는 PostgreSQL) */
+  readonly db: DbFixture;
   readonly nodes: TestbedNode[];
   readonly schedulerName: string;
   readonly schema: QuartzSchemaOptions;
@@ -43,42 +43,40 @@ export interface OracleQuartzCluster {
 }
 
 /**
- * Oracle Free 23을 띄우고 Quartz 스키마를 만든 뒤 테스트베드 노드 N개(`node-1`, `node-2`, ...)를 클러스터로 띄운다.
- * 모든 노드가 `SCHEDULER_STATE`에 체크인할 때까지 기다린다.
+ * `QA_IT_DB`의 DB(기본 Oracle Free 23)를 띄우고 Quartz 스키마를 만든 뒤 테스트베드 노드 N개(`node-1`, `node-2`, ...)를
+ * 클러스터로 띄운다. 모든 노드가 `SCHEDULER_STATE`에 체크인할 때까지 기다린다.
  */
-export async function startOracleQuartzCluster(
-  options: StartOracleClusterOptions = {},
-): Promise<OracleQuartzCluster> {
+export async function startQuartzCluster(
+  options: StartClusterOptions = {},
+): Promise<QuartzCluster> {
   const count = options.nodes ?? 2;
   const schedulerName = options.schedulerName ?? 'TestbedScheduler';
   const schema: QuartzSchemaOptions = { ...options.schema, tableCase: 'upper' };
   const tablePrefix = schema.prefix ?? 'QRTZ_';
 
-  // Oracle 기동과 이미지 빌드는 서로 기다릴 필요가 없다
-  const [oracleResult, imageResult] = await Promise.allSettled([
-    startOracle(options.oracle),
+  // DB 기동과 이미지 빌드는 서로 기다릴 필요가 없다
+  const [dbResult, imageResult] = await Promise.allSettled([
+    startTestDb(options.db),
     testbedImage(options.quartzVersion ?? QUARTZ_VERSION),
   ]);
-  if (oracleResult.status === 'rejected' || imageResult.status === 'rejected') {
-    if (oracleResult.status === 'fulfilled') {
-      await oracleResult.value.stop();
-    }
-    throw oracleResult.status === 'rejected'
-      ? oracleResult.reason
+  if (dbResult.status === 'rejected' || imageResult.status === 'rejected') {
+    if (dbResult.status === 'fulfilled') await dbResult.value.stop();
+    throw dbResult.status === 'rejected'
+      ? dbResult.reason
       : (imageResult as PromiseRejectedResult).reason;
   }
-  const oracle = oracleResult.value;
+  const db = dbResult.value;
   const image = imageResult.value;
   const nodes: TestbedNode[] = [];
   const references: TestbedNode[] = [];
   try {
-    await oracle.withConnection((conn) => initQuartzSchema(conn, schema));
+    await db.withConnection((conn) => initQuartzSchema(conn, schema));
 
     const startNode = (instanceId: string, reference?: { schedulerName: string }) =>
       startTestbedNode({
         ...options.node,
-        network: oracle.network,
-        db: { jdbcUrl: oracle.jdbcUrl, user: oracle.user, password: oracle.password },
+        network: db.network,
+        db: { jdbcUrl: db.jdbcUrl, user: db.user, password: db.password },
         image,
         schedulerName: reference?.schedulerName ?? schedulerName,
         instanceId,
@@ -96,12 +94,12 @@ export async function startOracleQuartzCluster(
     nodes.push(
       ...(await Promise.all(Array.from({ length: count }, (_, i) => startNode(`node-${i + 1}`)))),
     );
-    await oracle.withConnection((conn) =>
+    await db.withConnection((conn) =>
       waitForCheckedInNodes(conn, { schedulerName, schema, count }),
     );
 
     return {
-      oracle,
+      db,
       nodes,
       schedulerName,
       schema,
@@ -117,19 +115,19 @@ export async function startOracleQuartzCluster(
       },
       async stop() {
         await Promise.allSettled([...nodes, ...references].map((n) => n.stop()));
-        await oracle.stop();
+        await db.stop();
       },
     };
   } catch (error) {
     await Promise.allSettled(nodes.map((n) => n.stop()));
-    await oracle.stop();
+    await db.stop();
     throw error;
   }
 }
 
 /** `SCHEDULER_STATE`에 체크인한 인스턴스 이름 목록 */
 export async function checkedInInstances(
-  conn: oracledb.Connection,
+  conn: TestConnection,
   { schedulerName, schema = {} }: { schedulerName: string; schema?: QuartzSchemaOptions },
 ): Promise<string[]> {
   const result = await conn.execute<[string]>(
@@ -141,7 +139,7 @@ export async function checkedInInstances(
 
 /** 노드 `count`개가 체크인할 때까지 기다린다 */
 export function waitForCheckedInNodes(
-  conn: oracledb.Connection,
+  conn: TestConnection,
   options: {
     schedulerName: string;
     schema?: QuartzSchemaOptions;

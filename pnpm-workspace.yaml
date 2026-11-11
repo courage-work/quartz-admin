@@ -21,6 +21,7 @@ catalog:
   '@types/luxon': 3.7.1
   '@types/node': 26.6.6
   '@types/oracledb': 26.0.0
+  '@types/pg': 8.23.1
   '@types/react': 19.3.0
   '@types/react-dom': 19.3.0
   '@types/supertest': 7.2.1
@@ -43,6 +44,7 @@ catalog:
   next-themes: 0.4.6
   nodemailer: 10.2.1
   oracledb: 26.0.0
+  pg: 8.23.1
   pino: 10.4.0
   pino-http: 11.0.0
   postcss: 8.5.32

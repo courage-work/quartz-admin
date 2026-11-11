@@ -363,7 +363,8 @@ const NAME_ATTEMPTS = 5;
  * 즉시 실행 트리거를 넣는다 (TRD §7.5, `Delegate.insertTrigger`, `insertSimpleTrigger`).
  * 이름은 잠금 안에서 겹치지 않는지 확인한 뒤 정한다. Quartz도 트리거를 같은 잠금 안에서 넣으므로 이것으로 충분하고,
  * INSERT가 키 중복으로 실패해 트랜잭션이 깨지는 DB(PostgreSQL)도 피할 수 있다.
- * JOB_DATA와 CALENDAR_NAME은 넣지 않아 NULL이 된다(Quartz도 빈 맵이면 NULL).
+ * CALENDAR_NAME은 넣지 않아 NULL이 된다. JOB_DATA는 Quartz처럼 빈 맵을 빈 바이트로 넣는다
+ * (`StdJDBCDelegate.setBytes`는 null 대신 빈 배열을 쓴다). Oracle은 빈 값을 NULL로 보므로 넣지 않는다(B-27에서 확인).
  */
 async function insertTrigger(
   conn: TargetConn,
@@ -397,6 +398,7 @@ async function insertTrigger(
     ['START_TIME', b.add(ins.startTime)],
     ['END_TIME', b.add(0)],
     ['MISFIRE_INSTR', b.add(0)],
+    ...(d.kind === 'oracle' ? [] : ([['JOB_DATA', b.add(Buffer.alloc(0))]] as [string, string][])),
   ];
   const inserted = await conn.execute(
     `INSERT INTO ${tables.table('TRIGGERS')} (${cols.map(([c]) => c).join(', ')}) ` +

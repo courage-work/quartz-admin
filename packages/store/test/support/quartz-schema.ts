@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { TEST_DB, type TestDbKind } from './db.js';
 import { TESTBED_DIR } from './paths.js';
 
 /** Quartz 2.x JDBC JobStore 테이블(prefix 제외, 대문자). FK 순서상 부모가 앞이다. */
@@ -22,12 +23,13 @@ export type QuartzTable = (typeof QUARTZ_TABLES)[number];
 /**
  * Quartz 배포본의 스키마 파일. `oracle`은 `tables_oracle.sql`(2.3.2와 2.5.x 공통, 불리언은 VARCHAR2(1)),
  * `oracle23`은 2.5.x에 추가된 `tables_oracle23.sql`(불리언 컬럼이 Oracle 23 BOOLEAN)이다.
+ * `postgres`는 `tables_postgres.sql`(2.3.2와 2.5.x가 같음, 불리언은 BOOL, BLOB은 BYTEA, 이름은 따옴표 없음)이다.
  */
-export type QuartzSchemaVariant = 'oracle' | 'oracle23';
+export type QuartzSchemaVariant = 'oracle' | 'oracle23' | 'postgres';
 
 /**
- * 테이블명 대소문자. `upper`는 따옴표 없는 식별자(Oracle에서 대문자), `lower`는 따옴표로 감싼 소문자 이름이다.
- * Quartz는 테이블명을 따옴표 없이 쓰므로 Oracle의 `lower` 스키마에는 Quartz 노드를 붙일 수 없다(자동 감지 테스트용).
+ * 테이블명 대소문자. `upper`는 따옴표 없는 식별자(Oracle은 대문자로, PostgreSQL은 소문자로 저장), `lower`는 따옴표로
+ * 감싼 소문자 이름이다. Quartz는 테이블명을 따옴표 없이 쓰므로 Oracle의 `lower` 스키마에는 Quartz 노드를 붙일 수 없다(자동 감지 테스트용).
  */
 export type TableCase = 'upper' | 'lower';
 
@@ -36,8 +38,10 @@ export interface QuartzSchemaOptions {
   prefix?: string;
   /** 기본 `upper` */
   tableCase?: TableCase;
-  /** 기본 `oracle` */
+  /** 기본은 DB에 맞춰 `oracle` 또는 `postgres` */
   variant?: QuartzSchemaVariant;
+  /** 기본 {@link TEST_DB} */
+  db?: TestDbKind;
 }
 
 /** 쿼리 하나를 실행할 수 있는 연결. oracledb `Connection`이 그대로 맞는다. */
@@ -53,7 +57,13 @@ function resolve(options: QuartzSchemaOptions): Required<QuartzSchemaOptions> {
   if (!PREFIX_PATTERN.test(prefix)) {
     throw new Error(`테이블 prefix로 쓸 수 없는 값입니다: ${prefix}`);
   }
-  return { prefix, tableCase: options.tableCase ?? 'upper', variant: options.variant ?? 'oracle' };
+  const db = options.db ?? TEST_DB;
+  return {
+    prefix,
+    tableCase: options.tableCase ?? 'upper',
+    variant: options.variant ?? (db === 'postgres' ? 'postgres' : 'oracle'),
+    db,
+  };
 }
 
 /** SQL에 그대로 넣을 수 있는 테이블 식별자. `lower`이면 따옴표로 감싼다. */
@@ -63,11 +73,19 @@ export function quartzTableName(table: QuartzTable, options: QuartzSchemaOptions
   return tableCase === 'lower' ? `"${name.toLowerCase()}"` : name.toUpperCase();
 }
 
-/** 카탈로그(ALL_TABLES.TABLE_NAME)에 보이는 실제 테이블 이름 */
+/** 카탈로그(Oracle ALL_TABLES, PostgreSQL information_schema)에 보이는 실제 테이블 이름 */
 export function quartzCatalogName(table: QuartzTable, options: QuartzSchemaOptions = {}): string {
-  const { prefix, tableCase } = resolve(options);
+  const { prefix, tableCase, db } = resolve(options);
   const name = `${prefix}${table}`;
-  return tableCase === 'lower' ? name.toLowerCase() : name.toUpperCase();
+  // 따옴표 없는 이름은 Oracle이 대문자로, PostgreSQL이 소문자로 저장한다
+  return tableCase === 'lower' || db === 'postgres' ? name.toLowerCase() : name.toUpperCase();
+}
+
+/** 제품 `createTableSet`에 넘기는 논리 이름 → 실제 이름. SIMPROP까지 모두 넣는다 */
+export function quartzCatalogNames(
+  options: QuartzSchemaOptions = {},
+): Partial<Record<QuartzTable, string>> {
+  return Object.fromEntries(QUARTZ_TABLES.map((t) => [t, quartzCatalogName(t, options)]));
 }
 
 export function readQuartzSchemaSql(variant: QuartzSchemaVariant = 'oracle'): string {
@@ -118,10 +136,15 @@ export function quartzDropStatements(options: QuartzSchemaOptions = {}): string[
     'LOCKS',
     'SCHEDULER_STATE',
   ];
-  return order.map((t) => `DROP TABLE ${quartzTableName(t, options)} PURGE`);
+  const { db } = resolve(options);
+  return order.map((t) =>
+    db === 'postgres'
+      ? `DROP TABLE IF EXISTS ${quartzTableName(t, options)}`
+      : `DROP TABLE ${quartzTableName(t, options)} PURGE`,
+  );
 }
 
-/** Quartz 스키마를 만든다. 이미 같은 이름의 테이블이 있으면 Oracle 오류(ORA-00955)로 실패한다. */
+/** Quartz 스키마를 만든다. 이미 같은 이름의 테이블이 있으면 실패한다. */
 export async function initQuartzSchema(
   db: SqlExecutor,
   options: QuartzSchemaOptions = {},

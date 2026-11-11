@@ -1,16 +1,12 @@
 import type { MonitorData } from '@qa/shared';
-import type oracledb from 'oracledb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  OracleAdapter,
-  QUARTZ_REQUIRED_TABLES,
   TargetPoolManager,
+  createDriverAdapters,
   collectMonitorData,
-  createTableSet,
   evaluateRule,
   isTargetError,
   observeBlocked,
-  oracleDialect,
   queryDbNowMillis,
   stepAlert,
   triggerKeyOf,
@@ -25,11 +21,14 @@ import {
 import {
   QUARTZ_VERSION,
   quartzTableName,
-  startOracleQuartzCluster,
+  startQuartzCluster,
   startTcpProxy,
   waitFor,
-  type OracleQuartzCluster,
+  type QuartzCluster,
   type TestbedNode,
+  schedulerContext,
+  TEST_DB_LABEL,
+  type TestConnection,
 } from '../support/index.js';
 
 const T = (name: string) => quartzTableName(name as Parameters<typeof quartzTableName>[0]);
@@ -39,16 +38,6 @@ const T = (name: string) => quartzTableName(name as Parameters<typeof quartzTabl
  */
 const OVERDUE_AFTER_MS = 10_000;
 const EXPECTED_NODES = 2;
-
-const features = {
-  simpropTriggers: true,
-  triggerPriority: true,
-  firedPriority: true,
-  firedSchedTime: true,
-  jobNonconcurrent: true,
-  jobUpdateData: true,
-  cronTimeZone: true,
-};
 
 type Rule = AlertRuleSpec & { key: string };
 const SUPPRESSING = new Set(['CLUSTER_DOWN', 'MONITOR_UNREACHABLE']);
@@ -133,9 +122,9 @@ class MemoryEngine {
  * 감시 수집(`collectMonitorData`)과 판정(`evaluateRule`·`stepAlert`)이 맞게 잡는지 본다.
  * 트리거 단위 규칙은 케이스마다 그룹으로 범위를 좁혀 서로 섞이지 않게 한다.
  */
-describe(`알림 규칙 엔진 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () => {
-  let cluster: OracleQuartzCluster;
-  let conn: oracledb.Connection;
+describe(`알림 규칙 엔진 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
+  let cluster: QuartzCluster;
+  let conn: TestConnection;
   let pools: TargetPoolManager;
   let target: PoolTarget;
   let ctx: SchedulerViewContext;
@@ -144,7 +133,7 @@ describe(`알림 규칙 엔진 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () =
   const node1 = (): TestbedNode => cluster.nodes.find((n) => n.instanceId === 'node-1')!;
   const run = <R>(fn: (c: TargetConn) => Promise<R>, t: PoolTarget = target) =>
     pools.withConnection(t, fn);
-  const dbNow = () => run((c) => queryDbNowMillis(c, oracleDialect));
+  const dbNow = () => run((c) => queryDbNowMillis(c, cluster.db.dialect));
   const collect =
     (t: PoolTarget = target) =>
     () =>
@@ -179,32 +168,14 @@ describe(`알림 규칙 엔진 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () =
     );
 
   beforeAll(async () => {
-    cluster = await startOracleQuartzCluster({ nodes: 2 });
-    conn = await cluster.oracle.connect();
-    pools = new TargetPoolManager([new OracleAdapter()]);
+    cluster = await startQuartzCluster({ nodes: 2 });
+    conn = await cluster.db.connect();
+    pools = new TargetPoolManager(createDriverAdapters());
     target = {
       id: 'alerts',
-      info: {
-        kind: 'oracle',
-        host: cluster.oracle.container.getHost(),
-        port: cluster.oracle.container.getMappedPort(1521),
-        username: cluster.oracle.user,
-        password: cluster.oracle.password,
-        oracleServiceName: 'FREEPDB1',
-      },
+      info: cluster.db.targetInfo(),
     };
-    ctx = {
-      dialect: oracleDialect,
-      tables: createTableSet(oracleDialect, {
-        schema: cluster.oracle.user,
-        tables: {
-          ...Object.fromEntries(QUARTZ_REQUIRED_TABLES.map((t) => [t, `QRTZ_${t}`])),
-          SIMPROP_TRIGGERS: 'QRTZ_SIMPROP_TRIGGERS',
-        },
-      }),
-      features,
-      schedName: cluster.schedulerName,
-    };
+    ctx = schedulerContext(cluster.db, cluster.schedulerName);
   });
 
   afterAll(async () => {
@@ -240,8 +211,10 @@ describe(`알림 규칙 엔진 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`, () =
       [await dbNow(), sched()],
     );
     await conn.commit();
+    // 노드는 할 일이 없으면 idleWaitTime(30초)까지 잠들어 있다가 트리거를 집는다
     await waitFor(async () => (await stateOf('err', 't')) === 'ERROR', {
       message: 'ERROR 상태',
+      timeoutMs: 60_000,
     });
 
     await engine.round(collect());

@@ -16,8 +16,8 @@ import {
 } from './quartz.js';
 import type { SchedulerConnectionSummary, SnapshotDto } from './monitor.js';
 
-/** 지금 연결할 수 있는 DB 종류. 나머지는 B-27~B-29에서 추가한다 */
-export const SUPPORTED_DB_KINDS: readonly DbKind[] = ['oracle'];
+/** 지금 연결할 수 있는 DB 종류. MySQL·MariaDB는 B-28~B-29에서 추가한다 */
+export const SUPPORTED_DB_KINDS: readonly DbKind[] = ['oracle', 'postgresql'];
 
 export const CONNECTION_NAME_MAX = 100;
 export const TAG_MAX = 30;
@@ -115,7 +115,7 @@ function checkTargetFields(value: TargetFieldsValue, ctx: z.RefinementCtx): void
     ctx.addIssue({
       code: 'custom',
       path: ['dbType'],
-      message: '아직 지원하지 않는 DB 종류입니다. 지금은 Oracle만 연결할 수 있습니다',
+      message: '아직 지원하지 않는 DB 종류입니다. 지금은 Oracle과 PostgreSQL만 연결할 수 있습니다',
     });
     return;
   }

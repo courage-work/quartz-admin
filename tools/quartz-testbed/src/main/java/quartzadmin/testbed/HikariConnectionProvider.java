@@ -39,10 +39,15 @@ public class HikariConnectionProvider implements ConnectionProvider {
     this.maxConnections = maxConnections;
   }
 
-  /** properties 형식 텍스트({@code key=value} 줄 단위) */
+  /**
+   * properties 형식 텍스트({@code key=value} 줄 단위). Quartz는 빈 값을 null로 넘기므로(드라이버 속성이 없는
+   * PostgreSQL) null이면 속성 없음으로 둔다.
+   */
   public void setDriverProperties(String text) throws IOException {
     Properties p = new Properties();
-    p.load(new StringReader(text));
+    if (text != null) {
+      p.load(new StringReader(text));
+    }
     this.driverProperties = p;
   }
 
