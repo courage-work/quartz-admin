@@ -16,6 +16,9 @@ import {
   NOTIFICATION_STATUSES,
   SCHEDULER_HEALTH,
   SEVERITIES,
+  type AlertAffected,
+  type AlertRuleParams,
+  type AlertScope,
   type NodeDto,
   type QuartzFeatures,
   type QuartzTableKey,
@@ -30,11 +33,6 @@ import {
   text,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
-
-export type AlertScope =
-  | { kind: 'all' }
-  | { kind: 'groups'; groups: string[] }
-  | { kind: 'triggers'; triggers: { group: string; name: string }[] };
 
 const id = () => integer().primaryKey({ autoIncrement: true });
 const createdAt = () => integer().notNull();
@@ -204,7 +202,7 @@ export const alertRules = sqliteTable(
       .references(() => schedulers.id, { onDelete: 'cascade' }),
     type: text({ enum: ALERT_RULE_TYPES }).notNull(),
     params: text({ mode: 'json' })
-      .$type<Record<string, unknown>>()
+      .$type<AlertRuleParams>()
       .notNull()
       .$defaultFn(() => ({})),
     scope: text({ mode: 'json' })
@@ -246,7 +244,7 @@ export const alerts = sqliteTable(
     type: text({ enum: ALERT_RULE_TYPES }).notNull(),
     severity: text({ enum: SEVERITIES }).notNull(),
     status: text({ enum: ALERT_STATUSES }).notNull(),
-    affected: text({ mode: 'json' }).$type<unknown>(),
+    affected: text({ mode: 'json' }).$type<AlertAffected>(),
     firstSeenAt: integer().notNull(),
     lastSeenAt: integer().notNull(),
     resolvedAt: integer(),

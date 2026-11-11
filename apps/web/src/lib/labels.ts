@@ -28,6 +28,9 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   'trigger.reschedule': '트리거 스케줄 수정',
   'trigger.delete': '트리거 삭제',
   'job.delete': '잡 삭제',
+  'alert_rule.create': '알림 규칙 추가',
+  'alert_rule.update': '알림 규칙 수정',
+  'alert_rule.delete': '알림 규칙 삭제',
 };
 
 export function auditActionLabel(action: string): string {

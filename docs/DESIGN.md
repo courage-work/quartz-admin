@@ -138,7 +138,7 @@ shadcn 표준 토큰(background, foreground, card, popover, primary, secondary, 
 | 캡션, 데이터 기준 시각 | `text-xs text-muted-foreground` | 12px |
 
 - 굵기는 `font-medium`(라벨)과 `font-semibold`(제목) 두 가지만 씁니다.
-- 코드성 텍스트(cron 표현식, `그룹.이름` 키, 잡 클래스, 설정 키)는 `font-mono`(D2Coding)입니다. 문장 안에서는 `<Code>`, 표 셀 안에서는 `<span className="font-mono">`로 감쌉니다. 입력칸은 `<Input mono>`입니다(스케줄 수정의 cron 표현식, B-20).
+- 코드성 텍스트(cron 표현식, `그룹.이름` 키, 잡 클래스, 설정 키)는 `font-mono`(D2Coding)입니다. 문장 안에서는 `<Code>`, 표 셀 안에서는 `<span className="font-mono">`로 감쌉니다. 입력칸은 `<Input mono>`, 여러 줄 입력은 `<Textarea mono>`입니다(스케줄 수정의 cron 표현식 B-20, 알림 규칙의 그룹·트리거 B-24).
 - 표에는 `tabular-nums`가 기본으로 적용돼 시각·건수 열의 숫자 폭이 같습니다(`globals.css`).
 
 D2Coding은 KS X 1001 서브셋을 씁니다. 서브셋에 없는 한글은 Pretendard로 표시됩니다.

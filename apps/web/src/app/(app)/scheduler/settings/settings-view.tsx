@@ -11,7 +11,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { SearchXIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useForm } from 'react-hook-form';
+import { useEffect, useRef } from 'react';
+import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 import type { z } from 'zod';
 
@@ -51,6 +52,11 @@ const FIELDS: (keyof SchedulerSettings)[] = [
   'pollIntervalSec',
 ];
 
+/** 입력칸 값(문자열 또는 숫자)을 비교용 글자로 */
+function asText(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+}
+
 function SettingsForm({
   scheduler,
   back,
@@ -73,6 +79,18 @@ function SettingsForm({
       pollIntervalSec: scheduler.pollIntervalSec,
     },
   });
+  // 연체 유예가 misfire 임계값과 같으면(기본값) 임계값을 바꿀 때 함께 바꾼다. 정상 클러스터에서 오탐이
+  // 나지 않는 가장 작은 값이 임계값과 같기 때문이다 (TRD §9.2)
+  const misfire = useWatch({ control: form.control, name: 'misfireThresholdMs' });
+  const lastMisfire = useRef(String(scheduler.misfireThresholdMs));
+  useEffect(() => {
+    const next = asText(misfire);
+    if (next === lastMisfire.current) return;
+    if (asText(form.getValues('overdueGraceMs')) === lastMisfire.current) {
+      form.setValue('overdueGraceMs', next);
+    }
+    lastMisfire.current = next;
+  }, [misfire, form]);
   const save = useMutation({
     mutationFn: (body: SchedulerSettings) =>
       api<SchedulerDto>(`/schedulers/${scheduler.id}/settings`, { method: 'PUT', body }),
@@ -131,7 +149,7 @@ function SettingsForm({
               name="overdueGraceMs"
               label="연체 유예 시간(ms)"
               autoComplete="off"
-              description="misfire 임계값 이상이어야 합니다. 기본 60000"
+              description="misfire 임계값 이상이어야 합니다. 임계값과 같으면 임계값을 바꿀 때 함께 바뀝니다. 기본 60000"
               layout="row"
               size="short"
             />

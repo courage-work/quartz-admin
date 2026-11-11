@@ -21,6 +21,7 @@ import type {
 } from '@qa/shared';
 import { TargetError } from '@qa/store';
 import { and, asc, count, eq, inArray, ne } from 'drizzle-orm';
+import { AlertDefaults } from '../alerts/alert-defaults.js';
 import { ApiError, notFound } from '../common/api-error.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { SecretBox, secretAad } from '../crypto/secret-box.js';
@@ -151,6 +152,7 @@ export class ConnectionsService {
     private readonly secrets: SecretBox,
     private readonly targets: TargetsService,
     private readonly events: SchedulerEvents,
+    private readonly alertDefaults: AlertDefaults,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -438,27 +440,27 @@ export class ConnectionsService {
             `이미 등록된 스케줄러입니다: ${candidate.schedName}`,
           );
         }
-        created.push(
-          tx
-            .insert(schedulers)
-            .values({
-              connectionId,
-              tablePrefix: set.prefix,
-              tableSchema: detection.schema,
-              tableNames: set.tableNames,
-              schedName: candidate.schedName,
-              displayName:
-                sel.displayName ?? defaultDisplayName(set, candidate.schedName, detection),
-              features: { ...set.features },
-              boolFormat: set.boolFormat,
-              expectedNodeCount: candidate.expectedNodeCount,
-              detectedAt: now,
-              createdAt: now,
-              updatedAt: now,
-            })
-            .returning()
-            .get(),
-        );
+        const inserted = tx
+          .insert(schedulers)
+          .values({
+            connectionId,
+            tablePrefix: set.prefix,
+            tableSchema: detection.schema,
+            tableNames: set.tableNames,
+            schedName: candidate.schedName,
+            displayName: sel.displayName ?? defaultDisplayName(set, candidate.schedName, detection),
+            features: { ...set.features },
+            boolFormat: set.boolFormat,
+            expectedNodeCount: candidate.expectedNodeCount,
+            detectedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning()
+          .get();
+        // 기본 규칙 세트 (TRD §9.2)
+        this.alertDefaults.createDefaultRules(tx, inserted.id);
+        created.push(inserted);
       }
       tx.update(connections)
         .set({ writeCapable: writeCapableOf(detection), updatedAt: now })

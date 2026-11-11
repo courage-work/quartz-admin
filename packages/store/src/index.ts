@@ -73,3 +73,20 @@ export {
 export { LIKE_ESCAPE, containsPattern } from './views/sql.js';
 export { collectMonitorData, type CollectOptions } from './views/monitor.js';
 export * from './commands/index.js';
+export {
+  affectedKeys,
+  evaluateRule,
+  inScope,
+  observeBlocked,
+  stepAlert,
+  triggerKeyOf,
+  type AlertRuleSpec,
+  type AlertStep,
+  type AlertStepOptions,
+  type EvaluationInput,
+  type MonitorResult,
+  type ObservationUpdate,
+  type OpenAlertState,
+  type RuleEvaluation,
+  type TriggerObservation,
+} from './alerts/evaluate.js';

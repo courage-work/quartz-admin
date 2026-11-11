@@ -57,6 +57,9 @@ describe('recentDays', () => {
 
 describe('isCodeTarget', () => {
   it('아이디와 트리거 키만 식별자로 본다', () => {
+    expect(describeTarget({ targetType: 'alert_rule', target: { id: 3, type: 'OVERDUE' } })).toBe(
+      '실행 지연 규칙',
+    );
     expect(isCodeTarget({ targetType: 'user' })).toBe(true);
     expect(isCodeTarget({ targetType: 'trigger' })).toBe(true);
     expect(isCodeTarget({ targetType: 'connection' })).toBe(false);

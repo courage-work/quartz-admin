@@ -1,5 +1,6 @@
 import type { AuditLogDto, AuditLogQuery } from '@qa/shared';
 
+import { ALERT_RULE_LABELS } from '@/lib/alerts';
 import type { Query } from '@/lib/api';
 import { dateRange } from '@/lib/format';
 
@@ -65,6 +66,13 @@ export function describeTarget(log: Pick<AuditLogDto, 'targetType' | 'target'>):
   if (log.targetType === 'trigger_group' || log.targetType === 'job_group') {
     const group = field(log.target, 'group');
     if (typeof group === 'string') return group;
+  }
+  // 알림 규칙은 규칙 종류 이름(규칙에는 따로 붙인 이름이 없다)
+  if (log.targetType === 'alert_rule') {
+    const type = field(log.target, 'type');
+    if (typeof type === 'string' && type in ALERT_RULE_LABELS) {
+      return `${ALERT_RULE_LABELS[type as keyof typeof ALERT_RULE_LABELS]} 규칙`;
+    }
   }
   const keys = log.targetType ? nameKey[log.targetType] : undefined;
   if (!keys) return '-';
