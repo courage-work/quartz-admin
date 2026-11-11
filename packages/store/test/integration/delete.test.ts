@@ -310,12 +310,16 @@ describe(`삭제 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
 
     it('D-05 집힌 트리거를 지우면 발화하지 않고 노드가 획득 기록을 지운다 (통합)', async () => {
       await node().addJob({ name: 'job-d05', group: 'd05', type: 'RecordingJob', durable: true });
+      // 약 15초 뒤의 초에 발화하는 매분 트리거. 등록하면 노드가 바로 깨어 idleWaitTime(30초) 안의 트리거를 집으므로
+      // 발화 15초쯤 전에 ACQUIRED가 된다. 매분 0초로 두면 집는 시점이 노드의 임의 대기(24~30초)에 달려
+      // 발화 직전에 집는 일이 이어질 수 있다(MySQL 8.4 CI에서 90초 안에 4초 넘게 앞서 집지 못함)
+      const fireSecond = Math.floor(((await dbNow()) + 15_000) / 1_000) % 60;
       await node().scheduleJob({
         trigger: {
           type: 'cron',
           name: 't',
           group: 'd05',
-          cron: '0 * * * * ?',
+          cron: `${fireSecond} * * * * ?`,
           timeZone: 'UTC',
           forJob: { name: 'job-d05', group: 'd05' },
         },
@@ -336,7 +340,7 @@ describe(`삭제 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
       );
       await toolRun(sched(), delTrigger('d05'));
       await waitFor(async () => (await dbNow()) > oldFire + 3_000, { timeoutMs: 40_000 });
-      // 매분 트리거라 앞 회차(노드가 4초 안쪽에 집어 건너뛴 회차)는 지우기 전에 정상으로 실행됐을 수 있다.
+      // 처음 집은 시점이 4초 안쪽이면 그 회차는 건너뛰고 다음 분을 기다리므로, 앞 회차는 지우기 전에 정상으로 실행됐을 수 있다.
       // 지운 회차(oldFire)부터 실행이 없어야 한다
       const late = (await listExecutions(conn, { schedName: sched(), triggerGroup: 'd05' })).filter(
         (e) => (e.scheduledFireTime ?? e.fireTime) >= oldFire,
