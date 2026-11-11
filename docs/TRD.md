@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.28 (MySQL 계열 misfire 경합 반영) |
+| 문서 버전 | v0.29 (B-30 CI DB 매트릭스 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -42,6 +42,7 @@
 | v0.26 | 2026-11-11 | B-28: §5.2 조회 제한을 MySQL 세션 `max_execution_time`으로(힌트와 같은 효과), mysql2 어댑터 세부(자리 표시 변환, 트랜잭션 경계, 세션 설정, `FOUND_ROWS`, 오류 분류), §5.3 MySQL dialect 구현 메모(대소문자 무시 정렬 규칙, `lower_case_table_names`), §5.5 MySQL 권한 오류, §12 `QA_IT_DB=mysql`과 CI에 MySQL 잡 2개, 테스트베드 MySQL 드라이버(mysql-connector-j 8.4) |
 | v0.27 | 2026-11-11 | B-29: §5.1 `ed25519` 계정 안내 확정, §5.2 MariaDB 어댑터 세부(`max_statement_time`, 1969, DB 종류를 잘못 고른 경우의 안내), §5.3 MariaDB dialect 메모, §5.4 MariaDB JOB_DATA, §12 `QA_IT_DB=mariadb`과 CI에 MariaDB 잡 2개, 테스트베드 MariaDB 드라이버(MariaDB Connector/J 3.5) |
 | v0.28 | 2026-11-11 | B-28·B-29 후속: §7.2 REPEATABLE READ에서 misfire 처리가 일시정지를 되돌리는 경합(main CI X-05 실패의 원인)과 노드 권장 설정, §5.3·§5.5 서버 기본 격리 수준 감지 경고(`REPEATABLE_READ_MISFIRE_RACE`), §12 MySQL 계열 테스트 노드에 권장 설정 |
+| v0.29 | 2026-11-11 | B-30: §12.2 CI를 통합 테스트 매트릭스 하나(4종 DB × 최소·최신 × Quartz 2.3.2/2.5.2, 16조합)로 정리. PR은 최신 버전 × 2.5.2(4조합), main 머지는 전체. 테스트베드 이미지 캐시, 실패한 조합의 노드 로그 아티팩트. §12.1 `QA_IT_ORACLE_VERSION`(Oracle XE 21)과 `QA_IT_LOG_DIR`, §12.3 S3 XE 21 확인. XE 21에서 드러난 타이밍 의존 테스트 2개(R-24 실행 수를 따로 세던 비교, 풀 동시성 테스트의 실패 표시) 보강 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -1005,10 +1006,11 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 | 헬퍼 | 내용 |
 | --- | --- |
-| `startOracle` | Oracle Free 23(`gvenzl/oracle-free:23-slim-faststart`) 기동, 앱 계정, SYSTEM 접속, 추가 계정 생성 |
+| `startOracle` | Oracle(`QA_IT_ORACLE_VERSION`: `23` 기본 Oracle Free 23 `gvenzl/oracle-free:23-slim-faststart`, `21`은 Oracle XE 21 `gvenzl/oracle-xe:21-slim-faststart`) 기동, 앱 계정(PDB `FREEPDB1`/`XEPDB1`), SYSTEM 접속, 추가 계정 생성. Oracle 23 BOOLEAN 스키마(`oracle23`)를 쓰는 테스트는 XE 21에서 건너뜀 |
 | `startPostgres` | PostgreSQL(`postgres:<QA_IT_POSTGRES_VERSION>-alpine`, 기본 17) 기동, 추가 역할과 같은 이름의 스키마 생성 |
 | `startMysql` | MySQL(`mysql:<QA_IT_MYSQL_VERSION>`, 기본 8.4) 또는 MariaDB(`flavor: 'mariadb'`, `mariadb:<QA_IT_MARIADB_VERSION>`, 기본 11.4) 기동, 앱 계정(quartz DB 전체 권한), root 접속, 권한 없는 추가 계정 생성, `lower_case_table_names=1` 변형 |
 | `startTestDb` / `TestConnection` / `schedulerContext` | `QA_IT_DB`의 DB 기동, DB 중립 검증 SQL 연결, 테스트용 스케줄러 컨텍스트 |
+| `startTestbedNode`의 `logDir` | 노드 로그를 노드마다 파일로 남김(기본 `QA_IT_LOG_DIR`). CI가 실패한 조합에서 아티팩트로 올림 |
 | `initQuartzSchema` / `dropQuartzSchema` | Quartz 스키마 생성·삭제(prefix, 대소문자, `oracle`/`oracle23`/`postgres`/`mysql` 변형) |
 | `startTestbedNode` / `startQuartzCluster` | 테스트베드 노드 기동, DB + 스키마 + N노드 클러스터(기본 2) 기동과 체크인 대기 |
 | `TestbedClient` | `/control/*` API 클라이언트 |
@@ -1023,14 +1025,19 @@ S2에서 확인한 사항:
 ### 12.2 환경 메모
 
 - Apple Silicon: Oracle XE 21과 MySQL 5.7 이미지는 amd64 전용이라 로컬에서는 에뮬레이션으로 느리게 돕니다. 로컬 기본값은 Oracle Free 23과 각 DB 최신 버전으로 두고, 전체 매트릭스는 CI(x64 러너)에서 돌립니다. `gvenzl/oracle-free:23-slim-faststart`와 테스트베드 베이스 이미지는 arm64를 제공합니다.
-- CI는 GitHub Actions를 가정합니다. DB별로 잡을 나눠 병렬로 실행합니다. 지금은 `integration-oracle` 잡이 Quartz 2.3.2와 2.5.2 매트릭스로, `integration-postgres` 잡이 PostgreSQL 11 × Quartz 2.3.2와 PostgreSQL 17 × Quartz 2.5.2로, `integration-mysql` 잡이 MySQL 5.7 × Quartz 2.3.2와 MySQL 8.4 × Quartz 2.5.2로, `integration-mariadb` 잡이 MariaDB 10.3 × Quartz 2.3.2와 MariaDB 11.4 × Quartz 2.5.2로 테스트베드 이미지를 빌드하고(`QA_IT_TESTBED_IMAGE`) 통합 테스트를 돌립니다. DB·버전·Quartz의 전체 조합은 B-30에서 맞춥니다.
+- CI는 GitHub Actions입니다(B-30). 통합 테스트는 `integration` 잡 하나가 `.github/integration-matrix.json`의 조합(4종 DB × §5.1의 최소·최신 버전 × Quartz 2.3.2/2.5.2, 16조합)을 서로 독립된 잡으로 돌립니다.
+  - **범위**: PR은 각 DB의 최신 버전 × Quartz 2.5.2(Oracle Free 23, PostgreSQL 17, MySQL 8.4, MariaDB 11.4)만 돌고, main 머지는 16조합 전체를 돕니다. 수동 실행(`workflow_dispatch`)은 기본 전체이고 `scope=pr`이면 PR과 같습니다. `matrix` 잡이 이벤트에 맞는 조합을 골라 실행 요약에 적습니다. 조합을 바꿀 때는 이 JSON만 고칩니다(`"pr": true`가 PR 조합).
+  - **이미지 캐시**: `testbed-image` 잡이 Quartz 버전마다 테스트베드 이미지를 한 번만 빌드하고(빌드 단계의 JUnit 포함) 아티팩트로 넘깁니다. 레이어는 GitHub Actions 캐시에 남겨, 테스트베드 소스가 그대로면 다음 실행에서 Maven 의존성과 빌드를 다시 하지 않습니다. DB 이미지는 잡마다 내려받습니다.
+  - **실패 로그**: 통합 테스트는 `QA_IT_LOG_DIR`에 테스트베드 노드 로그를 노드마다 파일로 남기고, 실패한 조합만 `it-logs-<DB>-<버전>-quartz-<버전>` 아티팩트(14일 보관)로 올립니다. 잡 로그에는 테스트 결과만 남습니다.
+  - 잡 하나는 12~16분입니다. 16조합이 병렬로 돌아 main 전체도 20분 안팎입니다(공개 저장소라 표준 러너 비용 없음).
+  - **Oracle XE 21**(`QA_IT_ORACLE_VERSION=21`): 서비스 이름이 `XEPDB1`이고 BOOLEAN 타입이 없어, Oracle 23 BOOLEAN 스키마를 만드는 부분(감지의 `native` 판정, 어댑터의 BOOLEAN 컬럼 조회, 스키마 변형 스모크)만 건너뜁니다. 잠금 대기 초과는 ORA-30006, 권한 부족은 ORA-01031로 오며 둘 다 이미 처리합니다.
 - **DB 중립 통합 테스트**(B-27): 같은 테스트 파일이 `QA_IT_DB`(`oracle` 기본, `postgres`, `mysql`(B-28), `mariadb`(B-29))로 고른 DB에서 돕니다. 테스트의 준비·검증 SQL은 `TestConnection`(oracledb `Connection`과 같은 모양)으로 실행하고, PostgreSQL에서는 `:1`·`:name` 바인드를 `$1`로(MySQL에서는 나온 순서대로 `?`로), `FOR UPDATE WAIT n`을 `FOR UPDATE`로 바꾸며 DDL은 Oracle처럼 바로 반영합니다. 테이블 이름은 따옴표 없는 대문자(`QRTZ_TRIGGERS`)로 써서 두 DB에서 같은 SQL이 돕니다. 스케줄러 컨텍스트는 `schedulerContext(db, schedName)`, 잠금 행이 풀렸는지는 `triggerAccessIsFree`로 봅니다. Oracle 전용(`oracle-store`, `detect`), PostgreSQL 전용(`postgres-store`, `detect-postgres`), MySQL 계열 전용(`mysql-store`, `detect-mysql`, MySQL과 MariaDB에서 돎) 스위트는 다른 DB에서 건너뜁니다. MySQL과 MariaDB에서 다르게 확인할 것(세션 변수 이름, `ed25519`)만 테스트 안에서 나눕니다.
   - PostgreSQL 조회 성능 테스트(트리거 1만 개 p95)는 데이터를 넣은 뒤 `ANALYZE`합니다. 넣은 직후에는 통계가 없어 계획이 크게 틀리기 때문입니다(정렬·깊은 페이지가 1.4~3초). 운영 Quartz 테이블은 autovacuum이 통계를 채웁니다.
   - 테스트베드는 JDBC 드라이버 속성이 없으면(PostgreSQL) `driverProperties`를 넘기지 않습니다. 빈 값을 넘기면 Quartz가 null로 setter를 불러 기동이 실패합니다.
   - MySQL(B-28): 테스트베드 드라이버는 mysql-connector-j 8.4입니다(9.x는 5.7 지원을 뺐음). MySQL은 DDL 앞에서 스스로 커밋하므로 `TestConnection`도 DDL에서 트랜잭션을 닫은 것으로 봅니다. 5.7 이미지는 amd64 전용입니다.
   - MariaDB(B-29): 테스트베드 드라이버는 MariaDB Connector/J 3.5(`jdbc:mariadb://`)입니다. Quartz delegate는 MySQL과 같은 `StdJDBCDelegate`이고, 불리언은 `'1'`/`'0'`으로 저장됩니다(감지 테스트에서 확인).
   - MySQL 계열 노드는 운영 권장 설정 `org.quartz.jobStore.doubleCheckLockMisfireHandler=false`로 띄웁니다(`MYSQL_FAMILY_QUARTZ_PROPERTIES`, §7.2). 기본값이면 X-05(계속 발화하는 그룹 일시정지)가 misfire 처리의 경합으로 실패합니다. 기본값을 보려면 `quartzProperties`로 `true`를 넘깁니다.
-- MVP 기능 개발 동안은 PR에서 CI를 돌리지 않습니다. 워크플로는 main 푸시와 수동 실행(`workflow_dispatch`)에만 돌고, main 브랜치 보호의 필수 검사(`verify`)도 해제했습니다. PR을 올리기 전에는 로컬에서 `pnpm format:check`, `build`, `lint`, `typecheck`, `test`(대상 DB 코드를 바꿨으면 `test:integration`도)를 돌립니다. MVP 이후 CI/CD를 정리할 때 PR 트리거와 필수 검사를 다시 켭니다.
+- PR에서는 위의 PR 범위(검사, 최신 버전 통합 테스트 4조합, 컨테이너 스모크)가 돕니다(B-30에서 다시 켬). main 브랜치 보호의 필수 검사는 아직 켜지 않았습니다. PR을 올리기 전에는 로컬에서 `pnpm format:check`, `build`, `lint`, `typecheck`, `test`(대상 DB 코드를 바꿨으면 `test:integration`도)를 돌립니다. 최소 버전이나 Quartz 2.3.2에서만 드러나는 문제는 main 머지 뒤 전체 매트릭스에서 잡히므로, 그런 쪽을 건드렸으면 브랜치에서 수동 실행으로 전체를 돌려 봅니다.
 
 ### 12.3 구현 전 확인 항목 (스파이크)
 
@@ -1038,7 +1045,7 @@ S2에서 확인한 사항:
 | --- | --- | --- |
 | S1 | Quartz 2.3.2 `JobStoreSupport`, `StdJDBCDelegate`, `StdRowLockSemaphore`를 읽고 §7.2와 §7.3의 상태 전이, 잠금, `rescheduleJob` 동작을 확인 | **완료**(B-08). §5.4, §7.1~7.6, §9.2, 부록 A에 반영. 2.5.2도 같은 동작 |
 | S2 | quartz-testbed와 Testcontainers 4종 DB 골격. 2노드 클러스터 기동 확인 | **완료**(B-09, Oracle). `tools/quartz-testbed`, `packages/store/test/support/`, §12.1. 나머지 3종 DB는 B-27~B-29 |
-| S3 | `oracledb` Thin 모드로 Oracle XE 21과 Free 23에 접속하고 BLOB과 NUMBER 매핑 확인 | **완료**(B-11, Free 23). `@qa/store` 어댑터·풀·`QuartzDialect`, §5.2·§5.3·§5.6에 반영(배열 바인드 순서, Thin `callTimeout` 한계, Oracle 23 잠금 오류 코드). XE 21은 amd64 전용이라 CI 매트릭스(B-30)에서 확인 |
+| S3 | `oracledb` Thin 모드로 Oracle XE 21과 Free 23에 접속하고 BLOB과 NUMBER 매핑 확인 | **완료**(B-11, Free 23). `@qa/store` 어댑터·풀·`QuartzDialect`, §5.2·§5.3·§5.6에 반영(배열 바인드 순서, Thin `callTimeout` 한계, Oracle 23 잠금 오류 코드). XE 21은 B-30에서 통합 테스트 전체를 Quartz 2.3.2·2.5.2로 확인(BOOLEAN 스키마 테스트만 건너뜀) |
 | S4 | `CronExpression` 이식 범위와 Luxon으로 Java Calendar의 DST 처리(존재하지 않는 시각, 중복 시각)를 재현할 수 있는지 확인 | 벡터 50개 통과 프로토타입 |
 
 ## 13. PRD 변경 제안

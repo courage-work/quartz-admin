@@ -1,5 +1,5 @@
 /**
- * 통합 테스트 지원 코드. Oracle Free 23·PostgreSQL·MySQL 컨테이너, Quartz 스키마 초기화, quartz-testbed 클러스터, 실행 기록 조회.
+ * 통합 테스트 지원 코드. Oracle·PostgreSQL·MySQL·MariaDB 컨테이너, Quartz 스키마 초기화, quartz-testbed 클러스터, 실행 기록 조회.
  * 단위 테스트(`pnpm test`)에서는 import하지 않는다.
  */
 export * from './cluster.js';

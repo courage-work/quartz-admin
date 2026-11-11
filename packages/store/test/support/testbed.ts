@@ -1,3 +1,5 @@
+import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
+import path from 'node:path';
 import {
   GenericContainer,
   Wait,
@@ -67,6 +69,11 @@ export interface StartTestbedNodeOptions {
   /** 노드 로그를 stderr로 보낸다. 기본은 `QA_IT_LOGS=1`일 때만 */
   logs?: boolean;
   /**
+   * 노드 로그를 이 폴더에 노드마다 파일로 남긴다. 기본은 `QA_IT_LOG_DIR`. CI는 실패한 잡에서 이 폴더를 아티팩트로 올린다
+   * (stderr로 보내면 잡 로그가 너무 길어진다)
+   */
+  logDir?: string;
+  /**
    * false면 `scheduler.start()`를 하지 않는 기준 인스턴스로 띄운다(차등 테스트, TRD §12.1). 발화·misfire 처리·
    * 체크인이 돌지 않아 Quartz API 결과가 결정적이다. 다른 노드와 SCHED_NAME을 함께 쓰지 않는다. 기본 true
    */
@@ -91,6 +98,17 @@ const MYSQL_FAMILY_URL = /^jdbc:(mysql|mariadb):/i;
 export const MYSQL_FAMILY_QUARTZ_PROPERTIES: Readonly<Record<string, string>> = {
   'org.quartz.jobStore.doubleCheckLockMisfireHandler': 'false',
 };
+
+let logFileSeq = 0;
+
+/** 노드 로그 파일. 테스트 파일마다 클러스터를 새로 띄우므로 시각과 순번으로 이름을 나눈다 */
+function openLogFile(dir: string, label: string): WriteStream {
+  mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  logFileSeq += 1;
+  const name = `${stamp}-${String(logFileSeq).padStart(3, '0')}-${label.replace(/[^\w.-]+/g, '_')}.log`;
+  return createWriteStream(path.join(dir, name), { flags: 'a' });
+}
 
 function propertiesText(props: Record<string, string>): string {
   return Object.entries(props)
@@ -136,17 +154,30 @@ export async function startTestbedNode(options: StartTestbedNodeOptions): Promis
     .withEnvironment(env)
     .withWaitStrategy(Wait.forHttp('/healthz', HTTP_PORT).forStatusCode(200))
     .withStartupTimeout(120_000);
-  if (options.logs ?? process.env.QA_IT_LOGS === '1') {
-    const label = instanceId === 'AUTO' ? schedulerName : instanceId;
+  const label = instanceId === 'AUTO' ? schedulerName : instanceId;
+  const toStderr = options.logs ?? process.env.QA_IT_LOGS === '1';
+  const logDir = options.logDir ?? process.env.QA_IT_LOG_DIR;
+  const logFile = logDir ? openLogFile(logDir, `${schedulerName}-${label}`) : undefined;
+  if (toStderr || logFile) {
     container = container.withLogConsumer((stream) => {
       stream.on('data', (chunk: Buffer | string) => {
-        for (const line of chunk.toString().trimEnd().split('\n')) {
-          process.stderr.write(`[testbed ${label}] ${line}\n`);
+        const text = chunk.toString();
+        logFile?.write(text);
+        if (toStderr) {
+          for (const line of text.trimEnd().split('\n')) {
+            process.stderr.write(`[testbed ${label}] ${line}\n`);
+          }
         }
       });
     });
   }
-  const started = await container.start();
+  let started: StartedTestContainer;
+  try {
+    started = await container.start();
+  } catch (err) {
+    logFile?.end();
+    throw err;
+  }
   const baseUrl = `http://${started.getHost()}:${started.getMappedPort(HTTP_PORT)}`;
   const client = new TestbedClient(baseUrl);
   const metadata = await client.metadata();
@@ -158,7 +189,11 @@ export async function startTestbedNode(options: StartTestbedNodeOptions): Promis
     baseUrl,
     client,
     async stop() {
-      await started.stop();
+      try {
+        await started.stop();
+      } finally {
+        logFile?.end();
+      }
     },
   };
 }

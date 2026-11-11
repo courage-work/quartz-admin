@@ -1,0 +1,18 @@
+[
+  { "db": "oracle", "version": "21", "quartz": "2.3.2", "label": "oracle xe 21", "image": "gvenzl/oracle-xe:21-slim-faststart", "pr": false },
+  { "db": "oracle", "version": "21", "quartz": "2.5.2", "label": "oracle xe 21", "image": "gvenzl/oracle-xe:21-slim-faststart", "pr": false },
+  { "db": "oracle", "version": "23", "quartz": "2.3.2", "label": "oracle free 23", "image": "gvenzl/oracle-free:23-slim-faststart", "pr": false },
+  { "db": "oracle", "version": "23", "quartz": "2.5.2", "label": "oracle free 23", "image": "gvenzl/oracle-free:23-slim-faststart", "pr": true },
+  { "db": "postgres", "version": "11", "quartz": "2.3.2", "label": "postgres 11", "image": "postgres:11-alpine", "pr": false },
+  { "db": "postgres", "version": "11", "quartz": "2.5.2", "label": "postgres 11", "image": "postgres:11-alpine", "pr": false },
+  { "db": "postgres", "version": "17", "quartz": "2.3.2", "label": "postgres 17", "image": "postgres:17-alpine", "pr": false },
+  { "db": "postgres", "version": "17", "quartz": "2.5.2", "label": "postgres 17", "image": "postgres:17-alpine", "pr": true },
+  { "db": "mysql", "version": "5.7", "quartz": "2.3.2", "label": "mysql 5.7", "image": "mysql:5.7", "pr": false },
+  { "db": "mysql", "version": "5.7", "quartz": "2.5.2", "label": "mysql 5.7", "image": "mysql:5.7", "pr": false },
+  { "db": "mysql", "version": "8.4", "quartz": "2.3.2", "label": "mysql 8.4", "image": "mysql:8.4", "pr": false },
+  { "db": "mysql", "version": "8.4", "quartz": "2.5.2", "label": "mysql 8.4", "image": "mysql:8.4", "pr": true },
+  { "db": "mariadb", "version": "10.3", "quartz": "2.3.2", "label": "mariadb 10.3", "image": "mariadb:10.3", "pr": false },
+  { "db": "mariadb", "version": "10.3", "quartz": "2.5.2", "label": "mariadb 10.3", "image": "mariadb:10.3", "pr": false },
+  { "db": "mariadb", "version": "11.4", "quartz": "2.3.2", "label": "mariadb 11.4", "image": "mariadb:11.4", "pr": false },
+  { "db": "mariadb", "version": "11.4", "quartz": "2.5.2", "label": "mariadb 11.4", "image": "mariadb:11.4", "pr": true }
+]

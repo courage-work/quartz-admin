@@ -27,3 +27,5 @@ data/
 target/
 # apps/api 빌드 시 웹 결과물을 복사 (scripts/copy-web.mjs)
 apps/api/public/
+# 통합 테스트 노드 로그 (QA_IT_LOG_DIR=./it-logs)
+it-logs/
