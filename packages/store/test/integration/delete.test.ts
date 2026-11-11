@@ -29,6 +29,13 @@ import {
   type TestConnection,
 } from '../support/index.js';
 
+/** DB마다 BLOB 바이트(Java 직렬화 머리 ACED0005)를 쓰는 리터럴 */
+const BLOB_LITERAL = {
+  oracle: "HEXTORAW('ACED0005')",
+  postgres: "decode('ACED0005', 'hex')",
+  mysql: "X'ACED0005'",
+} as const;
+
 /** 차등 테스트의 두 기준 인스턴스. 같은 초기 상태를 만들고 한쪽은 Quartz API, 다른 쪽은 도구로 명령한다 */
 const REF_QUARTZ = 'DeleteQuartz';
 const REF_TOOL = 'DeleteTool';
@@ -227,7 +234,7 @@ describe(`삭제 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
         `VALUES (:sched, 'cal', 'd04', 'MINUTE', 5)`,
       insertTrigger('blob', 'BLOB'),
       `INSERT INTO ${T('BLOB_TRIGGERS')} (SCHED_NAME, TRIGGER_NAME, TRIGGER_GROUP, BLOB_DATA) ` +
-        `VALUES (:sched, 'blob', 'd04', ${TEST_DB === 'postgres' ? "decode('ACED0005', 'hex')" : "HEXTORAW('ACED0005')"})`,
+        `VALUES (:sched, 'blob', 'd04', ${BLOB_LITERAL[TEST_DB]})`,
     ]);
     await differential(unschedule('d04', 'cal'), delTrigger('d04', 'cal'));
     await differential(unschedule('d04', 'blob'), delTrigger('d04', 'blob'));

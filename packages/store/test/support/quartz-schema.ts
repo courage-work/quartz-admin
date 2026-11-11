@@ -24,8 +24,16 @@ export type QuartzTable = (typeof QUARTZ_TABLES)[number];
  * Quartz 배포본의 스키마 파일. `oracle`은 `tables_oracle.sql`(2.3.2와 2.5.x 공통, 불리언은 VARCHAR2(1)),
  * `oracle23`은 2.5.x에 추가된 `tables_oracle23.sql`(불리언 컬럼이 Oracle 23 BOOLEAN)이다.
  * `postgres`는 `tables_postgres.sql`(2.3.2와 2.5.x가 같음, 불리언은 BOOL, BLOB은 BYTEA, 이름은 따옴표 없음)이다.
+ * `mysql`은 `tables_mysql_innodb.sql`(2.3.2와 2.5.x가 같음, 불리언은 VARCHAR(1), BLOB, 이름은 대문자)이다.
  */
-export type QuartzSchemaVariant = 'oracle' | 'oracle23' | 'postgres';
+export type QuartzSchemaVariant = 'oracle' | 'oracle23' | 'postgres' | 'mysql';
+
+const SCHEMA_FILES: Record<QuartzSchemaVariant, string> = {
+  oracle: 'tables_oracle.sql',
+  oracle23: 'tables_oracle23.sql',
+  postgres: 'tables_postgres.sql',
+  mysql: 'tables_mysql_innodb.sql',
+};
 
 /**
  * 테이블명 대소문자. `upper`는 따옴표 없는 식별자(Oracle은 대문자로, PostgreSQL은 소문자로 저장), `lower`는 따옴표로
@@ -61,7 +69,7 @@ function resolve(options: QuartzSchemaOptions): Required<QuartzSchemaOptions> {
   return {
     prefix,
     tableCase: options.tableCase ?? 'upper',
-    variant: options.variant ?? (db === 'postgres' ? 'postgres' : 'oracle'),
+    variant: options.variant ?? (db === 'oracle' ? 'oracle' : db),
     db,
   };
 }
@@ -89,7 +97,7 @@ export function quartzCatalogNames(
 }
 
 export function readQuartzSchemaSql(variant: QuartzSchemaVariant = 'oracle'): string {
-  return readFileSync(join(TESTBED_DIR, 'schema', `tables_${variant}.sql`), 'utf8');
+  return readFileSync(join(TESTBED_DIR, 'schema', SCHEMA_FILES[variant]), 'utf8');
 }
 
 /**
@@ -138,9 +146,9 @@ export function quartzDropStatements(options: QuartzSchemaOptions = {}): string[
   ];
   const { db } = resolve(options);
   return order.map((t) =>
-    db === 'postgres'
-      ? `DROP TABLE IF EXISTS ${quartzTableName(t, options)}`
-      : `DROP TABLE ${quartzTableName(t, options)} PURGE`,
+    db === 'oracle'
+      ? `DROP TABLE ${quartzTableName(t, options)} PURGE`
+      : `DROP TABLE IF EXISTS ${quartzTableName(t, options)}`,
   );
 }
 

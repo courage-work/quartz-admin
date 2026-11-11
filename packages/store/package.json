@@ -24,6 +24,7 @@
   "dependencies": {
     "@qa/core": "workspace:*",
     "@qa/shared": "workspace:*",
+    "mysql2": "catalog:",
     "oracledb": "catalog:",
     "pg": "catalog:"
   },

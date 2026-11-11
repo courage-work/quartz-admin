@@ -75,7 +75,11 @@ export async function listNodes(
   });
 }
 
-/** 일시정지된 트리거 그룹 (FR-VIEW-02) */
+/**
+ * 일시정지된 트리거 그룹 (FR-VIEW-02). 문자 코드 순으로 정렬한다.
+ * DB 정렬 규칙에 맡기면 MySQL 5.7 기본값(`latin1_swedish_ci`)에서 `_$_ALL_GROUPS_PAUSED_$_`가 영문 뒤로 가는 등
+ * DB마다 순서가 달라진다. 행이 적고 페이지를 나누지 않으므로 코드에서 정렬한다
+ */
 export async function listPausedGroups(
   conn: TargetConn,
   ctx: SchedulerViewContext,
@@ -84,10 +88,10 @@ export async function listPausedGroups(
   const b = new Binds(d);
   const rows = await conn.query(
     `SELECT TRIGGER_GROUP AS ${d.quote('G')} FROM ${tables.table('PAUSED_TRIGGER_GRPS')} ` +
-      `WHERE SCHED_NAME = ${b.add(ctx.schedName)} ORDER BY TRIGGER_GROUP`,
+      `WHERE SCHED_NAME = ${b.add(ctx.schedName)}`,
     b.values,
   );
-  return rows.map((r) => str(r, 'G'));
+  return rows.map((r) => str(r, 'G')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /**

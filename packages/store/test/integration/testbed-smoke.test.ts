@@ -190,4 +190,30 @@ describe(`quartz-testbed 2노드 클러스터 (${TEST_DB_LABEL}, Quartz ${QUARTZ
       ]);
     },
   );
+
+  it.skipIf(TEST_DB !== 'mysql')(
+    '사용자 지정 prefix 스키마를 같은 DB에 만들 수 있고, 불리언은 VARCHAR(1)·BLOB은 BLOB이다',
+    async () => {
+      await initQuartzSchema(conn, { prefix: 'APP_' });
+      const result = await conn.execute<[string]>(
+        `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`,
+      );
+      const tables = new Set((result.rows ?? []).map(([name]) => name));
+      for (const schema of [{}, { prefix: 'APP_' }]) {
+        for (const table of QUARTZ_TABLES) {
+          expect(tables).toContain(quartzCatalogName(table, schema));
+        }
+      }
+      expect(tables).toContain('TESTBED_EXECUTIONS');
+      const types = await conn.execute<[string, string]>(
+        `SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'APP_JOB_DETAILS'
+           AND COLUMN_NAME IN ('IS_DURABLE', 'JOB_DATA') ORDER BY COLUMN_NAME`,
+      );
+      expect(types.rows).toEqual([
+        ['IS_DURABLE', 'varchar'],
+        ['JOB_DATA', 'blob'],
+      ]);
+    },
+  );
 });

@@ -41,6 +41,8 @@ export { oracleDialect } from './oracle/dialect.js';
 export { oracleConnectString } from './oracle/connect-string.js';
 export { PostgresAdapter } from './postgres/adapter.js';
 export { postgresDialect } from './postgres/dialect.js';
+export { MysqlAdapter, toMysqlPlaceholders } from './mysql/adapter.js';
+export { mysqlDialect } from './mysql/dialect.js';
 export { createDriverAdapters, dialectFor } from './registry.js';
 export { detectQuartz, type DetectOptions } from './detect/detect.js';
 export { REQUIRED_PRIVILEGES } from './detect/privileges.js';

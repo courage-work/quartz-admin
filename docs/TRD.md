@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.25 (B-27 PostgreSQL 지원 반영) |
+| 문서 버전 | v0.26 (B-28 MySQL 지원 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -39,6 +39,7 @@
 | v0.23 | 2026-11-10 | B-24: §8 스케줄러 API에 알림 규칙·알림 목록. §9.1 연체 목록 상한 50 → 500(적용 범위·재개 제외가 목록을 거름). §9.2 판정 세부(적용 범위는 수집 목록을 거름, BLOCKED와 PAUSED_BLOCKED, 감시 실패 회차, 기본 규칙과 기존 스케줄러 채우기). §9.3 엔진 구현(억제 순서, 억제가 풀린 뒤 `fire`, 지우거나 끈 규칙, 발송 큐까지), 감사 작업 종류 `alert_rule.create`·`update`·`delete` |
 | v0.24 | 2026-11-11 | B-25: §8 API에 채널·알림 센터, 규칙의 `channelIds`. §9.4 발송 구현(워커 주기·시간 제한·재시도, 요약 기준, 인앱 처리, 메시지 내용, 웹훅 URL 검사, 읽지 않음 정의, 확인, 발송 실패 표시, 채널 관리). §3.3 알림 보존 정리 구현. 감사 작업 종류 `channel.*`, `alert.ack` |
 | v0.25 | 2026-11-11 | B-27: §5.2 pg 어댑터 세부(트랜잭션 경계, int8 파서, 시간 제한, 오류 분류), §5.3 PostgreSQL dialect 구현 메모와 잠금 행 재시도의 `SET LOCAL` 재설정, §12 통합 테스트를 DB 중립으로(`QA_IT_DB`, PostgreSQL 전용 스위트), CI에 PostgreSQL 잡 2개. §5.4·§7.5 즉시 실행 트리거의 JOB_DATA를 Quartz처럼 빈 바이트로(Oracle은 NULL로 저장) |
+| v0.26 | 2026-11-11 | B-28: §5.2 조회 제한을 MySQL 세션 `max_execution_time`으로(힌트와 같은 효과), mysql2 어댑터 세부(자리 표시 변환, 트랜잭션 경계, 세션 설정, `FOUND_ROWS`, 오류 분류), §5.3 MySQL dialect 구현 메모(대소문자 무시 정렬 규칙, `lower_case_table_names`), §5.5 MySQL 권한 오류, §12 `QA_IT_DB=mysql`과 CI에 MySQL 잡 2개, 테스트베드 MySQL 드라이버(mysql-connector-j 8.4) |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -260,7 +261,7 @@ quartz-admin/
 | 유휴 종료 | 60초 |
 | 연결 타임아웃 | 10초 |
 | 커넥션 대기 타임아웃 | 10초 (초과 시 `TARGET_BUSY`) |
-| 조회 쿼리 실행 제한 | 10초 (PG `statement_timeout`, MySQL `MAX_EXECUTION_TIME` 힌트, MariaDB `max_statement_time`, Oracle `callTimeout`) |
+| 조회 쿼리 실행 제한 | 10초 (PG `statement_timeout`, MySQL 세션 `max_execution_time`, MariaDB `max_statement_time`, Oracle `callTimeout`) |
 | 세션 보호 | PG `idle_in_transaction_session_timeout=30s`, TCP keepalive 사용 |
 
 구현(`packages/store/src/pool-manager.ts`):
@@ -277,7 +278,7 @@ quartz-admin/
 - **oracledb**: Thin 모드. 접속은 Easy Connect(`host:port/service`), SID는 접속 기술자로 만듭니다. `connectTimeout`·`transportConnectTimeout`은 연결 제한(초), `callTimeout`은 조회 제한, `expireTime=1`(분)로 끊긴 연결을 감지합니다. BLOB은 Buffer로, 행은 객체 형식으로 받되 전역 `oracledb.fetchAsBuffer`·`outFormat`은 바꾸지 않고 쿼리마다 `fetchTypeHandler`·`outFormat`을 넘깁니다(같은 프로세스의 다른 oracledb 사용처에 영향을 주지 않기 위해). NUMBER는 JS number로 받습니다(epoch ms는 2^53 미만).
   - S3에서 확인: Thin 모드의 `callTimeout`은 시간이 지나면 서버에 중단을 요청하고 그 응답을 기다립니다. 서버가 PL/SQL을 끝까지 실행하거나 네트워크가 멈추면 호출이 돌아오지 않습니다. 그래서 어댑터가 제한 + 1초가 지나면 드라이버 응답을 기다리지 않고 `TARGET_TIMEOUT`으로 끝내고, 그 커넥션은 버립니다.
 - **pg**: 풀마다 `types` 옵션으로 int8(OID 20)을 Number로 파싱합니다. 전역 `setTypeParser`는 쓰지 않습니다.
-- **mysql2**: `supportBigNumbers: true`, `bigNumberStrings: false`, `dateStrings: true`, `timezone: 'Z'`
+- **mysql2**: `supportBigNumbers: true`, `bigNumberStrings: false`, `decimalNumbers: true`, `dateStrings: true`, `timezone: 'Z'`, `charset: 'utf8mb4'`, `enableKeepAlive`, `multipleStatements: false`, `flags: ['FOUND_ROWS']`
 
 PostgreSQL 어댑터 세부(B-27, `packages/store/src/postgres/`):
 
@@ -286,6 +287,16 @@ PostgreSQL 어댑터 세부(B-27, `packages/store/src/postgres/`):
 - **시간 제한**: 연결 제한은 `connectionTimeoutMillis`, 조회 제한은 서버 쪽 `statement_timeout`(57014 → `TARGET_TIMEOUT`)이고, 서버가 응답하지 않을 때를 위해 드라이버 쪽 `query_timeout`을 1초 더 길게 겁니다. `idle_in_transaction_session_timeout=30s`, TCP keepalive, `application_name=quartz-admin`을 접속 때 넣습니다.
 - **오류 분류**: SQLSTATE로 나눕니다. 28000·28P01 → `TARGET_AUTH_FAILED`, 08xxx·3D000(DB 이름 없음)·53300·57P0x → `TARGET_UNREACHABLE`, 57014·25P03 → `TARGET_TIMEOUT`, 55P03(lock_timeout) → `LOCK_TIMEOUT`, 40P01(교착)은 다시 시도할 수 있는 `TARGET_ERROR`, 그 밖(42501 권한 없음 등)은 `TARGET_ERROR`입니다. SQLSTATE가 없는 `pg` 연결·시간 초과 메시지와 Node 소켓 오류도 분류합니다. 메시지에서 호스트·포트·계정·비밀번호·DB 이름을 지웁니다.
 - **값**: int8(BIGINT, `COUNT(*)`)은 접속마다 넘기는 `types`로 Number로 읽고(전역 파서 미사용), BOOL은 boolean, BYTEA는 Buffer로 받습니다. 정규화(§5.4)는 그대로 씁니다.
+
+MySQL 어댑터 세부(B-28, `packages/store/src/mysql/`):
+
+- **자리 표시**: dialect의 `param(n)`은 `:pN`을 돌려주고, 어댑터가 SQL에 나온 순서대로 `?`로 바꾸며 값도 그 순서로 늘어놓습니다(`toMysqlPlaceholders`). 같은 번호를 두 번 쓰거나 `LIMIT :p2 OFFSET :p1`처럼 순서가 뒤바뀌어도 번호가 그대로 자리를 가리킵니다. 값이 없는 번호는 실행 전에 `TARGET_ERROR`로 막습니다.
+- **트랜잭션 경계**: PostgreSQL과 같습니다. 쓰기(`execute`)와 잠금 조회(`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`) 앞에서 `START TRANSACTION`하고, 잠그지 않는 조회는 자동 커밋으로 실행합니다. `SET` 문(잠금 대기 제한 설정과 원복)은 트랜잭션을 열지 않습니다.
+- **세션 설정**: 접속하면 `SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED`와 `SET SESSION max_execution_time = <조회 제한 ms>`를 실행합니다. 격리 수준을 맞추는 것은 조회 화면이 Oracle·PostgreSQL과 같이 문장마다 최신 커밋을 보게 하려는 것입니다(잠금 조회는 격리 수준과 관계없이 최신 행을 잠급니다). 쿼리마다 다른 제한을 주면 그 쿼리 앞뒤로 세션 값을 바꾸고 되돌립니다.
+- **조회 제한 결정**: TRD 초안은 `MAX_EXECUTION_TIME` 힌트였지만 세션 변수로 정했습니다. 힌트와 세션 변수는 같은 기능(읽기 전용 SELECT에만 적용, 3024 `ER_QUERY_TIMEOUT`)이고, 세션 변수는 SQL을 고치지 않아 dialect 코드가 DB를 가리지 않습니다. 쓰기 문장에는 적용되지 않으므로 서버가 응답하지 않을 때를 위해 드라이버 쪽 `timeout`을 1초 더 길게 겁니다(넘기면 커넥션을 버림).
+- **행 수**: `FOUND_ROWS` 플래그로 UPDATE의 행 수가 "조건에 맞은 행 수"입니다. 값이 이미 같아도 세므로 Oracle·PostgreSQL과 같은 값을 돌려줍니다(명령의 "대상 없음" 판정에 씀).
+- **오류 분류**: errno로 나눕니다. 1044·1045 → `TARGET_AUTH_FAILED`, 1049(DB 없음)·1040·1053·1927·4031·2002·2003·2006·2013 → `TARGET_UNREACHABLE`, 3024·1317 → `TARGET_TIMEOUT`, 1205·3572 → `LOCK_TIMEOUT`, 1213(교착)은 다시 시도할 수 있는 `TARGET_ERROR`, 그 밖(1142 권한 없음, 1062 `ER_DUP_ENTRY` 등)은 `TARGET_ERROR`입니다. errno가 없는 mysql2 연결·시간 초과 오류(`PROTOCOL_*`, Node 소켓 오류)도 분류합니다. `driverCode`는 mysql2의 `code`(`ER_DUP_ENTRY` 등)입니다. 권한이 없는 계정은 없는 DB에도 1044로 답하므로(DB가 있는지 알려주지 않음) 인증 실패로 보입니다.
+- **값**: BIGINT·`COUNT(*)`는 number, DECIMAL은 number, BLOB은 Buffer, 날짜는 문자열(UTC)로 받습니다. Quartz MySQL 스키마의 불리언은 `VARCHAR(1)`이라 문자열 `'1'`/`'0'`입니다.
 
 ### 5.3 QuartzDialect
 
@@ -310,15 +321,23 @@ interface QuartzDialect {
 
 | 동작 | Oracle | PostgreSQL | MySQL / MariaDB |
 | --- | --- | --- | --- |
-| 바인드 | `:p1` | `$1` | `?` |
+| 바인드 | `:p1` | `$1` | `?` (dialect는 `:p1`, 어댑터가 나온 순서대로 바꿈) |
 | 식별자 | `"QRTZ_TRIGGERS"` | `"qrtz_triggers"` (감지한 실제 대소문자) | `` `QRTZ_TRIGGERS` `` |
 | 페이지네이션 | `OFFSET :n ROWS FETCH NEXT :m ROWS ONLY` | `LIMIT $m OFFSET $n` | `LIMIT ? OFFSET ?` |
 | 잠금 대기 제한 | `FOR UPDATE WAIT 5`(락 행과 대상 행 모두) | `SET LOCAL lock_timeout = '5s'` | `SET SESSION innodb_lock_wait_timeout = 5` (트랜잭션 후 원복) |
-| 격리 수준 | READ COMMITTED (기본값) | READ COMMITTED (기본값) | `SET TRANSACTION ISOLATION LEVEL READ COMMITTED` |
-| 현재 시각(ms) | `(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400000 + TO_NUMBER(TO_CHAR(SYSTIMESTAMP,'FF3'))` | `(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint` | `ROUND(UNIX_TIMESTAMP(NOW(3)) * 1000)` |
+| 격리 수준 | READ COMMITTED (기본값) | READ COMMITTED (기본값) | 접속 때 `SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED` |
+| 현재 시각(ms) | `(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400000 + TO_NUMBER(TO_CHAR(SYSTIMESTAMP,'FF3'))` | `(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint` | `CAST(ROUND(UNIX_TIMESTAMP(NOW(3)) * 1000) AS SIGNED)` |
 | 카탈로그 | `ALL_TABLES`, `ALL_TAB_COLUMNS` (OWNER) | `information_schema` (table_schema) | `information_schema` (`DATABASE()`) |
 
 PostgreSQL dialect(B-27): 카탈로그는 `information_schema`(`table_type = 'BASE TABLE'`)를 대문자 별칭(`"TABLE_NAME"` 등)으로 읽어 감지 코드가 DB를 가리지 않습니다. Quartz PostgreSQL 스키마(`tables_postgres.sql`, 2.3.2와 2.5.x가 같음)는 테이블을 따옴표 없이 만들어 소문자(`qrtz_triggers`)로 저장되고, 감지한 prefix도 소문자(`qrtz_`)입니다. SQL의 컬럼 이름은 따옴표 없이 써서 소문자로 접히고, 결과는 모두 따옴표 친 대문자 별칭으로 읽으므로 드라이버가 돌려주는 키가 DB마다 같습니다. 불리언 컬럼은 BOOL이라 감지 결과가 `native`입니다.
+
+MySQL dialect(B-28):
+
+- 카탈로그는 `information_schema.TABLES`·`COLUMNS`에서 현재 DB(`DATABASE()`, 접속 정보의 DB 이름)를 백틱 대문자 별칭으로 읽습니다. 스키마는 DB 이름입니다. Quartz MySQL 스키마(`tables_mysql_innodb.sql`, 2.3.2와 2.5.x가 같음)는 테이블을 대문자(`QRTZ_TRIGGERS`)로 만들고, 불리언은 `VARCHAR(1)`, JOB_DATA는 `BLOB`입니다.
+- **`lower_case_table_names`**: 리눅스 기본값 0은 테이블 이름을 만든 그대로(대소문자 구분) 저장합니다. 1(Windows 기본, 초기화 때만 정할 수 있음)이면 소문자로 저장하고 비교도 소문자로 합니다. 감지는 카탈로그에 보이는 실제 이름을 쓰므로 1인 서버에서는 prefix가 `qrtz_`로 나오고, 그 이름으로 만든 식별자가 그대로 동작합니다(통합 테스트에서 확인).
+- **대소문자를 무시하는 정렬 규칙**: Quartz 스키마는 문자 컬럼의 정렬 규칙을 지정하지 않아 DB 기본값(`utf8mb4_0900_ai_ci`, 5.7은 `latin1_swedish_ci` 등)을 따릅니다. 대부분 대소문자와 끝 공백을 무시하므로 MySQL에서는 `job`과 `JOB`이 같은 키입니다. Quartz도 같은 테이블을 쓰므로 두 키를 따로 만들 수 없고(1062), 도구의 조회·명령도 같은 결과가 됩니다. 도구는 이 차이를 고치지 않고 문서로만 남깁니다(검색 필터의 대소문자 구분이 Oracle·PostgreSQL과 다를 수 있음). 페이지를 나누는 목록의 정렬도 DB 정렬 규칙을 따르므로 기호와 대소문자의 순서가 DB마다 다릅니다(5.7 `latin1_swedish_ci`는 `_`를 영문 뒤에 둠). 페이지를 나누지 않는 일시정지 그룹 목록만 코드에서 문자 코드 순으로 정렬합니다.
+- 잠금 대기 제한은 세션 변수라 트랜잭션이 끝나도 남습니다. 그래서 `afterLockedTx`가 `SET SESSION innodb_lock_wait_timeout = DEFAULT`로 되돌리고, 풀에 돌아간 커넥션의 다른 요청에 영향을 주지 않습니다. 대기 초과는 1205 `ER_LOCK_WAIT_TIMEOUT` → `LOCK_TIMEOUT`입니다. InnoDB는 1205가 나도 트랜잭션을 되돌리지 않으므로(문장만 실패) 호출하는 쪽이 ROLLBACK합니다.
+- 고유 키 중복은 `ER_DUP_ENTRY`(1062)이며 `isDuplicateKey`가 이것으로 판정합니다.
 
 Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상 트리거 행도 `SELECT … FOR UPDATE WAIT 5`로 먼저 잠근 뒤 UPDATE합니다. 대기 초과는 Oracle 23에서 `ORA-00054`, 이전 버전에서 `ORA-30006`이며 둘 다 `LOCK_TIMEOUT`입니다.
 
@@ -329,7 +348,7 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 
 - 시각 컬럼(NEXT_FIRE_TIME 등)은 epoch ms입니다. 값이 없을 때 Quartz가 저장하는 값은 경로마다 다릅니다. `NEXT_FIRE_TIME`은 INSERT(`Delegate.insertTrigger`)에서는 SQL `NULL`, UPDATE(`Delegate.updateTrigger`)에서는 `-1`이고, `PREV_FIRE_TIME`은 항상 `-1`, `END_TIME`은 `0`입니다. Quartz는 읽을 때 `> 0`인 값만 유효로 봅니다(`Delegate.selectTriggerStatus`). 도구도 `NULL`과 `0` 이하를 모두 `null`로 바꿉니다(`readTime`). 이 규칙은 시각 컬럼에만 씁니다. `REPEAT_COUNT`의 -1(무한 반복)이나 `TIMES_TRIGGERED`의 0처럼 의미 있는 값을 지우지 않도록, 정수 컬럼은 `readLong`(SQL `NULL`만 `null`)으로 읽습니다.
 - 불리언 컬럼은 읽을 때만 정규화합니다. MVP의 쓰기 작업은 불리언 컬럼을 건드리지 않습니다. 새로 넣는 행은 `TRIGGERS`, `SIMPLE_TRIGGERS`, `PAUSED_TRIGGER_GRPS`, `LOCKS`뿐이고, 이 테이블들에는 불리언 컬럼이 없습니다.
-- JOB_DATA(BLOB)는 읽기만 합니다. 즉시 실행 트리거의 JOB_DATA는 Quartz와 같게 넣습니다. Quartz는 맵이 비어 있으면 직렬화하지 않고(`Delegate.insertTrigger`의 `getJobDataMap().size() > 0` 검사) `StdJDBCDelegate.setBytes`가 null 대신 **빈 바이트 배열**을 씁니다. Oracle은 빈 값을 `NULL`로 저장하고, PostgreSQL(BYTEA)은 빈 값 그대로 저장합니다(B-27 차등 테스트에서 확인). 그래서 도구는 Oracle에서는 컬럼을 빼서 `NULL`, 그 밖의 DB에서는 빈 바이트를 넣습니다. 읽을 때는 둘 다 "데이터 없음"(`readBlob`이 `null`)입니다.
+- JOB_DATA(BLOB)는 읽기만 합니다. 즉시 실행 트리거의 JOB_DATA는 Quartz와 같게 넣습니다. Quartz는 맵이 비어 있으면 직렬화하지 않고(`Delegate.insertTrigger`의 `getJobDataMap().size() > 0` 검사) `StdJDBCDelegate.setBytes`가 null 대신 **빈 바이트 배열**을 씁니다. Oracle은 빈 값을 `NULL`로 저장하고, PostgreSQL(BYTEA)과 MySQL(BLOB)은 빈 값 그대로 저장합니다(B-27, B-28 차등 테스트에서 확인). 그래서 도구는 Oracle에서는 컬럼을 빼서 `NULL`, 그 밖의 DB에서는 빈 바이트를 넣습니다. 읽을 때는 둘 다 "데이터 없음"(`readBlob`이 `null`)입니다.
 - Oracle에서는 빈 문자열이 NULL이 되므로, DESCRIPTION 비교는 `IS NULL`과 함께 처리합니다.
 
 ### 5.5 자동 감지 (FR-CON-03, FR-CON-04)
@@ -353,13 +372,13 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
    | `jobNonconcurrent` | `JOB_DETAILS.IS_NONCONCURRENT` |
    | `jobUpdateData` | `JOB_DETAILS.IS_UPDATE_DATA` |
    | `cronTimeZone` | `CRON_TRIGGERS.TIME_ZONE_ID` |
-4. **불리언 형식 감지**: `JOB_DETAILS.IS_DURABLE`의 컬럼 타입이 BOOLEAN(Oracle 23 `BOOLEAN`, PostgreSQL `bool`)이면 `native`로 봅니다. 문자·숫자 타입이면 `JOB_DETAILS`의 불리언 컬럼 4개(`IS_DURABLE`, `IS_NONCONCURRENT`, `IS_UPDATE_DATA`, `REQUESTS_RECOVERY`)의 DISTINCT 값으로 `10`/`YN`/`TF` 중 하나를 판정합니다(대소문자와 CHAR 공백 무시, `TRUE`/`FALSE`는 `TF`).
+4. **불리언 형식 감지**: `JOB_DETAILS.IS_DURABLE`의 컬럼 타입이 BOOLEAN(Oracle 23 `BOOLEAN`, PostgreSQL `bool`)이면 `native`로 봅니다. MySQL은 `VARCHAR(1)`이라 값으로 판정합니다. 문자·숫자 타입이면 `JOB_DETAILS`의 불리언 컬럼 4개(`IS_DURABLE`, `IS_NONCONCURRENT`, `IS_UPDATE_DATA`, `REQUESTS_RECOVERY`)의 DISTINCT 값으로 `10`/`YN`/`TF` 중 하나를 판정합니다(대소문자와 CHAR 공백 무시, `TRUE`/`FALSE`는 `TF`).
    - 값이 하나도 없으면(잡이 없음) `10`으로 둡니다. Quartz는 `setBoolean`으로 저장하므로 문자 컬럼에는 `'1'`/`'0'`이 들어갑니다. 판정 근거는 `boolFormatSource`(`column-type`/`values`/`default`)로 함께 돌려줍니다.
    - 형식이 섞여 있으면 가장 많이 보이는 형식을 고르고 `BOOL_FORMAT_MIXED`, 알아볼 수 없는 값이 있으면 `BOOL_FORMAT_UNKNOWN_VALUE` 경고를 붙입니다.
 5. **SCHED_NAME 목록**: `TRIGGERS`, `JOB_DETAILS`, `SCHEDULER_STATE`, `LOCKS`에서 DISTINCT `SCHED_NAME`을 모아 후보로 제시합니다. 각 후보에 잡 수, 트리거 수, `SCHEDULER_STATE` 행 수, 활성 노드 수(§9.2 정의, 배수 기본 3, 기준은 감지 시점의 DB 현재 시각)를 붙입니다. 잠금 행만 있는 SCHED_NAME(아직 잡을 등록하지 않은 스케줄러)도 후보입니다.
 6. **쓰기 권한 점검**: 트랜잭션 안에서 결과 행이 0개인 문장(`SELECT … WHERE 1 = 0`, `UPDATE … SET SCHED_NAME = SCHED_NAME WHERE 1 = 0`, `INSERT INTO t SELECT * FROM t WHERE 1 = 0`, `DELETE … WHERE 1 = 0`)을 실행한 뒤 ROLLBACK합니다. 권한 검사는 실행 단계에서 일어나므로 행을 건드리거나 행 잠금을 잡지 않고도 권한 유무를 판정할 수 있습니다. 하나라도 실패하면 `write_capable=false`로 두고 빠진 권한을 `missingPrivileges`로 돌려줍니다.
    - 실패한 문장마다 바로 ROLLBACK합니다. Oracle은 실패한 문장만 되돌리지만 PostgreSQL은 트랜잭션 전체가 중단돼 다음 문장이 실패하기 때문입니다.
-   - 권한 부족은 `TARGET_ERROR`로 오는 오류만 셉니다. 연결이 끊기거나 시간이 넘으면(`TARGET_UNREACHABLE`·`TARGET_TIMEOUT`) 판정할 수 없으므로 감지 전체를 실패시킵니다. Oracle 23은 권한 부족을 `ORA-41900`(없는 권한을 알려줌)으로, 이전 버전은 `ORA-01031`로 알립니다.
+   - 권한 부족은 `TARGET_ERROR`로 오는 오류만 셉니다. 연결이 끊기거나 시간이 넘으면(`TARGET_UNREACHABLE`·`TARGET_TIMEOUT`) 판정할 수 없으므로 감지 전체를 실패시킵니다. Oracle 23은 권한 부족을 `ORA-41900`(없는 권한을 알려줌)으로, 이전 버전은 `ORA-01031`로 알립니다. PostgreSQL은 42501, MySQL은 1142 `ER_TABLEACCESS_DENIED_ERROR`입니다.
    - Oracle DML은 0행이라도 테이블에 RX 모드 TM 잠금을 잡습니다. 행 잠금이 아니라서 Quartz의 DML과 충돌하지 않고, ROLLBACK하면 바로 풀립니다. 다른 세션이 행을 잠그고 있어도 감지는 기다리지 않습니다(통합 테스트로 확인).
 
    | 테이블 | 필요 권한 |
@@ -965,14 +984,15 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 통합 테스트 헬퍼는 `packages/store/test/support/`에 있고 `pnpm test:integration`(Docker 필요)으로 돕니다. 단위 테스트(`pnpm test`)와는 분리돼 있습니다.
 
-화면이나 API를 손으로 확인할 때는 `pnpm --filter @qa/store testbed:up`으로 Oracle Free 23(`QA_IT_DB=postgres`면 PostgreSQL)과 2노드 클러스터(잡 2개)를 띄웁니다. 접속 정보는 `packages/store/.testbed.json`에 쓰이고, 같은 위치에 `.testbed.stop` 파일을 만들거나 `QA_TESTBED_MINUTES`(기본 120)분이 지나면 끝납니다(두 파일은 git 제외 대상). CI에서는 돌리지 않습니다.
+화면이나 API를 손으로 확인할 때는 `pnpm --filter @qa/store testbed:up`으로 Oracle Free 23(`QA_IT_DB=postgres`면 PostgreSQL, `mysql`이면 MySQL)과 2노드 클러스터(잡 2개)를 띄웁니다. 접속 정보는 `packages/store/.testbed.json`에 쓰이고, 같은 위치에 `.testbed.stop` 파일을 만들거나 `QA_TESTBED_MINUTES`(기본 120)분이 지나면 끝납니다(두 파일은 git 제외 대상). CI에서는 돌리지 않습니다.
 
 | 헬퍼 | 내용 |
 | --- | --- |
 | `startOracle` | Oracle Free 23(`gvenzl/oracle-free:23-slim-faststart`) 기동, 앱 계정, SYSTEM 접속, 추가 계정 생성 |
 | `startPostgres` | PostgreSQL(`postgres:<QA_IT_POSTGRES_VERSION>-alpine`, 기본 17) 기동, 추가 역할과 같은 이름의 스키마 생성 |
+| `startMysql` | MySQL(`mysql:<QA_IT_MYSQL_VERSION>`, 기본 8.4) 기동, 앱 계정(quartz DB 전체 권한), root 접속, 권한 없는 추가 계정 생성, `lower_case_table_names=1` 변형 |
 | `startTestDb` / `TestConnection` / `schedulerContext` | `QA_IT_DB`의 DB 기동, DB 중립 검증 SQL 연결, 테스트용 스케줄러 컨텍스트 |
-| `initQuartzSchema` / `dropQuartzSchema` | Quartz 스키마 생성·삭제(prefix, 대소문자, `oracle`/`oracle23`/`postgres` 변형) |
+| `initQuartzSchema` / `dropQuartzSchema` | Quartz 스키마 생성·삭제(prefix, 대소문자, `oracle`/`oracle23`/`postgres`/`mysql` 변형) |
 | `startTestbedNode` / `startQuartzCluster` | 테스트베드 노드 기동, DB + 스키마 + N노드 클러스터(기본 2) 기동과 체크인 대기 |
 | `TestbedClient` | `/control/*` API 클라이언트 |
 | `listExecutions` / `waitForExecutions` / `clearExecutions` | 실행 기록 조회·대기·삭제 |
@@ -986,10 +1006,11 @@ S2에서 확인한 사항:
 ### 12.2 환경 메모
 
 - Apple Silicon: Oracle XE 21과 MySQL 5.7 이미지는 amd64 전용이라 로컬에서는 에뮬레이션으로 느리게 돕니다. 로컬 기본값은 Oracle Free 23과 각 DB 최신 버전으로 두고, 전체 매트릭스는 CI(x64 러너)에서 돌립니다. `gvenzl/oracle-free:23-slim-faststart`와 테스트베드 베이스 이미지는 arm64를 제공합니다.
-- CI는 GitHub Actions를 가정합니다. DB별로 잡을 나눠 병렬로 실행합니다. 지금은 `integration-oracle` 잡이 Quartz 2.3.2와 2.5.2 매트릭스로, `integration-postgres` 잡이 PostgreSQL 11 × Quartz 2.3.2와 PostgreSQL 17 × Quartz 2.5.2로 테스트베드 이미지를 빌드하고(`QA_IT_TESTBED_IMAGE`) 통합 테스트를 돌립니다. DB·버전·Quartz의 전체 조합은 B-30에서 맞춥니다.
-- **DB 중립 통합 테스트**(B-27): 같은 테스트 파일이 `QA_IT_DB`(`oracle` 기본, `postgres`)로 고른 DB에서 돕니다. 테스트의 준비·검증 SQL은 `TestConnection`(oracledb `Connection`과 같은 모양)으로 실행하고, PostgreSQL에서는 `:1`·`:name` 바인드를 `$1`로, `FOR UPDATE WAIT n`을 `FOR UPDATE`로 바꾸며 DDL은 Oracle처럼 바로 반영합니다. 테이블 이름은 따옴표 없는 대문자(`QRTZ_TRIGGERS`)로 써서 두 DB에서 같은 SQL이 돕니다. 스케줄러 컨텍스트는 `schedulerContext(db, schedName)`, 잠금 행이 풀렸는지는 `triggerAccessIsFree`로 봅니다. Oracle 전용(`oracle-store`, `detect`)과 PostgreSQL 전용(`postgres-store`, `detect-postgres`) 스위트는 다른 DB에서 건너뜁니다.
+- CI는 GitHub Actions를 가정합니다. DB별로 잡을 나눠 병렬로 실행합니다. 지금은 `integration-oracle` 잡이 Quartz 2.3.2와 2.5.2 매트릭스로, `integration-postgres` 잡이 PostgreSQL 11 × Quartz 2.3.2와 PostgreSQL 17 × Quartz 2.5.2로, `integration-mysql` 잡이 MySQL 5.7 × Quartz 2.3.2와 MySQL 8.4 × Quartz 2.5.2로 테스트베드 이미지를 빌드하고(`QA_IT_TESTBED_IMAGE`) 통합 테스트를 돌립니다. DB·버전·Quartz의 전체 조합은 B-30에서 맞춥니다.
+- **DB 중립 통합 테스트**(B-27): 같은 테스트 파일이 `QA_IT_DB`(`oracle` 기본, `postgres`, `mysql`(B-28))로 고른 DB에서 돕니다. 테스트의 준비·검증 SQL은 `TestConnection`(oracledb `Connection`과 같은 모양)으로 실행하고, PostgreSQL에서는 `:1`·`:name` 바인드를 `$1`로(MySQL에서는 나온 순서대로 `?`로), `FOR UPDATE WAIT n`을 `FOR UPDATE`로 바꾸며 DDL은 Oracle처럼 바로 반영합니다. 테이블 이름은 따옴표 없는 대문자(`QRTZ_TRIGGERS`)로 써서 두 DB에서 같은 SQL이 돕니다. 스케줄러 컨텍스트는 `schedulerContext(db, schedName)`, 잠금 행이 풀렸는지는 `triggerAccessIsFree`로 봅니다. Oracle 전용(`oracle-store`, `detect`), PostgreSQL 전용(`postgres-store`, `detect-postgres`), MySQL 전용(`mysql-store`, `detect-mysql`) 스위트는 다른 DB에서 건너뜁니다.
   - PostgreSQL 조회 성능 테스트(트리거 1만 개 p95)는 데이터를 넣은 뒤 `ANALYZE`합니다. 넣은 직후에는 통계가 없어 계획이 크게 틀리기 때문입니다(정렬·깊은 페이지가 1.4~3초). 운영 Quartz 테이블은 autovacuum이 통계를 채웁니다.
   - 테스트베드는 JDBC 드라이버 속성이 없으면(PostgreSQL) `driverProperties`를 넘기지 않습니다. 빈 값을 넘기면 Quartz가 null로 setter를 불러 기동이 실패합니다.
+  - MySQL(B-28): 테스트베드 드라이버는 mysql-connector-j 8.4입니다(9.x는 5.7 지원을 뺐음). MySQL은 DDL 앞에서 스스로 커밋하므로 `TestConnection`도 DDL에서 트랜잭션을 닫은 것으로 봅니다. 5.7 이미지는 amd64 전용입니다.
 - MVP 기능 개발 동안은 PR에서 CI를 돌리지 않습니다. 워크플로는 main 푸시와 수동 실행(`workflow_dispatch`)에만 돌고, main 브랜치 보호의 필수 검사(`verify`)도 해제했습니다. PR을 올리기 전에는 로컬에서 `pnpm format:check`, `build`, `lint`, `typecheck`, `test`(대상 DB 코드를 바꿨으면 `test:integration`도)를 돌립니다. MVP 이후 CI/CD를 정리할 때 PR 트리거와 필수 검사를 다시 켭니다.
 
 ### 12.3 구현 전 확인 항목 (스파이크)
@@ -1093,7 +1114,7 @@ B-17~B-21의 통합 테스트와 차등 테스트가 이 목록을 씁니다. �
 
 | ID | 초기 상태 | 명령 | 기대 결과 | 비교 |
 | --- | --- | --- | --- | --- |
-| T-01 | 잡 J, 일시정지 없음 | triggerJob J | 새 TRIGGERS 행: 그룹 `DEFAULT`, 이름 `MT_`로 시작, TYPE `SIMPLE`, 상태 `W`, PREV −1, END 0, PRIORITY 5, MISFIRE_INSTR 0, JOB_DATA 빈 값(Oracle NULL, PostgreSQL 빈 BYTEA), CALENDAR NULL. SIMPLE_TRIGGERS (0, 0, 0). START_TIME = NFT ≈ dbNow | 차등 |
+| T-01 | 잡 J, 일시정지 없음 | triggerJob J | 새 TRIGGERS 행: 그룹 `DEFAULT`, 이름 `MT_`로 시작, TYPE `SIMPLE`, 상태 `W`, PREV −1, END 0, PRIORITY 5, MISFIRE_INSTR 0, JOB_DATA 빈 값(Oracle NULL, PostgreSQL 빈 BYTEA, MySQL 빈 BLOB), CALENDAR NULL. SIMPLE_TRIGGERS (0, 0, 0). START_TIME = NFT ≈ dbNow | 차등 |
 | T-02 | `PTG`에 `DEFAULT` | triggerJob J | 상태 `P`. `PTG` 변화 없음 | 차등 |
 | T-03 | `PTG`에 `ALL`만 | triggerJob J | 상태 `P`. `PTG`에 `DEFAULT` 행 INSERT | 차등 |
 | T-04 | JN 실행 중 | triggerJob JN | 상태 `B` | 차등 |
