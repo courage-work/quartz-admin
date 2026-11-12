@@ -731,6 +731,11 @@ describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, 
     /** 쌍둥이 트리거는 일시정지된 채 만들어 재개 전에는 발화한 적이 없다. 그래서 시각 없이 전체 실행 수를 센다 */
     const runs = async (group: string, name: string) => (await firedAfter(group, 0, name)).length;
 
+    /** 예정 시각이 `before`보다 이른 실행 수(그 뒤의 정상 발화는 빼고 센다) */
+    const runsBefore = async (group: string, name: string, before: number) =>
+      (await firedAfter(group, 0, name)).filter((r) => (r.scheduledFireTime ?? r.fireTime) < before)
+        .length;
+
     /**
      * 두 쪽의 실행 수가 같아지고 2초 동안 그대로일 때까지 기다린다(최대 15초). 마지막으로 함께 센 값을 돌려준다.
      * 끝내 다르면 다른 값이 돌아와 비교가 실패한다. 짧은 주기 트리거는 따로 다시 세면 그 사이 다음 회차가 낄 수 있어 이 값으로 비교한다
@@ -763,11 +768,14 @@ describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, 
           misfire,
         }));
         await waitForSecond(5, 35);
+        // misfire 처리와 실행 수 안정화를 기다리다 다음 분 0초를 넘기면 정상 발화가 한 번 더 기록된다(MariaDB에서 실패).
+        // 그래서 재개 시점의 다음 분보다 이른 예정 시각으로 실행된 것, 곧 misfire 처리로 실행된 것만 센다
+        const nextMinute = Math.ceil(now() / 60_000) * 60_000;
         const { q, t } = await resumeTwins(group);
         expect(t).toEqual(q);
         const expectedRuns = misfire === 'DO_NOTHING' ? 0 : 1;
-        expect(await runs(group, 'q')).toBe(expectedRuns);
-        expect(await runs(group, 't')).toBe(expectedRuns);
+        expect(await runsBefore(group, 'q', nextMinute)).toBe(expectedRuns);
+        expect(await runsBefore(group, 't', nextMinute)).toBe(expectedRuns);
       }
     }, 240_000);
 
