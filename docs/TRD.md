@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.31 (B-32 보안 점검 반영) |
+| 문서 버전 | v0.32 (B-35 사내 Oracle 점검 도구) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -45,6 +45,7 @@
 | v0.29 | 2026-11-11 | B-30: §12.2 CI를 통합 테스트 매트릭스 하나(4종 DB × 최소·최신 × Quartz 2.3.2/2.5.2, 16조합)로 정리. PR은 최신 버전 × 2.5.2(4조합), main 머지는 전체. 테스트베드 이미지 캐시, 실패한 조합의 노드 로그 아티팩트. §12.1 `QA_IT_ORACLE_VERSION`(Oracle XE 21)과 `QA_IT_LOG_DIR`, §12.3 S3 XE 21 확인. XE 21에서 드러난 타이밍 의존 테스트 2개(R-24 실행 수를 따로 세던 비교, 풀 동시성 테스트의 실패 표시) 보강 |
 | v0.30 | 2026-11-12 | B-31: §12.4 성능·규모 검증 추가. 합성 데이터(스케줄러 100 × 트리거 10,000) 측정 도구와 4종 DB 결과(NFR-PERF-01~04 모두 만족), 화면 첫 렌더 기록. 접속 감지가 대량 데이터에서 느려(MariaDB 5.2초) §5.5의 불리언 형식 판정을 앞쪽 1,000행 표본으로, SCHED_NAME 목록을 개수 집계 결과에서 모으도록 바꿈(MariaDB 2.2초, MySQL 0.51초) |
 | v0.31 | 2026-11-12 | B-32: §4.5 보안 점검 결과 추가. 라우트 전체의 인증·권한·CSRF, 비밀값 노출, 보안 헤더 자동 테스트. SQLite WAL·SHM·백업 파일 권한, API 응답 `Cache-Control: no-store`, Slack 미리보기 문구 이스케이프를 고침. 개발 의존성 취약점 등 위험 수용 5건 기록, CI에 `pnpm audit --prod` |
+| v0.32 | 2026-11-12 | B-35 준비: §5.1에 사내 Oracle 점검 도구(`check:oracle`)와 점검 안내(`docs/oracle-legacy-check.md`) 연결 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -284,7 +285,7 @@ PRD §7.1과 §4.1~4.4의 규칙이 실제로 지켜지는지 확인한 결과�
 | MariaDB | 10.3 | `mysql2` | 10.3, 11.4 |
 
 - Quartz 테스트 기준 버전은 **2.3.2**(사내 주력)와 **2.5.x 최신**입니다.
-- Oracle 12.1, 18c, 19c용 공식 컨테이너가 없어 CI에서는 검증하지 못합니다. 대신 SQL을 12.1 문법(`OFFSET … FETCH`, `FOR UPDATE WAIT n`) 안에서만 쓰고, 출시 전에 사내 19c(가능하면 12c) 인스턴스로 수동 점검합니다.
+- Oracle 12.1, 18c, 19c용 공식 컨테이너가 없어 CI에서는 검증하지 못합니다. 대신 SQL을 12.1 문법(`OFFSET … FETCH`, `FOR UPDATE WAIT n`) 안에서만 쓰고, 출시 전에 사내 19c(가능하면 12c) 인스턴스로 수동 점검합니다. 점검은 `packages/store/test/check/`(`pnpm --filter @qa/store check:oracle`)가 자동으로 하고, 점검표와 실행 방법은 `docs/oracle-legacy-check.md`에 있습니다(B-35). 읽기 점검은 기존 Quartz 스키마에 SELECT만 실행하고, 샌드박스 점검은 같은 계정에 `QACHK_` 테이블을 만들어 테스트베드 노드를 붙인 뒤 제어 명령과 알림 판정까지 확인하고 지웁니다. 로컬 Oracle Free 23·XE 21에서 도구 자체를 검증했습니다.
 - MySQL 5.7을 지원하므로 CTE, 윈도 함수, `SKIP LOCKED`/`NOWAIT`(8.0 이상)를 쓰지 않습니다.
 - `mysql2`는 MariaDB 전용 인증 플러그인 `ed25519`를 지원하지 않습니다. 이 플러그인을 쓰는 계정으로 접속하면 `TARGET_AUTH_FAILED`로 실패하고, 메시지가 "이 인증 방식은 지원하지 않으니 `mysql_native_password` 계정을 쓰라"고 안내합니다(B-29, 연결 테스트 화면에 그대로 보임). `authPlugins`로 직접 붙이지 않은 이유: MariaDB `ed25519`는 비밀번호의 SHA-512를 서명 키로 바로 쓰는 변형이라 Node의 표준 Ed25519(32바이트 시드에서 키를 만듦)로는 서명할 수 없습니다. 필요하면 `mariadb` 커넥터용 어댑터를 따로 추가합니다.
 

@@ -9,6 +9,7 @@
     "vitest.config.ts",
     "vitest.integration.config.ts",
     "vitest.demo.config.ts",
-    "vitest.perf.config.ts"
+    "vitest.perf.config.ts",
+    "vitest.check.config.ts"
   ]
 }
