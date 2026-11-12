@@ -32,3 +32,7 @@ it-logs/
 
 # 성능·규모 측정 결과 (packages/store perf)
 perf-results/
+
+# 사내 Oracle 점검 대상(비밀번호 포함)과 결과 (packages/store check:oracle)
+.check-target.json
+check-results/

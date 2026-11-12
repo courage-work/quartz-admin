@@ -132,7 +132,8 @@ export async function startTestDb(options: StartTestDbOptions = {}): Promise<DbF
 
 // ── Oracle ───────────────────────────────────────────────────────
 
-function wrapOracle(conn: oracledb.Connection): TestConnection {
+/** oracledb 커넥션을 {@link TestConnection}으로 감싼다(외부 Oracle 점검에서도 쓴다) */
+export function wrapOracle(conn: oracledb.Connection): TestConnection {
   return {
     async execute<T>(sql: string, binds: Binds = [], options: ExecuteOptions = {}) {
       const result = await conn.execute<T>(sql, binds as oracledb.BindParameters, {
