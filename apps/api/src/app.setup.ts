@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { API_PREFIX } from '@qa/shared';
+import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import { requestIdMiddleware } from './common/request-id.js';
 import type { AppConfig } from './config/env.js';
@@ -33,6 +34,11 @@ export function configureApp(
   // CSP default-src 'self', X-Content-Type-Options, Referrer-Policy 등 (TRD §4.3).
   // 화면 HTML은 아래 미들웨어가 파일별 CSP로 덮어쓴다
   app.use(helmet());
+  // API 응답(접속 정보, 사용자, 감사 로그)은 브라우저나 중간 프록시 캐시에 남기지 않는다 (B-32, TRD §4.5)
+  app.use(`/${API_PREFIX}`, (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
   // 화면과 API를 같은 오리진에서 서빙한다 (TRD §2.2). Nest 라우터보다 먼저 등록된다
   if (options.webDev) {

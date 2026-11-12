@@ -87,7 +87,7 @@ export function slackPayload(items: OutboundItem[], publicUrl: string): unknown 
     const title = titleOf(item);
     const targets = targetLines(item.alert.affected);
     return {
-      text: title,
+      text: mrkdwn(title),
       attachments: [
         {
           color: colorOf(item),
@@ -135,7 +135,7 @@ export function slackPayload(items: OutboundItem[], publicUrl: string): unknown 
       : COLORS.resolved;
   const title = summaryTitle(items);
   return {
-    text: title,
+    text: mrkdwn(title),
     attachments: [
       {
         color: worst,
