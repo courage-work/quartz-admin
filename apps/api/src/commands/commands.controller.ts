@@ -9,6 +9,12 @@ import {
   Req,
 } from '@nestjs/common';
 import {
+  type BatchPreviewRequest,
+  batchPreviewRequestSchema,
+  type BatchPreviewResponse,
+  type BatchRequest,
+  batchRequestSchema,
+  type BatchResultResponse,
   type CommandPreviewRequest,
   commandPreviewRequestSchema,
   type CommandPreviewResponse,
@@ -48,5 +54,27 @@ export class CommandsController {
     @Req() req: AuthedRequest,
   ): Promise<CommandResultDto> {
     return this.commands.execute(id, body, actorOf(req));
+  }
+
+  /** 일괄 제어 미리보기 (FR-CTL-10). 대상 DB를 바꾸지 않는다 */
+  @Post('batch/preview')
+  @HttpCode(HttpStatus.OK)
+  batchPreview(
+    @Param('id', ParseIntPipe) id: number,
+    @Body(new ZodPipe(batchPreviewRequestSchema)) body: BatchPreviewRequest,
+    @Req() req: AuthedRequest,
+  ): Promise<BatchPreviewResponse> {
+    return this.commands.batchPreview(id, body.commands, actorOf(req));
+  }
+
+  /** 일괄 제어 실행. 항목마다 결과를 돌려주며, 일부가 실패해도 200이다 */
+  @Post('batch')
+  @HttpCode(HttpStatus.OK)
+  batchExecute(
+    @Param('id', ParseIntPipe) id: number,
+    @Body(new ZodPipe(batchRequestSchema)) body: BatchRequest,
+    @Req() req: AuthedRequest,
+  ): Promise<BatchResultResponse> {
+    return this.commands.batchExecute(id, body, actorOf(req));
   }
 }

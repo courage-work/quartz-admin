@@ -5,9 +5,11 @@ import { ArrowUpDownIcon, ArrowUpIcon, type LucideIcon, TimerIcon } from 'lucide
 import type { ReactNode } from 'react';
 
 import { Code } from '@/components/code';
+import type { BatchSelection } from '@/components/commands/use-batch-selection';
 import { InlineLink } from '@/components/links';
 import { TableEmpty } from '@/components/table-empty';
 import { TriggerStateBadge } from '@/components/status/status-badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -92,6 +94,7 @@ export function TriggerTable({
   empty = { icon: TimerIcon, title: '트리거가 없습니다' },
   actions,
   sort,
+  selection,
 }: {
   schedulerId: number;
   triggers: TriggerDto[] | undefined;
@@ -103,12 +106,24 @@ export function TriggerTable({
   actions?: (trigger: TriggerDto) => ReactNode;
   /** 서버 정렬. 있으면 "그룹 / 이름"과 "다음 실행" 열 머리를 눌러 바꾼다(트리거 탭). 없으면 머리는 글자뿐이다 */
   sort?: { value: TriggerSort; onChange: (sort: TriggerSort) => void };
+  /** 일괄 제어할 줄 고르기(FR-CTL-10, 트리거 탭). 있으면 맨 앞에 체크박스 열을 둔다 */
+  selection?: BatchSelection<TriggerDto>;
 }) {
-  const columns = (showJob ? 8 : 7) + (actions ? 1 : 0);
+  const columns = (showJob ? 8 : 7) + (actions ? 1 : 0) + (selection ? 1 : 0);
   return (
     <Table>
       <TableHeader>
         <TableRow>
+          {selection ? (
+            <TableHead className="w-0">
+              <Checkbox
+                checked={selection.all}
+                onCheckedChange={selection.toggleAll}
+                disabled={!triggers?.length}
+                aria-label="이 쪽의 트리거 모두 선택"
+              />
+            </TableHead>
+          ) : null}
           {sort ? (
             <SortHead
               label="그룹 / 이름"
@@ -159,7 +174,19 @@ export function TriggerTable({
           />
         ) : (
           triggers?.map((t) => (
-            <TableRow key={`${t.group}\u0000${t.name}`}>
+            <TableRow
+              key={`${t.group}\u0000${t.name}`}
+              data-state={selection?.isSelected(t) ? 'selected' : undefined}
+            >
+              {selection ? (
+                <TableCell>
+                  <Checkbox
+                    checked={selection.isSelected(t)}
+                    onCheckedChange={() => selection.toggle(t)}
+                    aria-label={`${t.group} / ${t.name} 선택`}
+                  />
+                </TableCell>
+              ) : null}
               <TableCell>
                 {/* 줄 높이가 같도록 항상 두 줄(그룹·캘린더 / 이름). 캘린더는 그룹 줄 뒤에 붙인다 */}
                 <span className="flex flex-col">
