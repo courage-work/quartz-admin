@@ -19,7 +19,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:integration": "vitest run -c vitest.integration.config.ts",
-    "testbed:up": "vitest run -c vitest.demo.config.ts"
+    "testbed:up": "vitest run -c vitest.demo.config.ts",
+    "perf": "vitest run -c vitest.perf.config.ts"
   },
   "dependencies": {
     "@qa/core": "workspace:*",

@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.29 (B-30 CI DB 매트릭스 반영) |
+| 문서 버전 | v0.30 (B-31 성능·규모 검증 반영) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -43,6 +43,7 @@
 | v0.27 | 2026-11-11 | B-29: §5.1 `ed25519` 계정 안내 확정, §5.2 MariaDB 어댑터 세부(`max_statement_time`, 1969, DB 종류를 잘못 고른 경우의 안내), §5.3 MariaDB dialect 메모, §5.4 MariaDB JOB_DATA, §12 `QA_IT_DB=mariadb`과 CI에 MariaDB 잡 2개, 테스트베드 MariaDB 드라이버(MariaDB Connector/J 3.5) |
 | v0.28 | 2026-11-11 | B-28·B-29 후속: §7.2 REPEATABLE READ에서 misfire 처리가 일시정지를 되돌리는 경합(main CI X-05 실패의 원인)과 노드 권장 설정, §5.3·§5.5 서버 기본 격리 수준 감지 경고(`REPEATABLE_READ_MISFIRE_RACE`), §12 MySQL 계열 테스트 노드에 권장 설정 |
 | v0.29 | 2026-11-11 | B-30: §12.2 CI를 통합 테스트 매트릭스 하나(4종 DB × 최소·최신 × Quartz 2.3.2/2.5.2, 16조합)로 정리. PR은 최신 버전 × 2.5.2(4조합), main 머지는 전체. 테스트베드 이미지 캐시, 실패한 조합의 노드 로그 아티팩트. §12.1 `QA_IT_ORACLE_VERSION`(Oracle XE 21)과 `QA_IT_LOG_DIR`, §12.3 S3 XE 21 확인. XE 21에서 드러난 타이밍 의존 테스트 2개(R-24 실행 수를 따로 세던 비교, 풀 동시성 테스트의 실패 표시) 보강 |
+| v0.30 | 2026-11-12 | B-31: §12.4 성능·규모 검증 추가. 합성 데이터(스케줄러 100 × 트리거 10,000) 측정 도구와 4종 DB 결과(NFR-PERF-01~04 모두 만족), 화면 첫 렌더 기록. 접속 감지가 대량 데이터에서 느려(MariaDB 5.2초) §5.5의 불리언 형식 판정을 앞쪽 1,000행 표본으로, SCHED_NAME 목록을 개수 집계 결과에서 모으도록 바꿈(MariaDB 2.2초, MySQL 0.51초) |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -386,11 +387,11 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
    | `jobNonconcurrent` | `JOB_DETAILS.IS_NONCONCURRENT` |
    | `jobUpdateData` | `JOB_DETAILS.IS_UPDATE_DATA` |
    | `cronTimeZone` | `CRON_TRIGGERS.TIME_ZONE_ID` |
-4. **불리언 형식 감지**: `JOB_DETAILS.IS_DURABLE`의 컬럼 타입이 BOOLEAN(Oracle 23 `BOOLEAN`, PostgreSQL `bool`)이면 `native`로 봅니다. MySQL은 `VARCHAR(1)`이라 값으로 판정합니다. 문자·숫자 타입이면 `JOB_DETAILS`의 불리언 컬럼 4개(`IS_DURABLE`, `IS_NONCONCURRENT`, `IS_UPDATE_DATA`, `REQUESTS_RECOVERY`)의 DISTINCT 값으로 `10`/`YN`/`TF` 중 하나를 판정합니다(대소문자와 CHAR 공백 무시, `TRUE`/`FALSE`는 `TF`).
+4. **불리언 형식 감지**: `JOB_DETAILS.IS_DURABLE`의 컬럼 타입이 BOOLEAN(Oracle 23 `BOOLEAN`, PostgreSQL `bool`)이면 `native`로 봅니다. MySQL은 `VARCHAR(1)`이라 값으로 판정합니다. 문자·숫자 타입이면 `JOB_DETAILS`의 불리언 컬럼 4개(`IS_DURABLE`, `IS_NONCONCURRENT`, `IS_UPDATE_DATA`, `REQUESTS_RECOVERY`)의 값으로 `10`/`YN`/`TF` 중 하나를 판정합니다(대소문자와 CHAR 공백 무시, `TRUE`/`FALSE`는 `TF`). 값은 앞쪽 1,000행만 읽어 모읍니다. Quartz는 한 테이블 세트에 같은 형식으로 쓰므로 표본으로 충분하고, 잡이 많을 때 컬럼마다 DISTINCT로 전부 읽으면 MySQL 계열에서 수 초가 걸리기 때문입니다(§12.4).
    - 값이 하나도 없으면(잡이 없음) `10`으로 둡니다. Quartz는 `setBoolean`으로 저장하므로 문자 컬럼에는 `'1'`/`'0'`이 들어갑니다. 판정 근거는 `boolFormatSource`(`column-type`/`values`/`default`)로 함께 돌려줍니다.
    - 형식이 섞여 있으면 가장 많이 보이는 형식을 고르고 `BOOL_FORMAT_MIXED`, 알아볼 수 없는 값이 있으면 `BOOL_FORMAT_UNKNOWN_VALUE` 경고를 붙입니다.
    - MySQL·MariaDB는 서버 기본 격리 수준이 REPEATABLE READ면 모든 세트에 `REPEATABLE_READ_MISFIRE_RACE` 경고를 붙입니다(§7.2). 화면은 이 경고를 눈에 띄는 경고 상자로 보여 주고 노드 권장 설정을 안내합니다.
-5. **SCHED_NAME 목록**: `TRIGGERS`, `JOB_DETAILS`, `SCHEDULER_STATE`, `LOCKS`에서 DISTINCT `SCHED_NAME`을 모아 후보로 제시합니다. 각 후보에 잡 수, 트리거 수, `SCHEDULER_STATE` 행 수, 활성 노드 수(§9.2 정의, 배수 기본 3, 기준은 감지 시점의 DB 현재 시각)를 붙입니다. 잠금 행만 있는 SCHED_NAME(아직 잡을 등록하지 않은 스케줄러)도 후보입니다.
+5. **SCHED_NAME 목록**: `TRIGGERS`, `JOB_DETAILS`, `SCHEDULER_STATE`, `LOCKS`에 나오는 `SCHED_NAME`을 모아 후보로 제시합니다. 큰 테이블(`JOB_DETAILS`, `TRIGGERS`)은 `SCHED_NAME`별 `COUNT(*)` 결과에서 이름을 얻고, `SCHEDULER_STATE`는 노드 행 전체, `LOCKS`는 DISTINCT로 읽습니다(큰 테이블을 UNION으로 한 번 더 읽지 않음). 각 후보에 잡 수, 트리거 수, `SCHEDULER_STATE` 행 수, 활성 노드 수(§9.2 정의, 배수 기본 3, 기준은 감지 시점의 DB 현재 시각)를 붙입니다. 잠금 행만 있는 SCHED_NAME(아직 잡을 등록하지 않은 스케줄러)도 후보입니다.
 6. **쓰기 권한 점검**: 트랜잭션 안에서 결과 행이 0개인 문장(`SELECT … WHERE 1 = 0`, `UPDATE … SET SCHED_NAME = SCHED_NAME WHERE 1 = 0`, `INSERT INTO t SELECT * FROM t WHERE 1 = 0`, `DELETE … WHERE 1 = 0`)을 실행한 뒤 ROLLBACK합니다. 권한 검사는 실행 단계에서 일어나므로 행을 건드리거나 행 잠금을 잡지 않고도 권한 유무를 판정할 수 있습니다. 하나라도 실패하면 `write_capable=false`로 두고 빠진 권한을 `missingPrivileges`로 돌려줍니다.
    - 실패한 문장마다 바로 ROLLBACK합니다. Oracle은 실패한 문장만 되돌리지만 PostgreSQL은 트랜잭션 전체가 중단돼 다음 문장이 실패하기 때문입니다.
    - 권한 부족은 `TARGET_ERROR`로 오는 오류만 셉니다. 연결이 끊기거나 시간이 넘으면(`TARGET_UNREACHABLE`·`TARGET_TIMEOUT`) 판정할 수 없으므로 감지 전체를 실패시킵니다. Oracle 23은 권한 부족을 `ORA-41900`(없는 권한을 알려줌)으로, 이전 버전은 `ORA-01031`로 알립니다. PostgreSQL은 42501, MySQL은 1142 `ER_TABLEACCESS_DENIED_ERROR`입니다.
@@ -1047,6 +1048,40 @@ S2에서 확인한 사항:
 | S2 | quartz-testbed와 Testcontainers 4종 DB 골격. 2노드 클러스터 기동 확인 | **완료**(B-09, Oracle). `tools/quartz-testbed`, `packages/store/test/support/`, §12.1. 나머지 3종 DB는 B-27~B-29 |
 | S3 | `oracledb` Thin 모드로 Oracle XE 21과 Free 23에 접속하고 BLOB과 NUMBER 매핑 확인 | **완료**(B-11, Free 23). `@qa/store` 어댑터·풀·`QuartzDialect`, §5.2·§5.3·§5.6에 반영(배열 바인드 순서, Thin `callTimeout` 한계, Oracle 23 잠금 오류 코드). XE 21은 B-30에서 통합 테스트 전체를 Quartz 2.3.2·2.5.2로 확인(BOOLEAN 스키마 테스트만 건너뜀) |
 | S4 | `CronExpression` 이식 범위와 Luxon으로 Java Calendar의 DST 처리(존재하지 않는 시각, 중복 시각)를 재현할 수 있는지 확인 | 벡터 50개 통과 프로토타입 |
+
+### 12.4 성능·규모 검증 (B-31, NFR-PERF)
+
+PRD §7.2의 규모 가정(스케줄러 100개 × 트리거 10,000개, 동시 사용자 20명)에서 NFR-PERF-01~04를 확인했습니다. 결론은 **4종 DB 모두 모든 목표를 만족**이며, 가장 느린 값도 목표의 1/4 이하입니다.
+
+**도구**(`packages/store/test/perf/`, `pnpm --filter @qa/store perf`, 사용법은 `tools/quartz-testbed/README.md`): 무겁고 오래 걸려(DB 하나에 7~9분) CI에서는 돌리지 않습니다. 결과는 `perf-results/`(git 제외)에 마크다운으로 남고, 목표를 넘은 항목이 있으면 실패합니다.
+
+- **합성 데이터**(`seed.ts`): Quartz 테이블 한 벌에 스케줄러 100개 × 잡·트리거 10,000개(트리거 100만 개)를 넣습니다. 첫 스케줄러의 행을 넣고 나머지는 `INSERT ... SELECT`로 SCHED_NAME만 바꿔 복사합니다(DB 4종에 같은 SQL, 35초~2분). 스케줄러마다 ERROR 50, BLOCKED 100, PAUSED 500, 연체 100, 실행 중 20을 섞고, 넣은 뒤 옵티마이저 통계를 모읍니다. Quartz 노드는 띄우지 않고 체크인 시각만 7.5초마다 갱신합니다.
+- **조회 계층**: 제품 어댑터 커넥션 하나로 접속 감지(`detectQuartz`, 문장별 시간 포함) 3회, 감시 1회(`collectMonitorData`)를 스케줄러마다, 목록·상세 15가지를 20회씩 실행해 시간과 쿼리 왕복 수를 잽니다.
+- **API 계층**: 빌드한 API를 임시 데이터 폴더로 띄우고 HTTP로 접속·스케줄러를 등록한 뒤, 실제 감시 루프가 도는 150초 동안 대시보드(2초마다, 동시 20명)와 목록(한 명 20회, 동시 20명 × 5회) 응답 시간, 스케줄러별 감시 간격·실패, 대상 DB 세션 수(Oracle `v$session`, PostgreSQL `pg_stat_activity`의 `application_name`, MySQL 계열 `PROCESSLIST`)를 잽니다. 접속 배치는 접속 1개에 100개(최악)와 접속 10개에 10개씩 두 가지입니다.
+
+**결과**(2026-11-12, Windows 11 + Docker Desktop 로컬, 각 DB 최신 버전, 응답 시간은 p95. 대시보드·목록은 두 배치 중 큰 값):
+
+| 항목 | 목표 | Oracle Free 23 | PostgreSQL 17 | MySQL 8.4 | MariaDB 11.4 |
+| --- | --- | --- | --- | --- | --- |
+| 감시 1회(쿼리 왕복 7회) | - | 190ms(p50 11ms) | 9.5ms | 32ms | 77ms |
+| 100개를 커넥션 1개로 차례로 감시 | 60초 | 4.4초 | 0.7초 | 2.6초 | 4.9초 |
+| 감시 간격 최대(실패 0회) | 60초 주기 | 60.14초 | 60.26초 | 60.90초 | 60.94초 |
+| 대시보드 API, 한 명 / 동시 20명 | 3초 | 32 / 82ms | 16 / 91ms | 24 / 114ms | 26 / 79ms |
+| 목록 API 가장 느린 경우, 한 명 | 2초 | 28ms | 38ms | 120ms | 113ms |
+| 트리거 목록 동시 20명, 접속 1개 / 10개 | 2초 | 177 / 143ms | 89 / 102ms | 488 / 325ms | 373 / 126ms |
+| 대상 DB 세션 최대, 접속 1개 / 10개 | 접속당 2개 | 2 / 20 | 2 / 20 | 2 / 20 | 2 / 20 |
+
+- 화면 첫 렌더(Oracle, 접속 1개 배치, Chromium 1280×900, 새 탭 10회): 대시보드는 카드 100장이 그려질 때까지 p95 0.30초, 트리거 목록 탭은 50줄이 그려질 때까지 p95 0.35초(NFR-PERF-01 목표 3초).
+- 조회 오류(`TARGET_BUSY` 포함)는 어느 배치에서도 0건이었습니다.
+
+**관찰**
+
+- **접속 1개에 스케줄러 100개**: 감시 동시 실행(8개)이 풀 크기(2개)보다 커도, 감시 1회가 수십 ms라 커넥션 대기가 짧아 회차가 밀리거나 실패하지 않습니다. 동시 20명 목록은 같은 접속의 커넥션 2개를 나눠 써 줄을 서므로 한 명일 때보다 4~10배 느리지만(MySQL 0.49초) 목표 안입니다.
+- **Oracle 감시 p95**: 처음 몇 회차가 하드 파싱과 버퍼 캐시 적재로 느립니다(최대 752ms). 그 뒤는 10ms 안팎입니다.
+- **MySQL 계열**은 깊은 페이지(`OFFSET` 1만 근처)와 다음 실행 정렬이 0.1초 수준으로 다른 DB보다 느리지만 여유가 큽니다.
+- **원격 DB**: 로컬 측정이라 왕복 지연이 거의 0입니다. 대상 DB까지 왕복 10ms면 감시 1회에 약 70ms, 목록 조회에 약 20ms가 더해지며 목표에는 영향이 없습니다.
+- **합성 데이터의 한계**: 노드가 실제로 발화하지 않아 잠금 경합과 행 갱신이 없습니다. Quartz 테이블 한 벌에 100만 행은 실제보다 불리한 가정입니다(보통 스케줄러마다 DB나 스키마가 나뉨).
+- **접속 감지(목표 밖)**: 처음 측정에서 트리거 100만 개가 있는 스키마의 감지 1회가 MySQL 2.2초, MariaDB 5.2초였습니다(PostgreSQL·Oracle은 API 기준 약 0.6초). 스케줄러 등록도 다시 감지하므로 같은 시간이 한 번 더 듭니다. 테이블 전체를 읽는 쿼리 중 불리언 형식 `DISTINCT`(MariaDB 2.5초)와 스케줄러 이름 `UNION`(1.1초)을 없앴습니다(§5.5 4·5단계: 앞쪽 1,000행 표본, 개수 집계 결과에서 이름 수집). 바꾼 뒤 감지 1회(조회 계층, 3회 중앙값)는 Oracle 0.17초, PostgreSQL 0.14초, MySQL 0.51초, MariaDB 2.2초입니다. 남은 시간은 등록 화면에 보여 주는 잡·트리거 수(`SCHED_NAME`별 `COUNT(*)`)이며 MariaDB에서 2.1초입니다. 측정 결과에는 감지에서 느린 문장 상위 5개가 함께 남습니다.
 
 ## 13. PRD 변경 제안
 

@@ -32,6 +32,8 @@ export interface DetectOptions {
 }
 
 const BOOL_COLUMNS = ['IS_DURABLE', 'IS_NONCONCURRENT', 'IS_UPDATE_DATA', 'REQUESTS_RECOVERY'];
+/** 불리언 형식 판정에 읽는 JOB_DETAILS 행 수 */
+const BOOL_SAMPLE_ROWS = 1_000;
 
 /**
  * Quartz 스키마 자동 감지 (TRD §5.5, FR-CON-03, FR-CON-04).
@@ -176,14 +178,14 @@ async function detectBoolFormat(
       (c !== 'IS_UPDATE_DATA' || features.jobUpdateData),
   );
   if (present.length === 0) return decideBoolFormat(type, []);
-  const job = tables.table('JOB_DETAILS');
-  const v = dialect.quote('V');
-  const sql = present.map((c) => `SELECT DISTINCT ${c} AS ${v} FROM ${job}`).join(' UNION ');
-  const rows = await conn.query(sql);
-  return decideBoolFormat(
-    type,
-    rows.map((r) => r.V),
-  );
+  // 앞쪽 행만 읽는다. Quartz는 한 테이블 세트에 같은 형식으로 쓰므로 표본으로 충분하다. 잡이 많은 테이블을
+  // 컬럼마다 DISTINCT로 전부 읽으면 MySQL 계열에서 수 초가 걸린다(TRD §12.4, 잡 100만 개)
+  const cols = present.map((c) => `${c} AS ${dialect.quote(c)}`).join(', ');
+  const sql = dialect.paginate(`SELECT ${cols} FROM ${tables.table('JOB_DETAILS')}`, 1, 2);
+  const rows = await conn.query(sql, [BOOL_SAMPLE_ROWS, 0]);
+  const values = new Set<unknown>();
+  for (const row of rows) for (const c of present) values.add(row[c]);
+  return decideBoolFormat(type, [...values]);
 }
 
 async function schedulerCandidates(
@@ -194,11 +196,6 @@ async function schedulerCandidates(
   multiplier: number,
 ): Promise<SchedulerCandidate[]> {
   const q = (alias: string) => dialect.quote(alias);
-  const names = await conn.query(
-    (['TRIGGERS', 'JOB_DETAILS', 'SCHEDULER_STATE', 'LOCKS'] as const)
-      .map((key) => `SELECT SCHED_NAME AS ${q('SCHED_NAME')} FROM ${tables.table(key)}`)
-      .join(' UNION '),
-  );
   const countBy = async (key: 'JOB_DETAILS' | 'TRIGGERS'): Promise<Map<string, number>> => {
     const rows = await conn.query(
       `SELECT SCHED_NAME AS ${q('SCHED_NAME')}, COUNT(*) AS ${q('CNT')} ` +
@@ -213,26 +210,30 @@ async function schedulerCandidates(
       `CHECKIN_INTERVAL AS ${q('CHECKIN_INTERVAL')} FROM ${tables.table('SCHEDULER_STATE')}`,
   );
 
-  return names
-    .map((r) => requireString(r, 'SCHED_NAME'))
-    .sort()
-    .map((schedName) => {
-      const own = nodes.filter((n) => n.SCHED_NAME === schedName);
-      // TRD §9.2: LAST_CHECKIN_TIME + CHECKIN_INTERVAL × checkin_multiplier ≥ dbNow
-      const active = own.filter((n) => {
-        const last = dialect.readLong(n.LAST_CHECKIN_TIME) ?? 0;
-        const interval = dialect.readLong(n.CHECKIN_INTERVAL) ?? 0;
-        return last + interval * multiplier >= dbNow;
-      }).length;
-      return {
-        schedName,
-        jobCount: jobs.get(schedName) ?? 0,
-        triggerCount: triggers.get(schedName) ?? 0,
-        nodeCount: own.length,
-        activeNodeCount: active,
-        expectedNodeCount: active,
-      };
-    });
+  // 후보 이름은 위 결과와 LOCKS(스케줄러마다 몇 행)에서 모은다. 큰 테이블을 UNION으로 한 번 더 읽지 않는다
+  const locks = await conn.query(
+    `SELECT DISTINCT SCHED_NAME AS ${q('SCHED_NAME')} FROM ${tables.table('LOCKS')}`,
+  );
+  const names = new Set<string>([...jobs.keys(), ...triggers.keys()]);
+  for (const r of [...nodes, ...locks]) names.add(requireString(r, 'SCHED_NAME'));
+
+  return [...names].sort().map((schedName) => {
+    const own = nodes.filter((n) => n.SCHED_NAME === schedName);
+    // TRD §9.2: LAST_CHECKIN_TIME + CHECKIN_INTERVAL × checkin_multiplier ≥ dbNow
+    const active = own.filter((n) => {
+      const last = dialect.readLong(n.LAST_CHECKIN_TIME) ?? 0;
+      const interval = dialect.readLong(n.CHECKIN_INTERVAL) ?? 0;
+      return last + interval * multiplier >= dbNow;
+    }).length;
+    return {
+      schedName,
+      jobCount: jobs.get(schedName) ?? 0,
+      triggerCount: triggers.get(schedName) ?? 0,
+      nodeCount: own.length,
+      activeNodeCount: active,
+      expectedNodeCount: active,
+    };
+  });
 }
 
 function requireString(row: Row, key: string): string {

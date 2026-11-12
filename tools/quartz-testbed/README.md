@@ -228,3 +228,25 @@ QA_IT_DB=mariadb QA_IT_MARIADB_VERSION=10.3 pnpm test:integration  # MariaDB 10.
 | `QA_IT_MYSQL_IMAGE`      |          | MySQL 이미지를 직접 지정                                                        |
 | `QA_IT_MARIADB_VERSION`  | `11.4`   | MariaDB 버전(이미지 `mariadb:<버전>`)                                           |
 | `QA_IT_MARIADB_IMAGE`    |          | MariaDB 이미지를 직접 지정                                                      |
+
+## 성능·규모 측정 (B-31)
+
+`packages/store/test/perf/`는 테스트베드 노드 없이 합성 데이터로 PRD §7.2 규모(스케줄러 100개 × 트리거 10,000개)를 만들고, 접속 감지, 조회 계층, 빌드한 API의 응답 시간·감시 주기·대상 DB 세션 수를 잽니다. 무겁고 오래 걸려(DB 하나에 7~9분) CI에서는 돌리지 않습니다. 결과는 레포 루트 `perf-results/`에 마크다운으로 남습니다.
+
+```bash
+pnpm build                                              # 측정은 빌드한 API(apps/api/dist)로 한다
+pnpm --filter @qa/store perf                            # Oracle Free 23
+QA_IT_DB=postgres pnpm --filter @qa/store perf          # DB는 통합 테스트와 같은 변수로 고른다
+QA_PERF_SCHEDULERS=5 QA_PERF_TRIGGERS=500 QA_PERF_OBSERVE_SEC=70 pnpm --filter @qa/store perf  # 작게 돌려 보기
+QA_PERF_HOLD_MIN=30 pnpm --filter @qa/store perf        # 측정 뒤 API를 띄워 두고 화면을 직접 본다
+```
+
+| 변수                  | 기본값          | 설명                                                                                                           |
+| --------------------- | --------------- | -------------------------------------------------------------------------------------------------------------- |
+| `QA_PERF_SCHEDULERS`  | `100`           | 합성 스케줄러 수                                                                                               |
+| `QA_PERF_TRIGGERS`    | `10000`         | 스케줄러마다 트리거 수(잡도 같은 수)                                                                           |
+| `QA_PERF_LAYOUTS`     | `single,spread` | API 측정의 접속 배치. `single`은 접속 1개에 스케줄러 전부, `spread`는 접속 10개에 나눠서                       |
+| `QA_PERF_OBSERVE_SEC` | `150`           | 감시 루프를 지켜보는 시간(초)                                                                                  |
+| `QA_PERF_REPEAT`      | `20`            | 조회마다 반복 횟수                                                                                             |
+| `QA_PERF_REPORT_DIR`  | `perf-results/` | 결과 폴더                                                                                                      |
+| `QA_PERF_HOLD_MIN`    | `0`             | 접속 1개 배치를 잰 뒤 API를 띄워 둘 시간(분). 접속 정보는 결과 폴더의 `hold.json`, `hold.stop`을 만들면 끝난다 |

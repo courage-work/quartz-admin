@@ -29,3 +29,6 @@ target/
 apps/api/public/
 # 통합 테스트 노드 로그 (QA_IT_LOG_DIR=./it-logs)
 it-logs/
+
+# 성능·규모 측정 결과 (packages/store perf)
+perf-results/
