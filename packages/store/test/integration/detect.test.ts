@@ -14,6 +14,7 @@ import {
   type QuartzDetection,
 } from '../../src/index.js';
 import {
+  ORACLE_NATIVE_BOOLEAN,
   QUARTZ_TABLES,
   QUARTZ_VERSION,
   initQuartzSchema,
@@ -23,6 +24,7 @@ import {
   type QuartzCluster,
   type QuartzSchemaOptions,
   TEST_DB,
+  TEST_DB_LABEL,
 } from '../support/index.js';
 
 const ORACLE_PORT = 1521;
@@ -39,7 +41,7 @@ const PRIVILEGE_ERROR = expect.stringMatching(/^ORA-(01031|41900)$/) as unknown 
  * - NOLOCK: LOCKS의 UPDATE 권한만 없는 계정
  */
 describe.skipIf(TEST_DB !== 'oracle')(
-  `자동 감지 (Oracle Free 23, Quartz ${QUARTZ_VERSION})`,
+  `자동 감지 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`,
   () => {
     let cluster: QuartzCluster;
     /** Oracle 전용 테스트다. 계정·권한 준비는 Oracle 픽스처를 직접 쓴다 */
@@ -58,7 +60,7 @@ describe.skipIf(TEST_DB !== 'oracle')(
         port: oracle().container.getMappedPort(ORACLE_PORT),
         username: credentials.user,
         password: credentials.password,
-        oracleServiceName: 'FREEPDB1',
+        oracleServiceName: oracle().serviceName,
       },
     });
 
@@ -157,8 +159,13 @@ describe.skipIf(TEST_DB !== 'oracle')(
         (conn) => initQuartzSchema(conn, { tableCase: 'lower' }),
         lower,
       );
-      const q23 = await oracle().createUser('Q23', 'Q23_test1');
-      await oracle().withConnection((conn) => initQuartzSchema(conn, { variant: 'oracle23' }), q23);
+      if (ORACLE_NATIVE_BOOLEAN) {
+        const q23 = await oracle().createUser('Q23', 'Q23_test1');
+        await oracle().withConnection(
+          (conn) => initQuartzSchema(conn, { variant: 'oracle23' }),
+          q23,
+        );
+      }
     });
 
     afterAll(async () => {
@@ -254,7 +261,8 @@ describe.skipIf(TEST_DB !== 'oracle')(
       expect(set.schedulers).toEqual([]);
     });
 
-    it('Oracle 23 BOOLEAN 스키마는 native로 판정한다', async () => {
+    // BOOLEAN 타입은 Oracle 23부터 있다
+    it.skipIf(!ORACLE_NATIVE_BOOLEAN)('Oracle 23 BOOLEAN 스키마는 native로 판정한다', async () => {
       const set = setOf(await detect({ user: 'Q23', password: 'Q23_test1' }), 'QRTZ_');
       expect(set).toMatchObject({ boolFormat: 'native', boolFormatSource: 'column-type' });
     });

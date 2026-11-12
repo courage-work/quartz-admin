@@ -1,16 +1,26 @@
 name: CI
 
-# MVP 기능 개발 동안은 PR마다 돌리지 않는다(실행 시간이 길어 개발 흐름을 막음).
-# main에 머지되면 돌고, Actions 화면에서 직접 실행할 수도 있다. PR 트리거와 브랜치 보호의
-# 필수 검사(verify)는 MVP 이후 CI/CD를 정리할 때 다시 켠다.
+# B-30: 통합 테스트는 4종 DB × 최소·최신 버전 × Quartz 2.3.2/2.5.2 매트릭스(.github/integration-matrix.json, 16조합)다.
+# - PR: 각 DB의 최신 버전 × Quartz 2.5.2만(4조합, "pr": true). 개발 흐름을 오래 막지 않게 한다
+# - main 머지: 전체 16조합
+# - 수동 실행(workflow_dispatch): 기본 전체, scope=pr이면 PR과 같은 4조합
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      scope:
+        description: 통합 테스트 범위
+        type: choice
+        options: [full, pr]
+        default: full
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # main은 머지마다 전체 결과를 남기고, PR은 새 커밋이 오면 앞 실행을 멈춘다
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -47,15 +57,72 @@ jobs:
       - name: Test
         run: pnpm test
 
-  integration-oracle:
-    name: integration (oracle, quartz ${{ matrix.quartz }})
+  # 이벤트에 맞는 통합 테스트 조합과, 그 조합에 필요한 Quartz 버전을 고른다
+  matrix:
+    name: matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
+    outputs:
+      integration: ${{ steps.pick.outputs.integration }}
+      quartz: ${{ steps.pick.outputs.quartz }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+
+      - id: pick
+        env:
+          SCOPE: ${{ github.event_name == 'pull_request' && 'pr' || inputs.scope || 'full' }}
+        run: |
+          jq -c --arg scope "$SCOPE" '[.[] | select($scope == "full" or .pr)]' .github/integration-matrix.json > picked.json
+          echo "integration=$(jq -c '{include: .}' picked.json)" >> "$GITHUB_OUTPUT"
+          echo "quartz=$(jq -c '[.[].quartz] | unique' picked.json)" >> "$GITHUB_OUTPUT"
+          {
+            echo "### 통합 테스트 범위: $SCOPE ($(jq length picked.json)조합)"
+            jq -r '.[] | "- \(.label) × Quartz \(.quartz)"' picked.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # 테스트베드 이미지를 Quartz 버전마다 한 번만 빌드해(빌드 단계에서 JUnit 테스트도 돈다) 통합 테스트 잡에 넘긴다.
+  # 레이어는 GitHub Actions 캐시에 남겨 다음 실행에서 Maven 의존성과 빌드를 다시 하지 않는다
+  testbed-image:
+    name: testbed image (quartz ${{ matrix.quartz }})
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        quartz: ['2.3.2', '2.5.2']
+        quartz: ${{ fromJSON(needs.matrix.outputs.quartz) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: tools/quartz-testbed
+          build-args: QUARTZ_VERSION=${{ matrix.quartz }}
+          tags: quartz-testbed:${{ matrix.quartz }}
+          outputs: type=docker,dest=${{ runner.temp }}/testbed-${{ matrix.quartz }}.tar
+          cache-from: type=gha,scope=testbed-${{ matrix.quartz }}
+          cache-to: type=gha,mode=max,scope=testbed-${{ matrix.quartz }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: testbed-image-${{ matrix.quartz }}
+          path: ${{ runner.temp }}/testbed-${{ matrix.quartz }}.tar
+          retention-days: 1
+
+  integration:
+    name: integration (${{ matrix.label }}, quartz ${{ matrix.quartz }})
+    needs: [matrix, testbed-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.integration) }}
     env:
+      QA_IT_DB: ${{ matrix.db }}
       QA_IT_QUARTZ_VERSION: ${{ matrix.quartz }}
       QA_IT_TESTBED_IMAGE: quartz-testbed:${{ matrix.quartz }}
     steps:
@@ -70,148 +137,38 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # 빌드 단계에서 testbed의 JUnit 테스트도 함께 돈다
-      - name: Build quartz-testbed image
-        run: >-
-          docker build
-          --build-arg QUARTZ_VERSION=${{ matrix.quartz }}
-          -t "$QA_IT_TESTBED_IMAGE"
-          tools/quartz-testbed
-
-      - name: Pull Oracle Free 23
-        run: docker pull gvenzl/oracle-free:23-slim-faststart
-
-      - name: Integration test
-        run: pnpm turbo run test:integration --filter=@qa/store
-
-  # B-27: PostgreSQL 최소·최신 버전을 Quartz 두 버전에 하나씩 맞춘다. 전체 조합은 B-30(CI DB 매트릭스)에서
-  integration-postgres:
-    name: integration (postgres ${{ matrix.postgres }}, quartz ${{ matrix.quartz }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - postgres: '11'
-            quartz: '2.3.2'
-          - postgres: '17'
-            quartz: '2.5.2'
-    env:
-      QA_IT_DB: postgres
-      QA_IT_POSTGRES_VERSION: ${{ matrix.postgres }}
-      QA_IT_QUARTZ_VERSION: ${{ matrix.quartz }}
-      QA_IT_TESTBED_IMAGE: quartz-testbed:${{ matrix.quartz }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
+      - uses: actions/download-artifact@v8
         with:
-          node-version-file: .nvmrc
-          cache: pnpm
+          name: testbed-image-${{ matrix.quartz }}
+          path: ${{ runner.temp }}
 
-      - run: pnpm install --frozen-lockfile
+      - name: Load quartz-testbed image
+        run: docker load -i "$RUNNER_TEMP/testbed-${{ matrix.quartz }}.tar"
 
-      - name: Build quartz-testbed image
-        run: >-
-          docker build
-          --build-arg QUARTZ_VERSION=${{ matrix.quartz }}
-          -t "$QA_IT_TESTBED_IMAGE"
-          tools/quartz-testbed
+      # DB 버전 변수는 그 DB 것만 둔다(QA_IT_ORACLE_VERSION, QA_IT_POSTGRES_VERSION, QA_IT_MYSQL_VERSION, QA_IT_MARIADB_VERSION)
+      - name: Select DB version
+        env:
+          DB: ${{ matrix.db }}
+          VERSION: ${{ matrix.version }}
+        run: echo "QA_IT_${DB^^}_VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      - name: Pull PostgreSQL
-        run: docker pull postgres:${{ matrix.postgres }}-alpine
+      - name: Pull ${{ matrix.image }}
+        run: docker pull "${{ matrix.image }}"
 
       - name: Integration test
+        env:
+          QA_IT_LOG_DIR: ${{ runner.temp }}/it-logs
         run: pnpm turbo run test:integration --filter=@qa/store
 
-  # MySQL 5.7·8.4 (B-28). 전체 버전 매트릭스는 B-30에서 넓힌다
-  integration-mysql:
-    name: integration (mysql ${{ matrix.mysql }}, quartz ${{ matrix.quartz }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - mysql: '5.7'
-            quartz: '2.3.2'
-          - mysql: '8.4'
-            quartz: '2.5.2'
-    env:
-      QA_IT_DB: mysql
-      QA_IT_MYSQL_VERSION: ${{ matrix.mysql }}
-      QA_IT_QUARTZ_VERSION: ${{ matrix.quartz }}
-      QA_IT_TESTBED_IMAGE: quartz-testbed:${{ matrix.quartz }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
+      # 실패한 조합만 테스트베드 노드 로그를 남긴다(노드마다 파일 하나)
+      - name: Upload testbed logs
+        if: failure()
+        uses: actions/upload-artifact@v7
         with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Build quartz-testbed image
-        run: >-
-          docker build
-          --build-arg QUARTZ_VERSION=${{ matrix.quartz }}
-          -t "$QA_IT_TESTBED_IMAGE"
-          tools/quartz-testbed
-
-      - name: Pull MySQL
-        run: docker pull mysql:${{ matrix.mysql }}
-
-      - name: Integration test
-        run: pnpm turbo run test:integration --filter=@qa/store
-
-  # MariaDB 10.3·11.4 (B-29). 전체 버전 매트릭스는 B-30에서 넓힌다
-  integration-mariadb:
-    name: integration (mariadb ${{ matrix.mariadb }}, quartz ${{ matrix.quartz }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - mariadb: '10.3'
-            quartz: '2.3.2'
-          - mariadb: '11.4'
-            quartz: '2.5.2'
-    env:
-      QA_IT_DB: mariadb
-      QA_IT_MARIADB_VERSION: ${{ matrix.mariadb }}
-      QA_IT_QUARTZ_VERSION: ${{ matrix.quartz }}
-      QA_IT_TESTBED_IMAGE: quartz-testbed:${{ matrix.quartz }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Build quartz-testbed image
-        run: >-
-          docker build
-          --build-arg QUARTZ_VERSION=${{ matrix.quartz }}
-          -t "$QA_IT_TESTBED_IMAGE"
-          tools/quartz-testbed
-
-      - name: Pull MariaDB
-        run: docker pull mariadb:${{ matrix.mariadb }}
-
-      - name: Integration test
-        run: pnpm turbo run test:integration --filter=@qa/store
+          name: it-logs-${{ matrix.db }}-${{ matrix.version }}-quartz-${{ matrix.quartz }}
+          path: ${{ runner.temp }}/it-logs
+          if-no-files-found: ignore
+          retention-days: 14
 
   container:
     name: container (docker compose smoke)

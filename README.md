@@ -140,7 +140,7 @@ docs/         PRD, TRD, BACKLOG, DESIGN
 
 ## 기여 방식
 
-작업은 [BACKLOG](docs/BACKLOG.md) §1 규칙을 따릅니다. 작업 하나가 `feat/B-xx-<slug>` 브랜치와 PR 하나입니다. MVP 기능 개발 동안은 PR에서 CI를 돌리지 않으므로, 올리기 전에 로컬에서 `pnpm format:check && pnpm build && pnpm lint && pnpm typecheck && pnpm test`를 돌립니다. CI(검사, Oracle 통합 테스트, 컨테이너 스모크 테스트)는 main에 머지된 뒤와 Actions 화면에서 직접 실행할 때 돕니다.
+작업은 [BACKLOG](docs/BACKLOG.md) §1 규칙을 따릅니다. 작업 하나가 `feat/B-xx-<slug>` 브랜치와 PR 하나입니다. 올리기 전에 로컬에서 `pnpm format:check && pnpm build && pnpm lint && pnpm typecheck && pnpm test`를 돌립니다. PR에서는 CI가 검사, 각 DB 최신 버전의 통합 테스트(4조합), 컨테이너 스모크 테스트를 돌리고, main에 머지되면 4종 DB × 최소·최신 버전 × Quartz 2.3.2/2.5.2 통합 테스트(16조합) 전체를 돕니다.
 
 ## 라이선스
 

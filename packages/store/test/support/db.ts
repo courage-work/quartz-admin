@@ -9,12 +9,17 @@ import { mariadbDialect, mysqlDialect } from '../../src/mysql/dialect.js';
 import { oracleDialect } from '../../src/oracle/dialect.js';
 import { postgresDialect } from '../../src/postgres/dialect.js';
 import { MARIADB_VERSION, MYSQL_VERSION, startMysql, type MysqlFixture } from './mysql.js';
-import { startOracle, type OracleFixture, type StartOracleOptions } from './oracle.js';
+import {
+  oracleEdition,
+  startOracle,
+  type OracleFixture,
+  type StartOracleOptions,
+} from './oracle.js';
 import { POSTGRES_VERSION, startPostgres, type PostgresFixture } from './postgres.js';
 
 /**
  * 통합 테스트를 돌릴 DB. `QA_IT_DB`로 고른다(`oracle` 기본, `postgres`, `mysql`, `mariadb`). 버전은
- * `QA_IT_POSTGRES_VERSION`, `QA_IT_MYSQL_VERSION`, `QA_IT_MARIADB_VERSION`으로 바꾼다. 같은 테스트 파일이 모든 DB에서 그대로 돌도록 이 파일의 {@link TestConnection}과
+ * `QA_IT_ORACLE_VERSION`, `QA_IT_POSTGRES_VERSION`, `QA_IT_MYSQL_VERSION`, `QA_IT_MARIADB_VERSION`으로 바꾼다. 같은 테스트 파일이 모든 DB에서 그대로 돌도록 이 파일의 {@link TestConnection}과
  * {@link DbFixture}만 쓴다.
  */
 export type TestDbKind = 'oracle' | 'postgres' | 'mysql' | 'mariadb';
@@ -38,7 +43,7 @@ export const TEST_DB_LABEL =
       ? `MySQL ${MYSQL_VERSION}`
       : TEST_DB === 'mariadb'
         ? `MariaDB ${MARIADB_VERSION}`
-        : 'Oracle Free 23';
+        : oracleEdition().label;
 
 export type Binds = readonly unknown[] | Record<string, unknown>;
 
@@ -167,7 +172,7 @@ function oracleFixture(o: OracleFixture): DbFixture {
       port: o.container.getMappedPort(1521),
       username: c.user,
       password: c.password,
-      oracleServiceName: 'FREEPDB1',
+      oracleServiceName: o.serviceName,
     }),
     connect,
     async withConnection(fn, c) {

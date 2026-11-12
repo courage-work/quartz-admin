@@ -731,20 +731,26 @@ describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, 
     /** 쌍둥이 트리거는 일시정지된 채 만들어 재개 전에는 발화한 적이 없다. 그래서 시각 없이 전체 실행 수를 센다 */
     const runs = async (group: string, name: string) => (await firedAfter(group, 0, name)).length;
 
-    /** 두 쪽의 실행 수가 같아지고 2초 동안 그대로일 때까지 기다린다(최대 15초). 끝내 다르면 그 값으로 비교가 실패한다 */
-    async function sameRuns(group: string): Promise<void> {
+    /**
+     * 두 쪽의 실행 수가 같아지고 2초 동안 그대로일 때까지 기다린다(최대 15초). 마지막으로 함께 센 값을 돌려준다.
+     * 끝내 다르면 다른 값이 돌아와 비교가 실패한다. 짧은 주기 트리거는 따로 다시 세면 그 사이 다음 회차가 낄 수 있어 이 값으로 비교한다
+     */
+    async function sameRuns(group: string): Promise<{ q: number; t: number }> {
       const deadline = Date.now() + 15_000;
       let stableSince = 0;
+      let last = { q: -1, t: -2 };
       while (Date.now() < deadline) {
         const [q, t] = await Promise.all([runs(group, 'q'), runs(group, 't')]);
+        last = { q, t };
         if (q === t) {
           stableSince ||= Date.now();
-          if (Date.now() - stableSince >= 2_000) return;
+          if (Date.now() - stableSince >= 2_000) return last;
         } else {
           stableSince = 0;
         }
         await sleep(500);
       }
+      return last;
     }
 
     it('R-21·R-22 CRON 재개: FIRE_ONCE_NOW는 한 번 실행, DO_NOTHING은 실행 없이 다음 시각 (수렴)', async () => {
@@ -824,11 +830,12 @@ describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, 
         },
         { timeoutMs: 30_000, message: '따라잡기' },
       );
-      await sameRuns(group);
+      // 10초마다 둘 다 발화하므로 실행 수는 sameRuns가 함께 센 값으로 비교한다(XE 21 × 2.3.2에서 따로 세다 7 대 8)
+      const counted = await sameRuns(group);
       const [q, t] = await Promise.all([row(sched(), group, 'q'), row(sched(), group, 't')]);
       expect(t).toEqual(q);
-      expect(await runs(group, 't')).toBe(await runs(group, 'q'));
-      expect(await runs(group, 't')).toBeGreaterThanOrEqual(6);
+      expect(counted.t).toBe(counted.q);
+      expect(counted.t).toBeGreaterThanOrEqual(6);
     }, 60_000);
 
     it('R-25 SIMPLE 남은 횟수가 지난 RESCHEDULE_NEXT_WITH_REMAINING_COUNT는 COMPLETE (수렴)', async () => {

@@ -196,13 +196,15 @@ docker run -i --rm quartz-testbed:2.3.2 cron-vectors < cases.json > vectors.json
 
 ## 통합 테스트에서 쓰기
 
-`packages/store/test/support/`의 헬퍼가 DB 컨테이너(Oracle Free 23, PostgreSQL, MySQL, MariaDB), 스키마 초기화, 테스트베드 노드 기동, 실행 기록 조회를 맡습니다.
+`packages/store/test/support/`의 헬퍼가 DB 컨테이너(Oracle Free 23·XE 21, PostgreSQL, MySQL, MariaDB), 스키마 초기화, 테스트베드 노드 기동, 실행 기록 조회를 맡습니다.
 
 ```bash
 pnpm test:integration                                   # Docker 필요. 테스트베드 이미지를 직접 빌드
 QA_IT_QUARTZ_VERSION=2.5.2 pnpm test:integration        # Quartz 2.5.2로
 QA_IT_TESTBED_IMAGE=quartz-testbed:2.3.2 pnpm test:integration  # 미리 빌드한 이미지 사용
 QA_IT_LOGS=1 pnpm test:integration                      # 노드 로그를 stderr로
+QA_IT_LOG_DIR=./it-logs pnpm test:integration           # 노드 로그를 노드마다 파일로
+QA_IT_ORACLE_VERSION=21 pnpm test:integration           # Oracle XE 21로(amd64 이미지)
 QA_IT_DB=postgres pnpm test:integration                 # PostgreSQL 17로
 QA_IT_DB=postgres QA_IT_POSTGRES_VERSION=11 pnpm test:integration  # PostgreSQL 11로
 QA_IT_DB=mysql pnpm test:integration                    # MySQL 8.4로
@@ -211,16 +213,18 @@ QA_IT_DB=mariadb pnpm test:integration                  # MariaDB 11.4로
 QA_IT_DB=mariadb QA_IT_MARIADB_VERSION=10.3 pnpm test:integration  # MariaDB 10.3으로
 ```
 
-| 변수                     | 기본값                                 | 설명                                                                            |
-| ------------------------ | -------------------------------------- | ------------------------------------------------------------------------------- |
-| `QA_IT_QUARTZ_VERSION`   | `2.3.2`                                | 테스트베드 Quartz 버전                                                          |
-| `QA_IT_TESTBED_IMAGE`    |                                        | 미리 빌드한 이미지. 없으면 `quartz-admin-testbed:<버전>-local`로 빌드           |
-| `QA_IT_ORACLE_IMAGE`     | `gvenzl/oracle-free:23-slim-faststart` | Oracle 이미지(amd64, arm64)                                                     |
-| `QA_IT_LOGS`             |                                        | `1`이면 노드 로그 출력                                                          |
-| `QA_IT_DB`               | `oracle`                               | 통합 테스트 DB. `postgres`면 PostgreSQL, `mysql`이면 MySQL, `mariadb`면 MariaDB |
-| `QA_IT_POSTGRES_VERSION` | `17`                                   | PostgreSQL 버전(이미지 `postgres:<버전>-alpine`)                                |
-| `QA_IT_POSTGRES_IMAGE`   |                                        | PostgreSQL 이미지를 직접 지정                                                   |
-| `QA_IT_MYSQL_VERSION`    | `8.4`                                  | MySQL 버전(이미지 `mysql:<버전>`)                                               |
-| `QA_IT_MYSQL_IMAGE`      |                                        | MySQL 이미지를 직접 지정                                                        |
-| `QA_IT_MARIADB_VERSION`  | `11.4`                                 | MariaDB 버전(이미지 `mariadb:<버전>`)                                           |
-| `QA_IT_MARIADB_IMAGE`    |                                        | MariaDB 이미지를 직접 지정                                                      |
+| 변수                     | 기본값   | 설명                                                                            |
+| ------------------------ | -------- | ------------------------------------------------------------------------------- |
+| `QA_IT_QUARTZ_VERSION`   | `2.3.2`  | 테스트베드 Quartz 버전                                                          |
+| `QA_IT_TESTBED_IMAGE`    |          | 미리 빌드한 이미지. 없으면 `quartz-admin-testbed:<버전>-local`로 빌드           |
+| `QA_IT_ORACLE_VERSION`   | `23`     | Oracle 버전. `23`은 Oracle Free 23(amd64, arm64), `21`은 Oracle XE 21(amd64)    |
+| `QA_IT_ORACLE_IMAGE`     |          | Oracle 이미지를 직접 지정(서비스 이름은 버전을 따름)                            |
+| `QA_IT_LOGS`             |          | `1`이면 노드 로그 출력                                                          |
+| `QA_IT_LOG_DIR`          |          | 노드 로그를 노드마다 파일로 남길 폴더(CI는 실패한 조합에서 아티팩트로 올림)     |
+| `QA_IT_DB`               | `oracle` | 통합 테스트 DB. `postgres`면 PostgreSQL, `mysql`이면 MySQL, `mariadb`면 MariaDB |
+| `QA_IT_POSTGRES_VERSION` | `17`     | PostgreSQL 버전(이미지 `postgres:<버전>-alpine`)                                |
+| `QA_IT_POSTGRES_IMAGE`   |          | PostgreSQL 이미지를 직접 지정                                                   |
+| `QA_IT_MYSQL_VERSION`    | `8.4`    | MySQL 버전(이미지 `mysql:<버전>`)                                               |
+| `QA_IT_MYSQL_IMAGE`      |          | MySQL 이미지를 직접 지정                                                        |
+| `QA_IT_MARIADB_VERSION`  | `11.4`   | MariaDB 버전(이미지 `mariadb:<버전>`)                                           |
+| `QA_IT_MARIADB_IMAGE`    |          | MariaDB 이미지를 직접 지정                                                      |

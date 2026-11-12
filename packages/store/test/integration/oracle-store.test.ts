@@ -13,6 +13,7 @@ import {
   type TargetConnectInfo,
 } from '../../src/index.js';
 import {
+  ORACLE_NATIVE_BOOLEAN,
   initQuartzSchema,
   sleep,
   startOracle,
@@ -21,13 +22,14 @@ import {
   type OracleFixture,
   type TcpProxy,
   TEST_DB,
+  TEST_DB_LABEL,
 } from '../support/index.js';
 
 const ORACLE_PORT = 1521;
 const queryOptions = { connectTimeoutMs: 10_000, queryTimeoutMs: 10_000 };
 
 describe.skipIf(TEST_DB !== 'oracle')(
-  '@qa/store Oracle 어댑터와 커넥션 풀 (Oracle Free 23)',
+  `@qa/store Oracle 어댑터와 커넥션 풀 (${TEST_DB_LABEL})`,
   () => {
     let oracle: OracleFixture;
     let info: TargetConnectInfo;
@@ -41,7 +43,7 @@ describe.skipIf(TEST_DB !== 'oracle')(
         port: oracle.container.getMappedPort(ORACLE_PORT),
         username: oracle.user,
         password: oracle.password,
-        oracleServiceName: 'FREEPDB1',
+        oracleServiceName: oracle.serviceName,
       };
     });
 
@@ -112,12 +114,17 @@ describe.skipIf(TEST_DB !== 'oracle')(
         await withConn(async (c) => {
           const executor = { execute: (sql: string) => c.execute(sql) };
           await initQuartzSchema(executor, { prefix: 'QRTZ_' });
-          await initQuartzSchema(executor, { prefix: 'Q23_', variant: 'oracle23' });
-
-          for (const [prefix, durable] of [
+          // BOOLEAN 타입은 Oracle 23부터 있다
+          if (ORACLE_NATIVE_BOOLEAN) {
+            await initQuartzSchema(executor, { prefix: 'Q23_', variant: 'oracle23' });
+          }
+          const variants = [
             ['QRTZ_', `'1'`],
             ['Q23_', 'TRUE'],
-          ] as const) {
+          ] as const;
+          for (const [prefix, durable] of variants.filter(
+            ([p]) => ORACLE_NATIVE_BOOLEAN || p === 'QRTZ_',
+          )) {
             const tables = Object.fromEntries(
               QUARTZ_REQUIRED_TABLES.map((t) => [t, `${prefix}${t}`]),
             ) as Record<QuartzTableKey, string>;
@@ -212,7 +219,7 @@ describe.skipIf(TEST_DB !== 'oracle')(
           `${info.port}`,
           info.username,
           'wrong-password-123',
-          'FREEPDB1',
+          oracle.serviceName,
         ]) {
           expect(text).not.toContain(secret);
         }
@@ -348,10 +355,17 @@ describe.skipIf(TEST_DB !== 'oracle')(
           await sampler;
 
           expect(peak).toBeLessThanOrEqual(2);
-          expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(2);
-          for (const r of results.filter((x) => x.status === 'rejected')) {
-            expect(r.reason).toMatchObject({ code: 'TARGET_BUSY' });
-          }
+          // 앞의 둘이 커넥션을 열고 뒤의 둘은 대기 제한(1.5초)을 넘는다. 실패하면 무엇으로 실패했는지 보이게 결과를 그대로 비교한다
+          // (XE 21 × 2.3.2 전체 실행에서 한 번 성공이 1개였고, 다시 돌리면 재현되지 않았다)
+          expect(
+            results.map((r) =>
+              r.status === 'fulfilled'
+                ? 'ok'
+                : (r.reason as { code?: string }).code === 'TARGET_BUSY'
+                  ? 'TARGET_BUSY'
+                  : `${(r.reason as { code?: string }).code ?? 'ERROR'}: ${String(r.reason)}`,
+            ),
+          ).toEqual(['ok', 'ok', 'TARGET_BUSY', 'TARGET_BUSY']);
         } finally {
           await manager.closeAll();
         }

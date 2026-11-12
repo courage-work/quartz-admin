@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  ORACLE_NATIVE_BOOLEAN,
   QUARTZ_TABLES,
   QUARTZ_VERSION,
   checkedInInstances,
@@ -144,7 +145,10 @@ describe(`quartz-testbed 2노드 클러스터 (${TEST_DB_LABEL}, Quartz ${QUARTZ
     async () => {
       await initQuartzSchema(conn, { prefix: 'APP_' });
       await initQuartzSchema(conn, { prefix: 'qa_', tableCase: 'lower' });
-      await initQuartzSchema(conn, { prefix: 'B23_', variant: 'oracle23' });
+      // BOOLEAN 타입은 Oracle 23부터 있다
+      if (ORACLE_NATIVE_BOOLEAN) {
+        await initQuartzSchema(conn, { prefix: 'B23_', variant: 'oracle23' });
+      }
 
       const result = await conn.execute<[string]>('SELECT TABLE_NAME FROM USER_TABLES');
       const tables = new Set((result.rows ?? []).map(([name]) => name));
@@ -152,7 +156,7 @@ describe(`quartz-testbed 2노드 클러스터 (${TEST_DB_LABEL}, Quartz ${QUARTZ
         {},
         { prefix: 'APP_' },
         { prefix: 'qa_', tableCase: 'lower' as const },
-        { prefix: 'B23_' },
+        ...(ORACLE_NATIVE_BOOLEAN ? [{ prefix: 'B23_' }] : []),
       ]) {
         for (const table of QUARTZ_TABLES) {
           expect(tables).toContain(quartzCatalogName(table, schema));
@@ -160,10 +164,12 @@ describe(`quartz-testbed 2노드 클러스터 (${TEST_DB_LABEL}, Quartz ${QUARTZ
       }
       expect(tables).toContain('TESTBED_EXECUTIONS');
 
-      const boolType = await conn.execute<[string]>(
-        `SELECT DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = 'B23_JOB_DETAILS' AND COLUMN_NAME = 'IS_DURABLE'`,
-      );
-      expect(boolType.rows?.[0]?.[0]).toBe('BOOLEAN');
+      if (ORACLE_NATIVE_BOOLEAN) {
+        const boolType = await conn.execute<[string]>(
+          `SELECT DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = 'B23_JOB_DETAILS' AND COLUMN_NAME = 'IS_DURABLE'`,
+        );
+        expect(boolType.rows?.[0]?.[0]).toBe('BOOLEAN');
+      }
     },
   );
 

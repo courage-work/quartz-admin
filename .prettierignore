@@ -13,3 +13,5 @@ apps/api/public
 # 생성 파일 (packages/core/scripts/generate-vectors.mjs)
 packages/core/test/vectors
 packages/core/src/tz/java-zone-ids.ts
+# CI 통합 테스트 조합. 한 줄에 한 조합을 표처럼 둔다
+.github/integration-matrix.json
