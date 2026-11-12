@@ -113,8 +113,18 @@ for path in /app/.smoke /app/dist/.smoke /.smoke /etc/.smoke /usr/local/.smoke; 
     fail "${path}에 쓸 수 있음"
   fi
 done
-perm="$(app_exec stat -c '%a' /data/quartz-admin.db)"
-[ "${perm}" = "600" ] || fail "DB 파일 권한이 600이 아님(${perm})"
+# DB와 WAL·공유 메모리 파일, 백업은 소유자만 읽고 쓴다 (NFR-SEC-05, TRD §4.5)
+app_exec node dist/cli.js backup >/dev/null || fail "백업 CLI"
+for path in /data/quartz-admin.db /data/quartz-admin.db-wal /data/quartz-admin.db-shm; do
+  perm="$(app_exec stat -c '%a' "${path}")" || fail "${path} 없음"
+  [ "${perm}" = "600" ] || fail "${path} 권한이 600이 아님(${perm})"
+done
+perm="$(app_exec stat -c '%a' /data/backups)"
+[ "${perm}" = "700" ] || fail "백업 디렉터리 권한이 700이 아님(${perm})"
+for path in $(app_exec sh -c 'ls /data/backups/*.db'); do
+  perm="$(app_exec stat -c '%a' "${path}")"
+  [ "${perm}" = "600" ] || fail "${path} 권한이 600이 아님(${perm})"
+done
 
 step "재시작 후 데이터 유지"
 compose down

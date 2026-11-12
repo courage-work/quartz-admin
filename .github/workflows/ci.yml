@@ -57,6 +57,10 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # 운영 이미지에 들어가는 의존성의 알려진 취약점 (B-32). 개발 도구 쪽은 TRD §4.5에 위험 수용으로 기록
+      - name: Audit (production dependencies)
+        run: pnpm audit --prod
+
   # 이벤트에 맞는 통합 테스트 조합과, 그 조합에 필요한 Quartz 버전을 고른다
   matrix:
     name: matrix

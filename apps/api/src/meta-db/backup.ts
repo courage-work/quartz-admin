@@ -2,6 +2,7 @@
 import type Database from 'better-sqlite3';
 import { chmodSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { restrictFile } from './meta-db.js';
 
 export const BACKUP_DIR_NAME = 'backups';
 export const BACKUP_KEEP = 7;
@@ -24,6 +25,8 @@ export function backupDir(dataDir: string): string {
 /** 운영 중인 DB를 잠그지 않고 target 파일로 복사한다 */
 export async function backupTo(sqlite: Database.Database, target: string): Promise<string> {
   mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+  // 빈 파일을 600으로 먼저 만들어, 쓰는 동안에도 다른 계정이 읽을 수 없게 한다(B-32)
+  restrictFile(target);
   await sqlite.backup(target);
   chmodSync(target, 0o600);
   return target;

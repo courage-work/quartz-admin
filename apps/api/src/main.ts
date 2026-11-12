@@ -11,7 +11,7 @@ import { configureApp } from './app.setup.js';
 import { ConfigError, LOG_LEVELS, type LogLevel, loadConfig } from './config/env.js';
 import { pinoOptions } from './logging/http-logger.js';
 import { InstanceLock, InstanceLockError } from './meta-db/instance-lock.js';
-import { metaDbPath } from './meta-db/meta-db.js';
+import { metaDbPath, restrictFile } from './meta-db/meta-db.js';
 import { defaultWebDir } from './web/web-assets.js';
 import { defaultWebSourceDir, startWebDev } from './web/web-dev.js';
 
@@ -23,6 +23,7 @@ import { defaultWebSourceDir, startWebDev } from './web/web-dev.js';
 function assertSingleInstance(dataDir: string): void {
   const file = metaDbPath(dataDir);
   if (!existsSync(file)) return;
+  restrictFile(file);
   const sqlite = new Database(file, { fileMustExist: true });
   try {
     new InstanceLock(sqlite).check();

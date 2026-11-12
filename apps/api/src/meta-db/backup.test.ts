@@ -35,7 +35,8 @@ describe('백업', () => {
     db.insert(settings).values({ key: 'after', value: 'x', updatedAt: 2 }).run();
     sqlite.close();
 
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows는 POSIX 권한이 없다. CI(Linux)에서 확인한다
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
 
     // 복원: 백업 파일을 새 데이터 디렉터리의 DB 파일로 복사한 뒤 기동 절차대로 연다
     copyFileSync(file, metaDbPath(restore.dir));

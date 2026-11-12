@@ -82,11 +82,23 @@ describe('메타데이터 저장소', () => {
     sqlite.close();
   });
 
-  it('DB 파일 권한을 600으로 둔다', () => {
-    const { sqlite } = open(tmp.dir);
-    expect(statSync(metaDbPath(tmp.dir)).mode & 0o777).toBe(0o600);
-    sqlite.close();
-  });
+  // Windows는 POSIX 권한이 없어 chmod가 읽기 전용 여부만 바꾼다. CI(Linux)에서 확인한다
+  it.skipIf(process.platform === 'win32')(
+    'umask가 022여도 DB, WAL, 공유 메모리 파일을 600으로 만든다',
+    () => {
+      const previous = process.umask(0o022);
+      try {
+        const { sqlite } = open(tmp.dir);
+        const file = metaDbPath(tmp.dir);
+        for (const path of [file, `${file}-wal`, `${file}-shm`]) {
+          expect({ path, mode: statSync(path).mode & 0o777 }).toEqual({ path, mode: 0o600 });
+        }
+        sqlite.close();
+      } finally {
+        process.umask(previous);
+      }
+    },
+  );
 
   describe('스키마 제약', () => {
     let sqlite: Sqlite;
