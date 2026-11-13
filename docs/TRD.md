@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.36 (B-33 E2E 테스트) |
+| 문서 버전 | v0.37 (B-34 감사 로그 CSV 내보내기) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -50,6 +50,7 @@
 | v0.34 | 2026-11-13 | B-23: §7.1 명령 형식에 `pauseAll`·`resumeAll`, 스케줄러 전체 규칙(트리거 수 상한 `TOO_MANY_TARGETS`, 트리거가 없는 그룹 행이 남는다는 경고 `PAUSED_GROUPS_KEPT`, 스케줄러 이름 입력 확인), 감사 작업 종류 `scheduler.pause`·`scheduler.resume`. §4.5 제어 명령 경로의 본문 상한 1MB(트리거 10,000개의 기대 상태가 약 680KB라 기본 100KB로는 413). §9.2 연체 판정의 재개 제외에 `scheduler.resume` |
 | v0.35 | 2026-11-13 | B-26: §9.3 음소거 구현(음소거 중에는 억제처럼 상태만 기록, 음소거 전에 보낸 알림의 해소는 끝나는 시각으로 미뤄 발송, 끝난 뒤 첫 회차에 열린 알림 `fire`·`reminder`, 일찍 풀면 미룬 발송을 바로). §5.7 음소거 API(`PUT`·`DELETE /schedulers/:id/mute`)와 감사 작업 종류 `scheduler.mute`·`scheduler.unmute`, 상세·대시보드의 `mutedUntil`. §9.4 인앱 읽지 않음은 넣은 시각이 지난 발송만 셈 |
 | v0.36 | 2026-11-13 | B-33: §12 E2E 표에 즉시 실행·브라우저 3종을 반영하고 §12.5 E2E(구성, 시나리오, 실행 방법, CI 잡) 추가 |
+| v0.37 | 2026-11-13 | B-34: §10 감사 로그 CSV 내보내기(`GET /audit-logs/export.csv`) 확정. 목록과 같은 필터, 1,000건씩 키셋으로 읽어 응답이 비워질 때까지 기다리며 쓰기, 열 구성, BOM, 수식 주입 방지, 메모리 측정(10만 건 68MB에서 살아 있는 힙 증가 2.5MB) |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -984,7 +985,12 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
   - 필터: `from`(포함)·`to`(제외, epoch ms), `userId`, `username`(부분 일치, 대소문자 무시), `schedulerId`, `action`, `result`
   - 페이지: 최신순(id 내림차순). `limit`(기본 50, 최대 200)과 이전 응답의 `nextCursor`를 `cursor`로 넘기는 키셋 방식입니다. 응답은 `{ items, nextCursor }`이고 `nextCursor`가 null이면 마지막 페이지입니다.
 - `GET /audit-logs/:id`: 기록 하나(상세 화면 `/audit-log?id=N`용). 없으면 404 `NOT_FOUND`
-- `GET /audit-logs/export.csv`(P1, 스트리밍, B-34)
+- `GET /audit-logs/export.csv`(B-34, FR-AUD-05): 목록과 같은 필터(`from`, `to`, `userId`, `username`, `schedulerId`, `action`, `result`, 페이지 값은 받지 않음)에 맞는 기록을 최신순으로 모두 CSV로 내려줍니다. 로그인한 사용자 누구나 받을 수 있고, 잘못된 쿼리는 400입니다.
+  - 스트리밍: 1,000건씩 키셋(id 내림차순)으로 새로 조회해 바로 응답에 쓰고, 응답 버퍼가 차면 `drain`까지 기다립니다. 묶음 사이에 SQLite 읽기를 열어 두지 않아 내보내는 동안에도 감시 루프와 감사 기록 쓰기가 막히지 않습니다. 받는 쪽이 끊으면 멈춥니다. 내보내기를 시작한 뒤 생긴 기록은 첫 묶음 뒤에는 들어가지 않습니다.
+  - 형식: RFC 4180, CRLF, UTF-8에 BOM(Excel 한글). 열은 id, 시각(UTC, ISO 8601), 사용자, IP, 요청 ID, 작업, 대상 종류, 대상, 접속 ID, 스케줄러 ID, 결과, 오류 코드, 오류 메시지, 사유, 변경 전, 변경 후이고 대상·변경 전후는 JSON 문자열입니다. 쉼표·따옴표·줄바꿈이 든 칸은 따옴표로 감쌉니다. `=`, `+`, `-`, `@`, 탭, CR로 시작하는 글은 앞에 `'`를 붙여 스프레드시트에서 수식으로 실행되지 않게 합니다(CSV 수식 주입). 비밀값은 저장할 때 이미 가려져 있습니다. 파일 이름은 `audit-logs-<UTC 날짜>-<시각>.csv`이고 `Cache-Control: no-store`입니다.
+  - 내려받기는 조회라 감사 로그에 남기지 않습니다(다른 조회와 같음).
+  - 메모리(`pnpm --filter @qa/api perf:audit-export`, 결과 `perf-results/audit-export.json`): 실제 포트로 띄운 API에서 받는 쪽이 조각을 버리며 내려받는 동안 100ms마다 GC 뒤 힙을 잽니다. Windows, Node 24에서 1만 건(6.8MB)과 10만 건(68MB) 모두 살아 있는 힙 증가가 2.5MB였습니다(GC 없이 잰 최대 증가는 쓰레기 포함 42~50MB로 역시 건수와 무관). 10만 건은 약 1.5초입니다.
+  - 화면: 감사 로그 머리글의 "CSV로 내보내기"(필터가 있으면 "필터 결과 CSV로 내보내기")가 지금 필터를 그대로 담은 주소로 내려받습니다.
 
 ## 11. 배포와 운영
 

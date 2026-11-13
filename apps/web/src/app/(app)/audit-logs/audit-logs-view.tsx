@@ -2,7 +2,7 @@
 
 import { AUDIT_ACTIONS, AUDIT_RESULTS, type AuditLogPage } from '@qa/shared';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { ListFilterIcon, ScrollTextIcon, SearchXIcon } from 'lucide-react';
+import { DownloadIcon, ListFilterIcon, ScrollTextIcon, SearchXIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 
 import { FormAlert } from '@/components/form/form-alert';
@@ -36,7 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { api } from '@/lib/api';
+import { api, buildUrl } from '@/lib/api';
 import {
   type AuditFilter,
   auditQuery,
@@ -280,6 +280,15 @@ export function AuditLogsView() {
       <PageHeader
         title="감사 로그"
         description="로그인, 사용자 관리, 접속·스케줄러 변경과 제어 작업 기록입니다. 기록은 고치거나 지울 수 없습니다."
+        actions={
+          // 지금 걸린 필터 그대로 맞는 기록을 모두 내려받는다(FR-AUD-05). 서버가 나눠 읽어 바로 보내므로 건수가 많아도 된다
+          <Button asChild variant="outline">
+            <a href={buildUrl('/audit-logs/export.csv', auditQuery(filter))} download>
+              <DownloadIcon data-icon="inline-start" aria-hidden />
+              {filtered ? '필터 결과 CSV로 내보내기' : 'CSV로 내보내기'}
+            </a>
+          </Button>
+        }
       />
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-end gap-2">

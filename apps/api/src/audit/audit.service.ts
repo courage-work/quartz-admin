@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import {
   AUDIT_INTERRUPTED,
   type AuditAction,
+  type AuditFilter,
   type AuditLogDto,
   type AuditLogPage,
   type AuditLogQuery,
@@ -58,6 +59,9 @@ export function describeError(err: unknown): { code: string; message: string } {
 }
 
 type AuditRow = typeof auditLogs.$inferSelect;
+
+/** 내보내기에서 한 번에 읽는 기록 수 */
+export const AUDIT_EXPORT_BATCH = 1_000;
 
 function toDto(row: AuditRow): AuditLogDto {
   return {
@@ -194,18 +198,7 @@ export class AuditService implements OnModuleInit {
   }
 
   list(query: AuditLogQuery): AuditLogPage {
-    const conds: SQL[] = [];
-    if (query.from !== undefined) conds.push(gte(auditLogs.at, query.from));
-    if (query.to !== undefined) conds.push(lt(auditLogs.at, query.to));
-    if (query.userId !== undefined) conds.push(eq(auditLogs.userId, query.userId));
-    // 아이디를 정확히 몰라도 찾도록 부분 일치로 건다. 아이디에는 `_`가 올 수 있어 LIKE 글자를 이스케이프한다
-    if (query.username !== undefined) {
-      const pattern = `%${query.username.replace(/[!%_]/g, (c) => `!${c}`)}%`;
-      conds.push(sql`${auditLogs.username} LIKE ${pattern} ESCAPE '!'`);
-    }
-    if (query.schedulerId !== undefined) conds.push(eq(auditLogs.schedulerId, query.schedulerId));
-    if (query.action !== undefined) conds.push(eq(auditLogs.action, query.action));
-    if (query.result !== undefined) conds.push(eq(auditLogs.result, query.result));
+    const conds = this.filterConds(query);
     if (query.cursor !== undefined) conds.push(lt(auditLogs.id, query.cursor));
 
     // 한 건 더 읽어 다음 페이지가 있는지 판단한다
@@ -219,6 +212,47 @@ export class AuditService implements OnModuleInit {
     const hasMore = rows.length > query.limit;
     const items = (hasMore ? rows.slice(0, query.limit) : rows).map(toDto);
     return { items, nextCursor: hasMore ? items[items.length - 1]!.id : null };
+  }
+
+  /**
+   * 내보내기(FR-AUD-05)용으로 필터에 맞는 기록을 최신순으로 `batchSize`개씩 돌려준다. 묶음마다 키셋(id 내림차순)으로
+   * 새로 조회하므로 몇 건이든 메모리에는 한 묶음만 있다. SQLite 읽기를 묶음 사이에 열어 두지 않아, 내보내는 동안에도
+   * 감시 루프와 감사 기록 쓰기가 막히지 않는다. 내보내기를 시작한 뒤 새로 생긴 기록은 첫 묶음 뒤에는 들어가지 않는다
+   */
+  *exportBatches(query: AuditFilter, batchSize = AUDIT_EXPORT_BATCH): Generator<AuditLogDto[]> {
+    let cursor: number | undefined;
+    for (;;) {
+      const conds = this.filterConds(query);
+      if (cursor !== undefined) conds.push(lt(auditLogs.id, cursor));
+      const rows = this.metaDb.db
+        .select()
+        .from(auditLogs)
+        .where(and(...conds))
+        .orderBy(desc(auditLogs.id))
+        .limit(batchSize)
+        .all();
+      if (rows.length === 0) return;
+      yield rows.map(toDto);
+      if (rows.length < batchSize) return;
+      cursor = rows[rows.length - 1]!.id;
+    }
+  }
+
+  /** 목록·내보내기 공통 필터 (FR-AUD-03) */
+  private filterConds(query: AuditFilter): SQL[] {
+    const conds: SQL[] = [];
+    if (query.from !== undefined) conds.push(gte(auditLogs.at, query.from));
+    if (query.to !== undefined) conds.push(lt(auditLogs.at, query.to));
+    if (query.userId !== undefined) conds.push(eq(auditLogs.userId, query.userId));
+    // 아이디를 정확히 몰라도 찾도록 부분 일치로 건다. 아이디에는 `_`가 올 수 있어 LIKE 글자를 이스케이프한다
+    if (query.username !== undefined) {
+      const pattern = `%${query.username.replace(/[!%_]/g, (c) => `!${c}`)}%`;
+      conds.push(sql`${auditLogs.username} LIKE ${pattern} ESCAPE '!'`);
+    }
+    if (query.schedulerId !== undefined) conds.push(eq(auditLogs.schedulerId, query.schedulerId));
+    if (query.action !== undefined) conds.push(eq(auditLogs.action, query.action));
+    if (query.result !== undefined) conds.push(eq(auditLogs.result, query.result));
+    return conds;
   }
 
   get(id: number): AuditLogDto | null {

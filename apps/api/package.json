@@ -17,7 +17,8 @@
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "perf:audit-export": "vitest run -c vitest.perf.config.ts"
   },
   "dependencies": {
     "@nestjs/common": "catalog:",
