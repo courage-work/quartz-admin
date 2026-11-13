@@ -174,6 +174,63 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # B-33: 빌드한 앱과 Quartz 테스트베드(PostgreSQL 17 × Quartz 2.5.2)로 운영자 흐름을 Chrome, Edge, Safari(WebKit)에서 확인한다.
+  # 테스트베드 이미지는 위 잡이 만든 2.5.2를 받아 쓴다(PR·main 모두 2.5.2를 빌드한다)
+  e2e:
+    name: e2e (chrome, edge, webkit)
+    needs: testbed-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      QA_IT_DB: postgres
+      QA_IT_POSTGRES_VERSION: '17'
+      QA_IT_QUARTZ_VERSION: 2.5.2
+      QA_IT_TESTBED_IMAGE: quartz-testbed:2.5.2
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: testbed-image-2.5.2
+          path: ${{ runner.temp }}
+
+      - name: Load quartz-testbed image
+        run: docker load -i "$RUNNER_TEMP/testbed-2.5.2.tar"
+
+      - name: Pull postgres:17-alpine
+        run: docker pull postgres:17-alpine
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install browsers
+        run: pnpm --filter @qa/e2e exec playwright install --with-deps chromium webkit msedge
+
+      - name: E2E
+        run: pnpm e2e
+
+      # 실패하면 Playwright 보고서·추적과 앱·테스트베드 로그를 남긴다
+      - name: Upload E2E results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-results
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+            e2e/.run/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   container:
     name: container (docker compose smoke)
     runs-on: ubuntu-latest

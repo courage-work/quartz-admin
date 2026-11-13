@@ -17,6 +17,10 @@ export default defineConfig(
     '**/coverage/**',
     '**/.turbo/**',
     '**/next-env.d.ts',
+    // E2E 실행 결과 (e2e)
+    'e2e/playwright-report/**',
+    'e2e/test-results/**',
+    'e2e/.run/**',
   ]),
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
