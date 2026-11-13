@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { AlertsTab } from '@/components/alerts/alerts-tab';
+import { PauseAllBadge, SchedulerControlMenu } from '@/components/commands/scheduler-control';
 import { FormAlert } from '@/components/form/form-alert';
 import { InlineLink } from '@/components/links';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
@@ -147,6 +148,7 @@ export function SchedulerView() {
               ) : (
                 <Badge variant="neutral">감시 전</Badge>
               )}
+              <PauseAllBadge schedulerId={id} refreshMs={refreshMs} enabled={!unreachable} />
             </span>
             <Summary s={s} />
           </span>
@@ -160,6 +162,10 @@ export function SchedulerView() {
             onRefresh={() => void queryClient.invalidateQueries({ queryKey: ['schedulers', id] })}
             refreshing={queryClient.isFetching({ queryKey: ['schedulers', id] }) > 0}
           >
+            <SchedulerControlMenu
+              schedulerId={id}
+              blockedReason={controlBlockedReason(s.connection)}
+            />
             {/* 설정은 접속 상세의 줄 메뉴에도 있다. 여기서 들어가면 저장·취소 뒤 이 화면으로 돌아온다 */}
             <Tooltip>
               <TooltipTrigger asChild>

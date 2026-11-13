@@ -67,7 +67,9 @@ export type CommandRejectionCode =
   /** 트리거 종류가 명령과 맞지 않음 (409) */
   | 'TRIGGER_TYPE_MISMATCH'
   /** 노드가 집은 트리거를 경합이 나는 시각으로 수정하려 함 (409, TRD §7.6) */
-  | 'TRIGGER_ACQUIRED';
+  | 'TRIGGER_ACQUIRED'
+  /** 한 명령이 다루는 트리거 수 상한(`COMMAND_TARGETS_MAX`)을 넘음 (409, 스케줄러 전체 명령) */
+  | 'TOO_MANY_TARGETS';
 
 /** 계획의 거부 사유 중 실행을 거부하는 코드 */
 export const REJECTION_CODES: ReadonlySet<string> = new Set<CommandRejectionCode>([
@@ -77,6 +79,7 @@ export const REJECTION_CODES: ReadonlySet<string> = new Set<CommandRejectionCode
   'TRIGGER_COMPLETE',
   'TRIGGER_TYPE_MISMATCH',
   'TRIGGER_ACQUIRED',
+  'TOO_MANY_TARGETS',
 ]);
 
 /**

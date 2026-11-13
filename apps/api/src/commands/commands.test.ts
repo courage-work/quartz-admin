@@ -594,6 +594,78 @@ describe('제어 명령 API (TRD §7.1)', () => {
     });
   });
 
+  it('스케줄러 전체 일시정지·재개는 전체 표시를 넣고 지우며 스케줄러 대상으로 감사 로그를 남긴다 (FR-CTL-11)', async () => {
+    const id = await register('c');
+    const ALL = '_$_ALL_GROUPS_PAUSED_$_';
+    const run = async (command: QuartzCommand) => {
+      const preview = (
+        await t.send('post', `/schedulers/${id}/commands/preview`, { command }, cookie).expect(200)
+      ).body as CommandPreviewResponse;
+      const result = (
+        await t
+          .send(
+            'post',
+            `/schedulers/${id}/commands`,
+            { command, expected: preview.expected },
+            cookie,
+          )
+          .expect(200)
+      ).body as CommandResultDto;
+      return { preview, result };
+    };
+
+    const paused = await run({ type: 'pauseAll' });
+    // Quartz처럼 그룹마다 일시정지한 뒤 전체 표시를 넣는다
+    expect(paused.preview.groupChanges).toEqual([
+      { group: 'g', paused: true },
+      { group: ALL, paused: true },
+    ]);
+    expect(paused.result).toMatchObject({ changed: true, after: expected('PAUSED', [ALL, 'g']) });
+    expect([...fake.pausedGroups].sort()).toEqual([ALL, 'g']);
+
+    const resumed = await run({ type: 'resumeAll' });
+    expect(resumed.result).toMatchObject({ changed: true, after: expected('WAITING') });
+    expect(fake.committed).toBe('WAITING');
+    expect(fake.pausedGroups).toEqual([]);
+
+    for (const [action, command] of [
+      ['scheduler.pause', 'pauseAll'],
+      ['scheduler.resume', 'resumeAll'],
+    ]) {
+      const logs = (await t.get(`/audit-logs?action=${action}`, cookie).expect(200))
+        .body as AuditLogPage;
+      expect(logs.items).toHaveLength(1);
+      expect(logs.items[0]).toMatchObject({
+        result: 'success',
+        targetType: 'scheduler',
+        target: { schedName: 'S', displayName: 'S' },
+        before: { command: { type: command } },
+      });
+    }
+  });
+
+  it('제어 명령 경로는 트리거 10,000개 규모의 기대 상태(1MB까지)를 받고, 다른 경로는 기본 상한을 지킨다', async () => {
+    const id = await register('c');
+    // 트리거 6,000개, 약 600KB. 기본 상한(100KB)이면 413이다
+    const triggers = Array.from({ length: 6_000 }, (_, i) => ({
+      group: 'group-'.padEnd(40, 'g'),
+      name: `trigger-${String(i).padStart(5, '0')}`.padEnd(40, 'n'),
+      state: 'WAITING',
+    }));
+    const big = { command: { type: 'pauseAll' }, expected: { triggers, pausedGroups: [] } };
+    expect(JSON.stringify(big).length).toBeGreaterThan(500_000);
+    const res = await t.send('post', `/schedulers/${id}/commands`, big, cookie);
+    // 본문을 받아 기대 상태를 비교했다(가짜 대상의 트리거는 하나뿐이라 상태 충돌)
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ code: 'STATE_CONFLICT' });
+
+    const tooBig = { ...big, padding: 'x'.repeat(1_100_000) };
+    const over = await t.send('post', `/schedulers/${id}/commands`, tooBig, cookie);
+    expect(over.status).toBe(413);
+    const other = await t.send('post', '/connections', { name: 'x'.repeat(200_000) }, cookie);
+    expect(other.status).toBe(413);
+  });
+
   it('즉시 실행은 사용자 이름을 남긴 일회성 트리거를 넣고 잡 대상으로 감사 로그를 남긴다 (TRD §7.5)', async () => {
     const id = await register('c');
     const command: QuartzCommand = { type: 'triggerJob', job: { group: 'jg', name: 'j' } };

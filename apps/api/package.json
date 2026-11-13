@@ -29,6 +29,7 @@
     "@qa/store": "workspace:*",
     "better-sqlite3": "catalog:",
     "drizzle-orm": "catalog:",
+    "express": "catalog:",
     "helmet": "catalog:",
     "nestjs-pino": "catalog:",
     "nodemailer": "catalog:",

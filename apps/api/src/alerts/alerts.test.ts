@@ -211,18 +211,26 @@ describe('알림 엔진 (TRD §9.3)', () => {
     const fake = new FakeTarget();
     const { app, cookie, poll, alerts, sqlite } = await start(fake);
     const s = await addScheduler(app, cookie);
-    sqlite
-      .prepare(
-        "INSERT INTO audit_logs (at, action, scheduler_id, after, result) VALUES (?, 'trigger.resume', ?, ?, 'success')",
-      )
-      .run(
-        app.clock.now,
-        s.id,
-        JSON.stringify({
-          changes: [{ group: 'g', name: 'resumed', from: 'PAUSED', to: 'WAITING' }],
-        }),
-      );
-    fake.overdue = [{ group: 'g', name: 'resumed', lateMs: 5 * MIN }];
+    // 트리거 재개와 스케줄러 전체 재개(B-23)
+    for (const [action, name] of [
+      ['trigger.resume', 'resumed'],
+      ['scheduler.resume', 'whole'],
+    ]) {
+      sqlite
+        .prepare(
+          "INSERT INTO audit_logs (at, action, scheduler_id, after, result) VALUES (?, ?, ?, ?, 'success')",
+        )
+        .run(
+          app.clock.now,
+          action,
+          s.id,
+          JSON.stringify({ changes: [{ group: 'g', name, from: 'PAUSED', to: 'WAITING' }] }),
+        );
+    }
+    fake.overdue = [
+      { group: 'g', name: 'resumed', lateMs: 5 * MIN },
+      { group: 'g', name: 'whole', lateMs: 5 * MIN },
+    ];
     await poll(s.id);
     expect((await alerts(s.id)).open).toEqual([]);
 

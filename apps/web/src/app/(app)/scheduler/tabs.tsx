@@ -204,7 +204,17 @@ export function PausedGroupsTab({
           <PauseIcon aria-hidden />
           <AlertTitle>전체 일시정지(pauseAll) 상태입니다</AlertTitle>
           <AlertDescription>
-            이 상태에서 새로 만드는 트리거 그룹도 일시정지된 채로 시작합니다.
+            <p>이 상태에서 새로 만드는 트리거 그룹도 일시정지된 채로 시작합니다.</p>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!!blockedReason}
+              title={blockedReason ?? undefined}
+              onClick={(e) => openCommand({ type: 'resumeAll' }, e.currentTarget)}
+            >
+              <PlayIcon data-icon="inline-start" aria-hidden />
+              전체 재개
+            </Button>
           </AlertDescription>
         </Alert>
       ) : null}

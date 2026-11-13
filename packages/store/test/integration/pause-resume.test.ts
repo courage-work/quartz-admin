@@ -40,7 +40,7 @@ const T = (name: string) => quartzTableName(name as Parameters<typeof quartzTabl
 const MISFIRE_THRESHOLD_MS = 5_000;
 
 /**
- * 일시정지와 재개 (B-18, TRD §7.3·§7.4, 부록 A.2 P-05, A.3, A.4 G-01~G-10, A.8 X-05).
+ * 일시정지와 재개 (B-18·B-23, TRD §7.3·§7.4, 부록 A.2 P-05, A.3, A.4 G-01~G-13, A.8 X-05).
  * 2노드 클러스터와 `start()`하지 않는 기준 인스턴스 두 개를 같은 DB 스키마에 띄운다.
  */
 describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => {
@@ -548,6 +548,42 @@ describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, 
     expect(await states(REF_TOOL, 'g08', ['t-ja', 't-jb'])).toEqual(['WAITING', 'WAITING']);
   });
 
+  // ── 스케줄러 전체 (B-23, 부록 A.4 G-11·G-13) ─────────────
+  // 기준 인스턴스의 모든 그룹을 바꾸므로 기준 인스턴스를 쓰는 테스트 중 맨 뒤에 둔다.
+  // 앞 테스트가 남긴 그룹(트리거 없는 g02 행 등)까지 Quartz와 같게 바뀌는지 함께 비교된다
+
+  it('G-11·G-13 pauseAll 뒤 resumeAll. 트리거가 없는 그룹 행은 남는다 (차등)', async () => {
+    await seedBoth('g11a', { triggers: ['t', 'late'] });
+    await seedBoth('g11b', { nonConcurrent: true });
+    await fixtureBoth([
+      // G2: 같은 잡이 동시 실행 금지로 실행 중이라 BLOCKED
+      setState('g11b', 't', 'BLOCKED'),
+      firedRow('g11b', 'e-g11b', 't', { name: 'job-g11b', nonConcurrent: true }),
+      // 실행 시각이 지난 트리거. 전체 재개는 전체 표시까지 지우므로 거부하지 않는다
+      setNextFire('g11a', 'late', now() - 600_000),
+      pausedGroupRow('g11empty'),
+    ]);
+
+    const paused = await differential((c) => c.pauseAll(), { type: 'pauseAll' });
+    expect(await states(REF_TOOL, 'g11a', ['t', 'late'])).toEqual(['PAUSED', 'PAUSED']);
+    expect(await state(REF_TOOL, 'g11b', 't')).toBe('PAUSED_BLOCKED');
+    expect(await pausedGroups(REF_TOOL)).toEqual(
+      expect.arrayContaining(['g11a', 'g11b', 'g11empty', ALL_GROUPS_PAUSED]),
+    );
+    expect(paused.groupChanges).toContainEqual({ group: ALL_GROUPS_PAUSED, paused: true });
+
+    const resumed = await differential((c) => c.resumeAll(), { type: 'resumeAll' });
+    expect(await states(REF_TOOL, 'g11a', ['t', 'late'])).toEqual(['WAITING', 'WAITING']);
+    expect(await state(REF_TOOL, 'g11b', 't')).toBe('BLOCKED');
+    const left = await pausedGroups(REF_TOOL);
+    expect(left).toContain('g11empty');
+    expect(left).not.toContain('g11a');
+    expect(left).not.toContain(ALL_GROUPS_PAUSED);
+    expect(resumed.warnings.map((w) => w.code)).toEqual(
+      expect.arrayContaining(['PAUSED_GROUPS_KEPT', 'MISFIRE_DELEGATED']),
+    );
+  });
+
   // ── 실제 클러스터 ─────────────────────────────────────
 
   describe('2노드 클러스터', () => {
@@ -918,5 +954,29 @@ describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, 
         { timeoutMs: 60_000, message: '잡 종료 뒤 misfire 처리' },
       );
     }, 120_000);
+
+    // 클러스터 스케줄러 전체를 멈추므로 클러스터 테스트 중 맨 뒤에 둔다
+    it('G-12 전체 일시정지 중 새 그룹에 추가한 트리거도 일시정지되고, 전체 재개하면 발화한다 (통합)', async () => {
+      await toolRun(sched(), { type: 'pauseAll' });
+      await node1.client.scheduleJob({
+        job: { name: 'job-g12', group: 'g12', type: 'RecordingJob', durable: true },
+        trigger: { name: 'added', group: 'g12', intervalMs: 1_000 },
+      });
+      // Quartz가 트리거를 저장할 때 전체 표시를 보고 그룹 행을 넣는다(TRD §7.3 "트리거 저장 시 상태 결정")
+      expect(await state(sched(), 'g12', 'added')).toBe('PAUSED');
+      expect(await pausedGroups(sched())).toEqual(
+        expect.arrayContaining(['g12', ALL_GROUPS_PAUSED]),
+      );
+      await sleep(2_000);
+      expect(await firedAfter('g12', 0)).toEqual([]);
+
+      const resumed = await toolRun(sched(), { type: 'resumeAll' });
+      await waitFor(async () => (await firedAfter('g12', resumed.dbNow)).length >= 1, {
+        timeoutMs: 20_000,
+        message: '전체 재개 뒤 발화',
+      });
+      expect(await pausedGroups(sched())).not.toContain(ALL_GROUPS_PAUSED);
+      expect(await lockIsFree(sched())).toBe(true);
+    }, 60_000);
   });
 });

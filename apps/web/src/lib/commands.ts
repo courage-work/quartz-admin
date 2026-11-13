@@ -28,6 +28,10 @@ export function commandTitle(command: QuartzCommand): string {
       return '잡 그룹 일시정지';
     case 'resumeJobGroup':
       return '잡 그룹 재개';
+    case 'pauseAll':
+      return '스케줄러 전체 일시정지';
+    case 'resumeAll':
+      return '스케줄러 전체 재개';
     case 'triggerJob':
       return '잡 즉시 실행';
     case 'updateCronSchedule':
@@ -57,6 +61,8 @@ export function commandConfirmLabel(command: QuartzCommand): string {
   if (command.type === 'updateCronSchedule' || command.type === 'updateSimpleSchedule') {
     return '수정하기';
   }
+  if (command.type === 'pauseAll') return '전체 일시정지하기';
+  if (command.type === 'resumeAll') return '전체 재개하기';
   return isPause(command) ? '일시정지하기' : '재개하기';
 }
 
@@ -80,6 +86,9 @@ export function commandSubject(command: QuartzCommand): string {
     case 'pauseJobGroup':
     case 'resumeJobGroup':
       return `${command.group} 잡 그룹`;
+    case 'pauseAll':
+    case 'resumeAll':
+      return '스케줄러 전체';
   }
 }
 
@@ -90,8 +99,8 @@ export function commandResultMessage(
 ): string {
   const { command } = result;
   const subject = commandSubject(command);
-  // 대상 말이 "트리거"로 끝나면 받침이 없고, "잡", "그룹"으로 끝나면 받침이 있다
-  const vowel = commandScope(command) === 'trigger';
+  // 대상 말이 "트리거", "전체"로 끝나면 받침이 없고, "잡", "그룹"으로 끝나면 받침이 있다
+  const vowel = commandScope(command) === 'trigger' || commandScope(command) === 'scheduler';
   const topic = `${subject}${vowel ? '는' : '은'}`;
   const object = `${subject}${vowel ? '를' : '을'}`;
   if (command.type === 'triggerJob') return triggerJobMessage(object, result.inserts?.[0]?.state);

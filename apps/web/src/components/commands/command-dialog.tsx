@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  ALL_GROUPS_PAUSED,
   COMMAND_TARGETS_LISTED,
   commandScope,
   type CommandExpected,
@@ -13,7 +14,7 @@ import {
 } from '@qa/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRightIcon, CircleAlertIcon, InfoIcon, RefreshCwIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { toast } from 'sonner';
 
 import { FormAlert } from '@/components/form/form-alert';
@@ -30,6 +31,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { api, isApiError } from '@/lib/api';
@@ -125,6 +128,35 @@ function ScheduleChange({ change }: { change: CommandScheduleChangeDto }) {
   );
 }
 
+/** 스케줄러 전체 명령의 그룹 행 변경. 그룹은 수로, 전체 일시정지 표시는 무엇이 달라지는지로 알린다 */
+function WholeGroupChanges({
+  groupChanges,
+}: {
+  groupChanges: CommandPreviewResponse['groupChanges'];
+}) {
+  const marker = groupChanges.find((g) => g.group === ALL_GROUPS_PAUSED);
+  const groups = groupChanges.filter((g) => g.group !== ALL_GROUPS_PAUSED);
+  const pausing = groupChanges[0]?.paused ?? false;
+  return (
+    <>
+      {groups.length > 0 ? (
+        <span>
+          {pausing
+            ? `트리거 그룹 ${groups.length}개를 일시정지 상태로 기록합니다`
+            : `트리거 그룹 ${groups.length}개의 일시정지 기록을 지웁니다`}
+        </span>
+      ) : null}
+      {marker ? (
+        <span>
+          {marker.paused
+            ? '전체 일시정지 표시를 남깁니다. 이후 새로 만드는 트리거 그룹도 일시정지된 채로 시작합니다'
+            : '전체 일시정지 표시를 지웁니다'}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 function Summary({ data }: { data: CommandPreviewResponse }) {
   const {
     scheduler,
@@ -138,7 +170,9 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
   } = data;
   const deleting = deletions.triggers.length + deletions.jobs.length > 0;
   const single = commandScope(command) === 'trigger';
-  const listed = targets.slice(0, COMMAND_TARGETS_LISTED);
+  // 스케줄러 전체 명령은 트리거를 하나씩 적지 않고 수로 알린다
+  const whole = commandScope(command) === 'scheduler';
+  const listed = whole ? [] : targets.slice(0, COMMAND_TARGETS_LISTED);
   return (
     <dl className="grid grid-cols-4 gap-x-4 gap-y-3 text-sm">
       <dt className="text-muted-foreground">스케줄러</dt>
@@ -154,7 +188,14 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
       <dt className="text-muted-foreground">대상</dt>
       <dd className="col-span-3 flex flex-col gap-2">
         <ScopeLine command={command} />
-        {single || command.type === 'triggerJob' ? null : <span>트리거 {targets.length}개</span>}
+        {whole ? (
+          <span>
+            스케줄러 전체 · 트리거 그룹 {new Set(targets.map((t) => t.group)).size}개 · 트리거{' '}
+            {targets.length}개
+          </span>
+        ) : single || command.type === 'triggerJob' ? null : (
+          <span>트리거 {targets.length}개</span>
+        )}
         {listed.map((t) => (
           <span key={`${t.group}\u0000${t.name}`} className="flex flex-col items-start gap-1">
             <span className="text-xs text-muted-foreground">{t.group}</span>
@@ -169,7 +210,7 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
             ) : null}
           </span>
         ))}
-        {targets.length > listed.length ? (
+        {!whole && targets.length > listed.length ? (
           <span className="text-xs text-muted-foreground">
             외 {targets.length - listed.length}개
           </span>
@@ -234,13 +275,17 @@ function Summary({ data }: { data: CommandPreviewResponse }) {
             )}
           </span>
         ))}
-        {groupChanges.map((g) => (
-          <span key={g.group}>
-            {g.paused
-              ? `${g.group} 그룹을 일시정지 상태로 기록합니다. 나중에 이 그룹에 추가되는 트리거도 일시정지됩니다`
-              : `${g.group} 그룹의 일시정지 기록을 지웁니다`}
-          </span>
-        ))}
+        {whole ? (
+          <WholeGroupChanges groupChanges={groupChanges} />
+        ) : (
+          groupChanges.map((g) => (
+            <span key={g.group}>
+              {g.paused
+                ? `${g.group} 그룹을 일시정지 상태로 기록합니다. 나중에 이 그룹에 추가되는 트리거도 일시정지됩니다`
+                : `${g.group} 그룹의 일시정지 기록을 지웁니다`}
+            </span>
+          ))
+        )}
       </dd>
     </dl>
   );
@@ -274,6 +319,9 @@ export function CommandDialog({
   const queryClient = useQueryClient();
   /** 직전 실행이 상태 충돌로 멈췄는지. 다시 실행하면 지운다 */
   const [conflict, setConflict] = useState(false);
+  /** 스케줄러 전체 명령은 스케줄러 이름을 입력해야 실행한다(FR-CTL-11의 강화된 확인 절차) */
+  const [typedName, setTypedName] = useState('');
+  const nameId = useId();
 
   const preview = useQuery({
     queryKey: ['command-preview', schedulerId, command],
@@ -318,7 +366,9 @@ export function CommandDialog({
   const data = preview.data;
   const loading = preview.isFetching;
   const blocked = data?.blocked ?? null;
-  const canRun = !!data && !blocked && !loading && !run.isPending;
+  const confirmName = commandScope(command) === 'scheduler' ? data?.scheduler.displayName : null;
+  const nameMatches = !confirmName || typedName.trim() === confirmName;
+  const canRun = !!data && !blocked && !loading && !run.isPending && nameMatches;
 
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && !run.isPending && onClose()}>
@@ -383,6 +433,31 @@ export function CommandDialog({
           </Alert>
         ) : null}
         {run.isError && !conflict ? <FormAlert error={run.error} /> : null}
+        {confirmName && !blocked ? (
+          <Field>
+            <FieldLabel htmlFor={nameId}>확인하려면 스케줄러 이름을 입력하세요</FieldLabel>
+            <Input
+              id={nameId}
+              value={typedName}
+              onChange={(e) => setTypedName(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={run.isPending}
+              onKeyDown={(e) => {
+                // 이름이 맞으면 Enter로 실행한다. 대화상자의 기본 동작(닫기)은 막는다
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                if (canRun && data) run.mutate(data.expected);
+              }}
+            />
+            <FieldDescription>
+              스케줄러 전체에 영향을 주는 명령이라 아래 이름을 똑같이 입력해야 실행됩니다.
+              <span className="block font-mono font-medium break-all text-foreground">
+                {confirmName}
+              </span>
+            </FieldDescription>
+          </Field>
+        ) : null}
 
         <AlertDialogFooter>
           <AlertDialogCancel disabled={run.isPending}>취소</AlertDialogCancel>
