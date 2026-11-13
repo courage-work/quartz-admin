@@ -26,11 +26,13 @@ const DAY = 86_400_000;
 
 /**
  * 이 사용자가 인앱으로 받고 아직 읽지 않았는지. 인앱 채널로 나간(큐에 들어간) 발송 중 마지막으로 읽은 뒤의 것이
- * 있으면 읽지 않은 것이다. 억제돼 한 번도 보내지 않은 알림은 세지 않는다
+ * 있으면 읽지 않은 것이다. 억제돼 한 번도 보내지 않은 알림은 세지 않는다. 음소거 중에 미룬 해소 알림은 넣은 시각이
+ * 음소거가 끝나는 시각이라 그때부터 센다(B-26)
  */
 const UNREAD = `EXISTS (
   SELECT 1 FROM notifications n JOIN channels c ON c.id = n.channel_id AND c.type = 'inapp'
   WHERE n.alert_id = a.id
+    AND n.created_at <= @now
     AND n.created_at > COALESCE(
       (SELECT r.read_at FROM alert_reads r WHERE r.alert_id = a.id AND r.user_id = @userId), -1)
 )`;
@@ -102,6 +104,7 @@ export class AlertCenterService implements OnModuleInit {
         userId,
         limit: ALERT_CENTER_PAGE_SIZE,
         offset: (query.page - 1) * ALERT_CENTER_PAGE_SIZE,
+        now: this.clock(),
       }) as AlertRowRaw[];
     const suppressing = this.suppressingSchedulers();
     return {
@@ -115,7 +118,9 @@ export class AlertCenterService implements OnModuleInit {
   summary(userId: number): AlertSummaryDto {
     const db = this.metaDb.sqlite;
     const unread = (
-      db.prepare(`SELECT COUNT(*) AS n FROM alerts a WHERE ${UNREAD}`).get({ userId }) as {
+      db
+        .prepare(`SELECT COUNT(*) AS n FROM alerts a WHERE ${UNREAD}`)
+        .get({ userId, now: this.clock() }) as {
         n: number;
       }
     ).n;

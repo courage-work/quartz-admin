@@ -20,6 +20,9 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { FormAlert } from '@/components/form/form-alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useMountTime } from '@/components/schedulers/mute-control';
+import { formatMuteUntil } from '@/lib/mute';
 import { TimeCell } from '@/components/schedulers/time-cell';
 import { SeverityBadge } from '@/components/status/status-badge';
 import { TableEmpty } from '@/components/table-empty';
@@ -366,10 +369,13 @@ export function AlertsTab({
   schedulerId,
   refreshMs,
   thresholds,
+  mutedUntil,
 }: {
   schedulerId: number;
   refreshMs: number;
   thresholds: SchedulerThresholds;
+  /** 알림 음소거가 끝나는 시각. 음소거 중이 아니면 null (FR-ALT-10) */
+  mutedUntil: number | null;
 }) {
   const alerts = useQuery({
     queryKey: schedulerAlertsKey(schedulerId),
@@ -377,8 +383,19 @@ export function AlertsTab({
       api<SchedulerAlertsResponse>(`/schedulers/${schedulerId}/alerts`, { signal }),
     refetchInterval: refreshMs || false,
   });
+  const now = useMountTime();
   return (
     <div className="flex flex-col gap-8">
+      {mutedUntil !== null ? (
+        <Alert>
+          <BellOffIcon aria-hidden />
+          <AlertTitle>{formatMuteUntil(mutedUntil, now)}까지 알림 음소거 중입니다</AlertTitle>
+          <AlertDescription>
+            알림 상태는 계속 기록하고 보내지 않습니다. 음소거가 끝난 뒤 열려 있는 알림을 보내고,
+            음소거 전에 보낸 알림이 그사이 해소되면 해소 알림을 보냅니다.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <Section
         title="열린 알림"
         description="클러스터 다운이나 감시 불가가 열려 있으면 실행 지연·BLOCKED·노드 이탈 알림은 기록만 하고 보내지 않습니다."

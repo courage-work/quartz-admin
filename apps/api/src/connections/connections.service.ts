@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { MUTE_MAX_MS } from '@qa/shared';
 import type {
   ConnectionDto,
   ConnectionTestResult,
@@ -81,6 +82,14 @@ export function toSchedulerDto(row: SchedulerRow): SchedulerDto {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/** 음소거 중이면 끝나는 시각, 아니면 null. 일찍 풀면 `muted_until`에 푼 시각이 남는다 */
+const muteInvalid = (message: string) =>
+  new ApiError(HttpStatus.BAD_REQUEST, 'VALIDATION_FAILED', message);
+
+export function activeMute(row: Pick<SchedulerRow, 'mutedUntil'>, now: number): number | null {
+  return row.mutedUntil !== null && row.mutedUntil > now ? row.mutedUntil : null;
 }
 
 export function connectionSummary(row: ConnectionRow): SchedulerConnectionSummary {
@@ -511,6 +520,7 @@ export class ConnectionsService {
       .orderBy(asc(connections.name), asc(schedulers.displayName))
       .all();
     const alertCounts = this.openAlertCounts();
+    const now = this.clock();
     const q = query.q?.toLowerCase();
     const items: SchedulerSummaryDto[] = rows
       .filter(({ scheduler, connection }) => {
@@ -532,9 +542,10 @@ export class ConnectionsService {
         connection: connectionSummary(connection),
         snapshot: snapshot ? toSnapshotDto(snapshot) : null,
         openAlertCount: alertCounts.get(scheduler.id) ?? 0,
+        mutedUntil: activeMute(scheduler, now),
       }));
     return {
-      generatedAt: this.clock(),
+      generatedAt: now,
       items,
       envs: [...new Set(rows.map((r) => r.connection.envLabel))].sort(),
       tags: [...new Set(rows.flatMap((r) => r.connection.tags))].sort(),
@@ -549,7 +560,54 @@ export class ConnectionsService {
       connection: connectionSummary(this.require(scheduler.connectionId)),
       snapshot: this.snapshot(id),
       openAlertCount: this.openAlertCounts(id).get(id) ?? 0,
+      mutedUntil: activeMute(scheduler, this.clock()),
     };
+  }
+
+  /**
+   * 알림 음소거 (FR-ALT-10, TRD §9.3). 끝나는 시각은 지금보다 뒤이고 `MUTE_MAX_MS`(7일) 안이어야 한다.
+   * 음소거 중에 미뤄 둔 해소 알림은 새 끝나는 시각으로 옮긴다
+   */
+  mute(id: number, until: number): SchedulerRow {
+    this.requireScheduler(id);
+    const now = this.clock();
+    if (until <= now) throw muteInvalid('음소거가 끝나는 시각은 지금보다 뒤여야 합니다');
+    if (until - now > MUTE_MAX_MS) throw muteInvalid('음소거는 7일까지 할 수 있습니다');
+    return this.metaDb.sqlite.transaction(() => {
+      this.moveDeferredNotifications(id, now, until);
+      return this.setMutedUntil(id, until, now);
+    })();
+  }
+
+  /** 음소거 해제. 끝나는 시각을 지금으로 바꿔 음소거가 끝났음을 남기고, 미뤄 둔 해소 알림을 바로 보낸다 */
+  unmute(id: number): SchedulerRow {
+    const row = this.requireScheduler(id);
+    const now = this.clock();
+    if (activeMute(row, now) === null) return row;
+    return this.metaDb.sqlite.transaction(() => {
+      this.moveDeferredNotifications(id, now, now);
+      return this.setMutedUntil(id, now, now);
+    })();
+  }
+
+  private setMutedUntil(id: number, mutedUntil: number, now: number): SchedulerRow {
+    return this.metaDb.db
+      .update(schedulers)
+      .set({ mutedUntil, updatedAt: now })
+      .where(eq(schedulers.id, id))
+      .returning()
+      .get();
+  }
+
+  /** 아직 보낼 시각이 안 된(음소거로 미룬) 첫 시도 전 발송을 `at`으로 옮긴다. 재시도 대기 중인 발송은 그대로 둔다 */
+  private moveDeferredNotifications(schedulerId: number, now: number, at: number): void {
+    this.metaDb.sqlite
+      .prepare(
+        `UPDATE notifications SET next_attempt_at = @at, created_at = @at
+         WHERE status = 'pending' AND attempts = 0 AND created_at > @now
+           AND alert_id IN (SELECT id FROM alerts WHERE scheduler_id = @schedulerId)`,
+      )
+      .run({ schedulerId, now, at });
   }
 
   /** 감시 루프가 남긴 마지막 스냅샷 (TRD §8.4). 아직 감시하지 않았으면 null */

@@ -16,6 +16,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   'scheduler.register': '스케줄러 등록',
   'scheduler.update': '스케줄러 설정 변경',
   'scheduler.delete': '스케줄러 등록 해제',
+  'scheduler.mute': '알림 음소거',
+  'scheduler.unmute': '알림 음소거 해제',
   'trigger.pause': '트리거 일시정지',
   'trigger.resume': '트리거 재개',
   'job.pause': '잡 일시정지',

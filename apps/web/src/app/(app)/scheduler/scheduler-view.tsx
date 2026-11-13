@@ -10,6 +10,7 @@ import { AlertsTab } from '@/components/alerts/alerts-tab';
 import { PauseAllBadge, SchedulerControlMenu } from '@/components/commands/scheduler-control';
 import { FormAlert } from '@/components/form/form-alert';
 import { InlineLink } from '@/components/links';
+import { MuteBadge, MuteMenu } from '@/components/schedulers/mute-control';
 import { RefreshControls, useRefreshInterval } from '@/components/schedulers/refresh-controls';
 import { SchedulerStats } from '@/components/schedulers/scheduler-stats';
 import { PageHeader } from '@/components/shell/page-header';
@@ -149,6 +150,7 @@ export function SchedulerView() {
                 <Badge variant="neutral">감시 전</Badge>
               )}
               <PauseAllBadge schedulerId={id} refreshMs={refreshMs} enabled={!unreachable} />
+              <MuteBadge mutedUntil={s.mutedUntil} />
             </span>
             <Summary s={s} />
           </span>
@@ -166,6 +168,7 @@ export function SchedulerView() {
               schedulerId={id}
               blockedReason={controlBlockedReason(s.connection)}
             />
+            <MuteMenu schedulerId={id} mutedUntil={s.mutedUntil} />
             {/* 설정은 접속 상세의 줄 메뉴에도 있다. 여기서 들어가면 저장·취소 뒤 이 화면으로 돌아온다 */}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -241,7 +244,12 @@ export function SchedulerView() {
           />
         </TabsContent>
         <TabsContent value="alerts">
-          <AlertsTab schedulerId={id} refreshMs={refreshMs} thresholds={s} />
+          <AlertsTab
+            schedulerId={id}
+            refreshMs={refreshMs}
+            thresholds={s}
+            mutedUntil={s.mutedUntil}
+          />
         </TabsContent>
       </Tabs>
     </>

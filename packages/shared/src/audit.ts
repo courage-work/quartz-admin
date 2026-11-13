@@ -23,6 +23,8 @@ export const AUDIT_ACTIONS = [
   'scheduler.register',
   'scheduler.update',
   'scheduler.delete',
+  'scheduler.mute',
+  'scheduler.unmute',
   'trigger.pause',
   'trigger.resume',
   'job.pause',

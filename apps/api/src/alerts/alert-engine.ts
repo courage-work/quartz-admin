@@ -49,12 +49,46 @@ const isSuppressing = (t: AlertRuleType) =>
   (SUPPRESSING_RULE_TYPES as readonly string[]).includes(t);
 const isSuppressed = (t: AlertRuleType) => (SUPPRESSED_RULE_TYPES as readonly string[]).includes(t);
 
+/** 음소거를 반영한 단계. 미룬 해소 알림은 `deliverAt`에 보낸다 */
+type MutedStep = AlertStep & { deliverAt?: number };
+
+/**
+ * 음소거(FR-ALT-10)를 단계에 반영한다. 판정(`stepAlert`)은 음소거 중을 억제와 같게 다루므로 여기서는 억제와 다른 두 가지만 더한다.
+ * - 음소거 전에 보낸 알림이 음소거 중에 해소되면, 받는 사람이 해소를 알도록 음소거가 끝나는 시각에 해소 알림을 보낸다
+ * - 음소거가 끝난 뒤 처음 보는 회차에, 음소거 전에 보낸 채 열려 있는 알림(확인하지 않은 것)은 재알림 간격과 관계없이
+ *   `reminder`(계속됨)를 한 번 보낸다. 음소거 중에 열린 알림은 `stepAlert`가 `fire`를 보낸다
+ */
+export function afterMute(
+  step: AlertStep,
+  existing: Pick<AlertRow, 'status' | 'lastNotifiedAt'> | null,
+  opts: { now: number; mutedUntil: number | null },
+): MutedStep {
+  const { now, mutedUntil } = opts;
+  if (mutedUntil === null || !existing || existing.lastNotifiedAt === null) return step;
+  if (mutedUntil > now) {
+    // 음소거 중. 억제로 판정돼 notify가 비어 있다
+    return step.action === 'resolve' ? { ...step, notify: 'resolve', deliverAt: mutedUntil } : step;
+  }
+  if (
+    step.action === 'refresh' &&
+    step.notify === null &&
+    existing.status === 'open' &&
+    existing.lastNotifiedAt < mutedUntil
+  ) {
+    return { ...step, notify: 'reminder' };
+  }
+  return step;
+}
+
 /**
  * 알림 규칙 엔진 (TRD §9.2, §9.3, B-24). 감시 1회의 SQLite 트랜잭션 안에서(`MonitorHooks`) 규칙을 판정하고
  * 알림 상태와 `trigger_observations`를 갱신한 뒤, 발송할 일을 `notifications`(outbox)에 넣는다. 발송은 B-25의 워커가 한다.
  *
  * - 억제(FR-ALT-09): `CLUSTER_DOWN`·`MONITOR_UNREACHABLE`을 먼저 판정하고, 그 알림이 열려 있으면 같은 스케줄러의
  *   `OVERDUE`·`BLOCKED_LONG`·`NODE_MISSING`은 상태만 기록한다. 억제가 풀린 뒤에도 열려 있으면 그때 `fire`를 보낸다
+ * - 음소거(FR-ALT-10, B-26): `muted_until`이 지나지 않았으면 모든 규칙을 억제한 것처럼 상태만 기록한다.
+ *   음소거 전에 보낸 알림이 음소거 중에 해소되면 해소 알림을 음소거가 끝나는 시각으로 미뤄 넣는다.
+ *   음소거가 끝난 뒤 첫 회차에는 음소거 중에 열린 알림에 `fire`를, 음소거 전에 보낸 채 열려 있는 알림에 `reminder`를 보낸다
  * - 감시가 실패한 회차에는 `MONITOR_UNREACHABLE`만 판정하고 나머지 알림은 그대로 둔다
  * - 지우거나 끈 규칙, 타입이 바뀐 규칙의 열린 알림은 발송 없이 해소한다
  */
@@ -129,17 +163,23 @@ export class AlertEngine implements MonitorHook, OnModuleInit {
       blockedSince,
       recentlyResumed,
     };
+    const mutedUntil = scheduler.mutedUntil;
+    const muted = mutedUntil !== null && mutedUntil > now;
     const run = (rule: RuleRow, suppressed: boolean): boolean => {
       const existing = openByRule.get(rule.id) ?? null;
-      const step = stepAlert(
-        existing && {
-          // 열린 알림만 골랐으므로 resolved가 아니다
-          status: existing.status === 'acked' ? 'acked' : 'open',
-          affected: existing.affected ?? null,
-          lastNotifiedAt: existing.lastNotifiedAt,
-        },
-        evaluateRule(rule, input),
-        { now, renotifyMinutes: rule.renotifyMinutes, suppressed },
+      const step = afterMute(
+        stepAlert(
+          existing && {
+            // 열린 알림만 골랐으므로 resolved가 아니다
+            status: existing.status === 'acked' ? 'acked' : 'open',
+            affected: existing.affected ?? null,
+            lastNotifiedAt: existing.lastNotifiedAt,
+          },
+          evaluateRule(rule, input),
+          { now, renotifyMinutes: rule.renotifyMinutes, suppressed: suppressed || muted },
+        ),
+        existing,
+        { now, mutedUntil },
       );
       return this.apply(tx, scheduler.id, rule, existing, step, now);
     };
@@ -236,7 +276,7 @@ export class AlertEngine implements MonitorHook, OnModuleInit {
     schedulerId: number,
     rule: RuleRow,
     existing: AlertRow | null,
-    step: AlertStep,
+    step: MutedStep,
     now: number,
   ): boolean {
     switch (step.action) {
@@ -275,28 +315,34 @@ export class AlertEngine implements MonitorHook, OnModuleInit {
         if (step.notify) this.enqueue(tx, rule.id, existing!.id, step.notify, now);
         return true;
       }
-      case 'resolve':
-        // 해소 알림도 발송이다. 알림 센터가 읽지 않은 알림으로 센다
+      case 'resolve': {
+        // 해소 알림도 발송이다. 알림 센터가 읽지 않은 알림으로 센다.
+        // 음소거 중이면 음소거가 끝나는 시각에 보낸다(`deliverAt`)
+        const at = step.deliverAt ?? now;
         tx.update(alerts)
           .set({
             status: 'resolved',
             resolvedAt: now,
-            ...(step.notify ? { lastNotifiedAt: now } : {}),
+            ...(step.notify ? { lastNotifiedAt: at } : {}),
           })
           .where(eq(alerts.id, existing!.id))
           .run();
-        if (step.notify) this.enqueue(tx, rule.id, existing!.id, step.notify, now);
+        if (step.notify) this.enqueue(tx, rule.id, existing!.id, step.notify, at);
         return false;
+      }
     }
   }
 
-  /** 규칙에 연결된 켜진 채널마다 발송 큐에 넣는다 (TRD §9.4) */
+  /**
+   * 규칙에 연결된 켜진 채널마다 발송 큐에 넣는다 (TRD §9.4). `at`은 보낼 시각이다. 음소거 중에 미룬 해소 알림은
+   * 음소거가 끝나는 시각이고, 넣은 시각(`created_at`)도 그 시각으로 둬 그때까지 읽지 않은 알림으로 세지 않는다
+   */
   private enqueue(
     tx: MonitorTx,
     ruleId: number,
     alertId: number,
     event: NotificationEvent,
-    now: number,
+    at: number,
   ): void {
     const targets = tx
       .select({ id: channels.id })
@@ -306,7 +352,7 @@ export class AlertEngine implements MonitorHook, OnModuleInit {
       .all();
     for (const c of targets) {
       tx.insert(notifications)
-        .values({ alertId, channelId: c.id, event, nextAttemptAt: now, createdAt: now })
+        .values({ alertId, channelId: c.id, event, nextAttemptAt: at, createdAt: at })
         .run();
     }
   }
