@@ -36,3 +36,8 @@ perf-results/
 # 사내 Oracle 점검 대상(비밀번호 포함)과 결과 (packages/store check:oracle)
 .check-target.json
 check-results/
+
+# E2E (e2e): 실행 중 상태, 보고서, 실패 추적
+e2e/.run/
+e2e/playwright-report/
+e2e/test-results/

@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.35 (B-26 알림 음소거) |
+| 문서 버전 | v0.36 (B-33 E2E 테스트) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -49,6 +49,7 @@
 | v0.33 | 2026-11-12 | B-22: §7.1에 일괄 제어 API(`/commands/batch/preview`, `/commands/batch`)와 규칙 추가. 항목마다 단건 절차로 따로 실행·기록하고, 한 항목이 실패해도 다음 항목을 실행하며, 연결할 수 없는 등 계속할 수 없는 오류면 남은 항목을 건너뜀 |
 | v0.34 | 2026-11-13 | B-23: §7.1 명령 형식에 `pauseAll`·`resumeAll`, 스케줄러 전체 규칙(트리거 수 상한 `TOO_MANY_TARGETS`, 트리거가 없는 그룹 행이 남는다는 경고 `PAUSED_GROUPS_KEPT`, 스케줄러 이름 입력 확인), 감사 작업 종류 `scheduler.pause`·`scheduler.resume`. §4.5 제어 명령 경로의 본문 상한 1MB(트리거 10,000개의 기대 상태가 약 680KB라 기본 100KB로는 413). §9.2 연체 판정의 재개 제외에 `scheduler.resume` |
 | v0.35 | 2026-11-13 | B-26: §9.3 음소거 구현(음소거 중에는 억제처럼 상태만 기록, 음소거 전에 보낸 알림의 해소는 끝나는 시각으로 미뤄 발송, 끝난 뒤 첫 회차에 열린 알림 `fire`·`reminder`, 일찍 풀면 미룬 발송을 바로). §5.7 음소거 API(`PUT`·`DELETE /schedulers/:id/mute`)와 감사 작업 종류 `scheduler.mute`·`scheduler.unmute`, 상세·대시보드의 `mutedUntil`. §9.4 인앱 읽지 않음은 넣은 시각이 지난 발송만 셈 |
+| v0.36 | 2026-11-13 | B-33: §12 E2E 표에 즉시 실행·브라우저 3종을 반영하고 §12.5 E2E(구성, 시나리오, 실행 방법, CI 잡) 추가 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -1036,7 +1037,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 | Quartz 동작 통합 | Testcontainers + quartz-testbed 2노드 | 제어 결과를 실제 발화 여부로 검증 | CI, 로컬 선택 실행 |
 | 차등 테스트 | quartz-testbed HTTP 제어 API | 같은 초기 상태에서 Quartz API와 도구로 각각 명령을 실행하고 결과 행을 비교(FR-CTL-00d) | CI |
 | API | Vitest + supertest | 인증, 권한, CSRF, 감사 로그 기록 | 로컬, CI |
-| E2E | Playwright | 로그인, 접속 등록, 일시정지/재개, 알림 확인 | CI(P1) |
+| E2E | Playwright(Chrome, Edge, Safari/WebKit) | 로그인, 접속 등록, 일시정지/재개, 즉시 실행, 알림 확인 (§12.5) | 로컬(`pnpm e2e`), CI |
 
 ### 12.1 quartz-testbed
 
@@ -1088,6 +1089,7 @@ S2에서 확인한 사항:
   - **범위**: PR은 각 DB의 최신 버전 × Quartz 2.5.2(Oracle Free 23, PostgreSQL 17, MySQL 8.4, MariaDB 11.4)만 돌고, main 머지는 16조합 전체를 돕니다. 수동 실행(`workflow_dispatch`)은 기본 전체이고 `scope=pr`이면 PR과 같습니다. `matrix` 잡이 이벤트에 맞는 조합을 골라 실행 요약에 적습니다. 조합을 바꿀 때는 이 JSON만 고칩니다(`"pr": true`가 PR 조합).
   - **이미지 캐시**: `testbed-image` 잡이 Quartz 버전마다 테스트베드 이미지를 한 번만 빌드하고(빌드 단계의 JUnit 포함) 아티팩트로 넘깁니다. 레이어는 GitHub Actions 캐시에 남겨, 테스트베드 소스가 그대로면 다음 실행에서 Maven 의존성과 빌드를 다시 하지 않습니다. DB 이미지는 잡마다 내려받습니다.
   - **실패 로그**: 통합 테스트는 `QA_IT_LOG_DIR`에 테스트베드 노드 로그를 노드마다 파일로 남기고, 실패한 조합만 `it-logs-<DB>-<버전>-quartz-<버전>` 아티팩트(14일 보관)로 올립니다. 잡 로그에는 테스트 결과만 남습니다.
+  - **E2E**(B-33): `e2e` 잡이 Quartz 2.5.2 테스트베드 이미지를 받아 PostgreSQL 17로 브라우저 3종 E2E를 돕니다(§12.5).
   - 잡 하나는 12~16분입니다. 16조합이 병렬로 돌아 main 전체도 20분 안팎입니다(공개 저장소라 표준 러너 비용 없음).
   - **Oracle XE 21**(`QA_IT_ORACLE_VERSION=21`): 서비스 이름이 `XEPDB1`이고 BOOLEAN 타입이 없어, Oracle 23 BOOLEAN 스키마를 만드는 부분(감지의 `native` 판정, 어댑터의 BOOLEAN 컬럼 조회, 스키마 변형 스모크)만 건너뜁니다. 잠금 대기 초과는 ORA-30006, 권한 부족은 ORA-01031로 오며 둘 다 이미 처리합니다.
 - **DB 중립 통합 테스트**(B-27): 같은 테스트 파일이 `QA_IT_DB`(`oracle` 기본, `postgres`, `mysql`(B-28), `mariadb`(B-29))로 고른 DB에서 돕니다. 테스트의 준비·검증 SQL은 `TestConnection`(oracledb `Connection`과 같은 모양)으로 실행하고, PostgreSQL에서는 `:1`·`:name` 바인드를 `$1`로(MySQL에서는 나온 순서대로 `?`로), `FOR UPDATE WAIT n`을 `FOR UPDATE`로 바꾸며 DDL은 Oracle처럼 바로 반영합니다. 테이블 이름은 따옴표 없는 대문자(`QRTZ_TRIGGERS`)로 써서 두 DB에서 같은 SQL이 돕니다. 스케줄러 컨텍스트는 `schedulerContext(db, schedName)`, 잠금 행이 풀렸는지는 `triggerAccessIsFree`로 봅니다. Oracle 전용(`oracle-store`, `detect`), PostgreSQL 전용(`postgres-store`, `detect-postgres`), MySQL 계열 전용(`mysql-store`, `detect-mysql`, MySQL과 MariaDB에서 돎) 스위트는 다른 DB에서 건너뜁니다. MySQL과 MariaDB에서 다르게 확인할 것(세션 변수 이름, `ed25519`)만 테스트 안에서 나눕니다.
@@ -1140,6 +1142,16 @@ PRD §7.2의 규모 가정(스케줄러 100개 × 트리거 10,000개, 동시 �
 - **원격 DB**: 로컬 측정이라 왕복 지연이 거의 0입니다. 대상 DB까지 왕복 10ms면 감시 1회에 약 70ms, 목록 조회에 약 20ms가 더해지며 목표에는 영향이 없습니다.
 - **합성 데이터의 한계**: 노드가 실제로 발화하지 않아 잠금 경합과 행 갱신이 없습니다. Quartz 테이블 한 벌에 100만 행은 실제보다 불리한 가정입니다(보통 스케줄러마다 DB나 스키마가 나뉨).
 - **접속 감지(목표 밖)**: 처음 측정에서 트리거 100만 개가 있는 스키마의 감지 1회가 MySQL 2.2초, MariaDB 5.2초였습니다(PostgreSQL·Oracle은 API 기준 약 0.6초). 스케줄러 등록도 다시 감지하므로 같은 시간이 한 번 더 듭니다. 테이블 전체를 읽는 쿼리 중 불리언 형식 `DISTINCT`(MariaDB 2.5초)와 스케줄러 이름 `UNION`(1.1초)을 없앴습니다(§5.5 4·5단계: 앞쪽 1,000행 표본, 개수 집계 결과에서 이름 수집). 바꾼 뒤 감지 1회(조회 계층, 3회 중앙값)는 Oracle 0.17초, PostgreSQL 0.14초, MySQL 0.51초, MariaDB 2.2초입니다. 남은 시간은 등록 화면에 보여 주는 잡·트리거 수(`SCHED_NAME`별 `COUNT(*)`)이며 MariaDB에서 2.1초입니다. 측정 결과에는 감지에서 느린 문장 상위 5개가 함께 남습니다.
+
+### 12.5 E2E (B-33, NFR-COMP-04)
+
+`e2e/`(`@qa/e2e`). Playwright로 빌드한 앱을 실제 Quartz 테스트베드에 붙여 운영자 흐름을 확인합니다.
+
+- **구성**: 전역 준비(`global-setup.ts`)가 테스트베드(`pnpm --filter @qa/store testbed:up`, DB는 `QA_IT_DB`)를 띄워 접속 정보가 나올 때까지 기다리고, 빌드한 앱(`apps/api/dist/main.js`)을 포트 3100(`E2E_PORT`), 임시 데이터 디렉터리, 실행할 때 만든 암호화 키·관리자 계정으로 띄웁니다. 이 값은 환경 변수로만 테스트에 넘기고 파일에 남기지 않습니다. 끝나면 앱과 테스트베드를 내립니다. 이미 띄운 테스트베드가 있으면 `E2E_TESTBED_INFO`에 그 접속 정보 파일을 주어 다시 씁니다. 앱·테스트베드 출력은 `e2e/.run/*.log`에 남습니다.
+- **브라우저**: Chrome(Playwright chromium), Edge(`msedge` 채널), Safari(WebKit) 세 프로젝트입니다. 같은 테스트베드 트리거를 제어하므로 워커 하나로 차례로 돌립니다.
+- **시나리오**(`tests/flows.spec.ts`, 브라우저마다 같은 페이지로 차례로): 로그인(틀린 비밀번호 거부 → 대시보드) → 접속 등록(DB 종류 선택, 연결 테스트, 저장, 자동 감지, 스케줄러 등록, 대시보드 카드) → 트리거 `every-10s` 일시정지·재개(줄 메뉴, 확인 대화상자, 알림, 상태 배지) → 잡 `every-minute` 즉시 실행(알림, 감사 로그) → 알림 확인(설정에서 기대 노드 수 3·감시 주기 15초로 바꿔 노드 이탈 알림을 열고 알림 센터에서 확인) → 정리(접속 삭제). 접속 이름은 브라우저와 재시도 번호를 붙여 겹치지 않게 합니다.
+- **실행**: `pnpm build` 뒤 `pnpm e2e`(Docker 필요). 브라우저는 `pnpm --filter @qa/e2e exec playwright install chromium webkit`로 받고, Edge는 설치된 것을 씁니다.
+- **CI**: `e2e` 잡이 테스트베드 이미지(Quartz 2.5.2)를 받아 PostgreSQL 17로 돌립니다. 브라우저는 `playwright install --with-deps chromium webkit msedge`로 설치하고, 실패하면 1번 다시 시도한 뒤 보고서·추적·로그를 올립니다.
 
 ## 13. PRD 변경 제안
 
