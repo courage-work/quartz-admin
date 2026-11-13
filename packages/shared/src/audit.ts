@@ -77,25 +77,38 @@ export const AUDIT_PAGE_SIZE_MAX = 200;
 const optionalInt = z.coerce.number().int().positive().optional();
 const optionalTime = z.coerce.number().int().nonnegative().optional();
 
-/** `GET /audit-logs` 쿼리. 시각은 epoch ms이고 `from`은 포함, `to`는 제외한다 */
+/** 감사 로그 필터. 시각은 epoch ms이고 `from`은 포함, `to`는 제외한다 (FR-AUD-03) */
+const auditFilterFields = {
+  from: optionalTime,
+  to: optionalTime,
+  userId: optionalInt,
+  username: z.string().trim().toLowerCase().min(1).max(64).optional(),
+  schedulerId: optionalInt,
+  action: z.enum(AUDIT_ACTIONS).optional(),
+  result: z.enum(AUDIT_RESULTS).optional(),
+};
+
+const validRange = (q: { from?: number; to?: number }) =>
+  q.from === undefined || q.to === undefined || q.from < q.to;
+const rangeError = { error: '시작 시각은 끝 시각보다 앞서야 합니다', path: ['to'] };
+
+/** `GET /audit-logs` 쿼리 */
 export const auditLogQuerySchema = z
   .object({
-    from: optionalTime,
-    to: optionalTime,
-    userId: optionalInt,
-    username: z.string().trim().toLowerCase().min(1).max(64).optional(),
-    schedulerId: optionalInt,
-    action: z.enum(AUDIT_ACTIONS).optional(),
-    result: z.enum(AUDIT_RESULTS).optional(),
+    ...auditFilterFields,
     /** 이전 응답의 `nextCursor`. 이 id보다 오래된 기록부터 돌려준다 */
     cursor: optionalInt,
     limit: z.coerce.number().int().min(1).max(AUDIT_PAGE_SIZE_MAX).default(AUDIT_PAGE_SIZE_DEFAULT),
   })
-  .refine((q) => q.from === undefined || q.to === undefined || q.from < q.to, {
-    error: '시작 시각은 끝 시각보다 앞서야 합니다',
-    path: ['to'],
-  });
+  .refine(validRange, rangeError);
 export type AuditLogQuery = z.infer<typeof auditLogQuerySchema>;
+
+/** `GET /audit-logs/export.csv` 쿼리 (FR-AUD-05). 목록과 같은 필터로 맞는 기록을 모두 내보낸다 */
+export const auditExportQuerySchema = z.object(auditFilterFields).refine(validRange, rangeError);
+export type AuditExportQuery = z.infer<typeof auditExportQuerySchema>;
+
+/** 감사 로그 필터(목록·내보내기 공통) */
+export type AuditFilter = AuditExportQuery;
 
 export interface AuditLogDto {
   id: number;
