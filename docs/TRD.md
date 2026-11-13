@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.37 (B-34 감사 로그 CSV 내보내기) |
+| 문서 버전 | v0.38 (B-36 운영 문서) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -51,6 +51,7 @@
 | v0.35 | 2026-11-13 | B-26: §9.3 음소거 구현(음소거 중에는 억제처럼 상태만 기록, 음소거 전에 보낸 알림의 해소는 끝나는 시각으로 미뤄 발송, 끝난 뒤 첫 회차에 열린 알림 `fire`·`reminder`, 일찍 풀면 미룬 발송을 바로). §5.7 음소거 API(`PUT`·`DELETE /schedulers/:id/mute`)와 감사 작업 종류 `scheduler.mute`·`scheduler.unmute`, 상세·대시보드의 `mutedUntil`. §9.4 인앱 읽지 않음은 넣은 시각이 지난 발송만 셈 |
 | v0.36 | 2026-11-13 | B-33: §12 E2E 표에 즉시 실행·브라우저 3종을 반영하고 §12.5 E2E(구성, 시나리오, 실행 방법, CI 잡) 추가 |
 | v0.37 | 2026-11-13 | B-34: §10 감사 로그 CSV 내보내기(`GET /audit-logs/export.csv`) 확정. 목록과 같은 필터, 1,000건씩 키셋으로 읽어 응답이 비워질 때까지 기다리며 쓰기, 열 구성, BOM, 수식 주입 방지, 메모리 측정(10만 건 68MB에서 살아 있는 힙 증가 2.5MB) |
+| v0.38 | 2026-11-13 | B-36(문서 1부): §11에 운영 런북(`docs/operations.md`)과 운영 CLI `reset-password` 연결, §5.5에 DB 계정 SQL(`docs/db-accounts/`)과 CI 검증 연결 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -445,6 +446,8 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
    | PAUSED_TRIGGER_GRPS | SELECT, INSERT, DELETE |
    | LOCKS | SELECT, INSERT, UPDATE |
    | FIRED_TRIGGERS, SCHEDULER_STATE, CALENDARS | SELECT |
+
+   이 표대로 읽기 전용·쓰기 계정을 만드는 SQL은 DB마다 `docs/db-accounts/*.sql`(안내 `docs/db-accounts.md`)에 있습니다. 통합 테스트 `db-accounts.test.ts`가 CI 매트릭스의 모든 DB 버전에서 이 파일을 그대로 실행해, 읽기 전용 계정은 쓰기 불가로, 쓰기 계정은 빠진 권한 없이 쓰기 가능으로 판정되는지 확인합니다(B-36).
 7. **기대 노드 수 초기값**: 감지 시점의 활성 노드 수를 `expected_node_count` 초기값으로 씁니다(§9.2). 클러스터가 내려가 있으면 0이 되며, 이때는 `NODE_MISSING` 대신 `CLUSTER_DOWN`이 잡힙니다. 등록 화면(B-13)에서 바꿀 수 있습니다.
 
 감지 결과(`QuartzDetection`)는 스키마, DB 현재 시각, 쓸 수 있는 테이블 세트 목록(`tableSets`: prefix, 실제 테이블 이름, 기능, 불리언 형식, 쓰기 가능 여부와 빠진 권한, SCHED_NAME 후보, 경고), 쓸 수 없는 prefix 목록(`unusable`)입니다. 화면은 테이블 세트 × SCHED_NAME을 스케줄러 후보로 보여주고, 운영자가 고른 것을 `schedulers` 행으로 저장합니다(B-13). `BOOL_FORMATS`는 `@qa/store`가 정의하고 메타 저장소 스키마가 가져다 씁니다.
@@ -994,6 +997,8 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 ## 11. 배포와 운영
 
+설치, 리버스 프록시, 배포 보안(나가는 연결 제한), 업그레이드, 백업·복원, 키 교체, 장애 대응 절차는 운영 런북 `docs/operations.md`에 있습니다(B-36). 이 절은 설계와 근거입니다.
+
 ### 11.1 컨테이너
 
 - 멀티 스테이지 빌드(`docker/Dockerfile`): `pnpm fetch`(잠금 파일만으로 의존성 레이어 캐시) → `pnpm install --offline` → `turbo run build --filter=@qa/api`(웹 export 후 API 빌드와 `public/` 복사) → `pnpm deploy --prod --legacy`로 운영 의존성과 `@qa/api`의 `files`(`dist`, `drizzle`, `public`)만 모아 `node:24-bookworm-slim` 실행 이미지로 옮깁니다. better-sqlite3 소스 빌드에 대비해 빌드 단계에만 `python3`, `make`, `g++`를 둡니다.
@@ -1024,6 +1029,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 - 빈 문자열은 지정하지 않은 것으로 봅니다. `QA_ADMIN_USERNAME`과 `QA_ADMIN_PASSWORD`는 함께 지정해야 하고, 화면에서 만드는 계정과 같은 아이디·비밀번호 규칙(§4.2)을 따릅니다. `QA_SMTP_*`를 하나라도 쓰면 `QA_SMTP_HOST`와 `QA_SMTP_FROM`이 필요합니다(포트 기본값 587).
 - `start`, `dev`, `cli` 스크립트는 `node --env-file-if-exists=.env`로 실행합니다. 로컬 개발에서는 `apps/api/.env`를 쓰고(`.env.example` 참고), 이미 설정된 환경변수가 우선합니다.
 - `cli backup`은 암호화 키 없이 `QA_DATA_DIR`만 읽습니다.
+- `cli reset-password --username <아이디>`(B-36): 관리자가 아무도 로그인할 수 없을 때 쓰는 복구 수단입니다. 서버를 멈춘 상태에서만 돕니다(인스턴스 락). 임시 비밀번호(base64url 24자)를 만들어 한 번 출력하고, 화면의 비밀번호 초기화와 같이 해시를 바꾸고 실패 횟수·잠금을 풀고 그 사용자의 세션을 모두 지웁니다. 감사 로그에 시스템 작업 `user.password_reset`(사유 `cli`)을 남깁니다. 암호화 키 없이 `QA_DATA_DIR`만 읽습니다.
 
 ### 11.3 로깅
 

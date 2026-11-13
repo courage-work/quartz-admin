@@ -4,12 +4,14 @@
 
 ## 문서
 
-| 문서                       | 내용                                                      |
-| -------------------------- | --------------------------------------------------------- |
-| [PRD](docs/PRD.md)         | 사용자, 범위, 기능·비기능 요구사항, 성공 지표             |
-| [TRD](docs/TRD.md)         | 아키텍처, 저장소 스키마, 제어·감시 설계, 테스트           |
-| [BACKLOG](docs/BACKLOG.md) | 마일스톤과 작업(B-xx), 진행 규칙, 요구사항 추적           |
-| [DESIGN](docs/DESIGN.md)   | 디자인 시스템: 테마, 토큰, 상태 표시, 컴포넌트, 린트 규칙 |
+| 문서                            | 내용                                                                 |
+| ------------------------------- | -------------------------------------------------------------------- |
+| [운영 런북](docs/operations.md) | 설치, 리버스 프록시, 배포 보안, 업그레이드, 백업·복원, 키, 장애 대응 |
+| [DB 계정](docs/db-accounts.md)  | 대상 DB 4종의 읽기 전용·쓰기 계정 만들기와 접속 등록                 |
+| [PRD](docs/PRD.md)              | 사용자, 범위, 기능·비기능 요구사항, 성공 지표                        |
+| [TRD](docs/TRD.md)              | 아키텍처, 저장소 스키마, 제어·감시 설계, 테스트                      |
+| [BACKLOG](docs/BACKLOG.md)      | 마일스톤과 작업(B-xx), 진행 규칙, 요구사항 추적                      |
+| [DESIGN](docs/DESIGN.md)        | 디자인 시스템: 테마, 토큰, 상태 표시, 컴포넌트, 린트 규칙            |
 
 ## 개발 환경
 
@@ -21,6 +23,7 @@ pnpm install
 pnpm build       # 전체 빌드 (turbo)
 pnpm test        # 단위 테스트
 pnpm test:integration  # 통합 테스트(Docker 필요, Oracle Free 23 + quartz-testbed)
+pnpm e2e        # E2E(Playwright, Chrome·Edge·WebKit). 먼저 pnpm build, Docker 필요
 pnpm --filter @qa/store testbed:up  # 손 확인용 Oracle + Quartz 2노드 클러스터(Docker 필요, 접속 정보: packages/store/.testbed.json)
 pnpm lint        # ESLint (타입 기반 규칙, 웹 화면은 @shadcn/lint 디자인 규칙 포함)
 pnpm typecheck   # TypeScript 검사
@@ -61,63 +64,33 @@ pnpm --filter @qa/api cli gen-key   # 출력값을 .env의 QA_ENCRYPTION_KEYS에
 
 Windows에 Visual Studio C++ 빌드 도구가 없으면 `pnpm install`이 better-sqlite3의 `node-gyp` 단계에서 실패합니다. better-sqlite3에는 Windows용 사전 빌드 바이너리가 들어 있으므로 `pnpm install --ignore-scripts`로 설치하면 됩니다.
 
-## Docker로 실행
+## 운영
 
-운영 배포는 Docker Compose 한 서비스입니다(NFR-OPS-01). 화면과 API를 한 포트(3000)에서 서빙하고, 메타데이터는 이름 있는 볼륨 `qa-data`(`/data`)에 남습니다.
+운영 배포는 Docker Compose 한 서비스입니다(NFR-OPS-01). 설치부터 업그레이드, 백업·복원, 키 교체, 관리자 비밀번호 되살리기, 장애 대응까지 [운영 런북](docs/operations.md)에 있고, 대상 DB 계정은 [DB 계정](docs/db-accounts.md)을 보세요.
 
 ```bash
 docker build -f docker/Dockerfile -t quartz-admin:local .
 docker run --rm quartz-admin:local node dist/cli.js gen-key   # 출력값을 QA_ENCRYPTION_KEYS에 넣는다
 cp docker/.env.example docker/.env                            # 값을 채운다
-docker compose -f docker/compose.yaml up -d
+docker compose -f docker/compose.yaml up -d --wait
 ```
 
-- 비루트 사용자(`node`)로 실행하고 루트 파일시스템은 읽기 전용입니다. 쓰기는 `/data`와 메모리 `/tmp`만 됩니다.
-- 헬스체크: `GET /healthz`(프로세스), `GET /readyz`(SQLite, 마이그레이션). 이미지의 `HEALTHCHECK`가 `/readyz`를 부릅니다.
-- 로그는 표준 출력에 JSON 한 줄씩 남습니다(`requestId`, `userId`, `durationMs` 포함, 비밀값은 `***`). `QA_LOG_LEVEL`로 레벨을 바꿉니다.
-- 운영 CLI는 실행 중인 컨테이너에서 씁니다: `docker compose -f docker/compose.yaml exec app node dist/cli.js backup`
-- `docker compose down -v`는 볼륨까지 지웁니다. 데이터를 남기려면 `-v` 없이 내립니다.
-- `bash docker/smoke.sh`는 이미지 빌드부터 재시작 후 데이터 유지까지 확인합니다(CI `container` 잡).
+`bash docker/smoke.sh`는 이미지 빌드부터 재시작 후 데이터 유지까지 확인합니다(CI `container` 잡).
 
-## 로그인과 사용자
+운영 CLI(`node dist/cli.js`, 개발 중에는 `pnpm --filter @qa/api cli`):
 
-- 처음 기동할 때 `users` 테이블이 비어 있으면 `QA_ADMIN_USERNAME`, `QA_ADMIN_PASSWORD`로 관리자를 만듭니다. 계정이 하나라도 있으면 이 값은 쓰지 않습니다.
-- 사용자 추가, 비활성화, 비밀번호 초기화는 관리자만 할 수 있습니다. 로그인 실패가 5번 이어지면 계정이 15분 동안 잠기고, 관리자가 비밀번호를 초기화하면 바로 풀립니다.
-- 세션은 30분 동안 요청이 없거나(`QA_SESSION_IDLE_MIN`) 로그인 후 12시간이 지나면 만료됩니다.
-- 상태를 바꾸는 API 요청에는 `Origin`(= `QA_PUBLIC_URL`)과 `X-QA-Request: 1` 헤더가 필요합니다. 직접 호출할 때는 두 헤더를 붙이세요.
+| 명령                                 | 하는 일                                                 |
+| ------------------------------------ | ------------------------------------------------------- |
+| `backup [--out <file>]`              | 메타데이터 저장소 온라인 백업                           |
+| `gen-key [--id <keyId>]`             | 새 암호화 키                                            |
+| `rotate-keys [--dry-run]`            | 기존 암호문을 활성 키로 재암호화(멈춘 상태에서)         |
+| `reset-password --username <아이디>` | 임시 비밀번호 발급, 잠금 해제, 세션 끊기(멈춘 상태에서) |
 
-## 감사 로그
-
-- 로그인 성공·실패, 로그아웃, 사용자 관리, 비밀번호 변경을 기록합니다. 이후 접속·스케줄러 변경과 제어 명령도 같은 곳에 남습니다. 비밀번호 같은 비밀값은 기록하기 전에 가립니다.
-- `GET /api/v1/audit-logs`로 조회합니다(기간, 사용자, 스케줄러, 작업 종류, 결과 필터). 수정하거나 지우는 API는 없습니다.
-- `QA_AUDIT_RETENTION_DAYS`(기본 365일)가 지난 기록은 매일 새벽 정리 작업이 지웁니다.
-- 모든 응답에 `X-Request-Id` 헤더가 붙습니다. 감사 기록의 `requestId`와 같은 값이라 문의할 때 함께 알려주면 추적할 수 있습니다.
-
-## 암호화 키 교체
-
-대상 DB 비밀번호와 알림 웹훅 URL은 `QA_ENCRYPTION_KEYS`의 키로 AES-256-GCM 암호화해 저장합니다.
-
-1. `pnpm --filter @qa/api cli gen-key --id k2`로 새 키를 만듭니다.
-2. `QA_ENCRYPTION_KEYS=k1:...,k2:...`, `QA_ENCRYPTION_ACTIVE_KEY=k2`로 바꿉니다.
-3. 도구를 멈추고 `pnpm --filter @qa/api cli rotate-keys`를 실행합니다(`--dry-run`으로 미리 확인 가능).
-4. 도구를 다시 시작해 확인한 뒤, k1을 키 목록에서 뺍니다.
-
-## 메타데이터 저장소 (SQLite)
-
-- 파일 위치는 `$QA_DATA_DIR/quartz-admin.db`입니다(기본 `/data`, 개발 서버는 `./data`). 기동할 때 마이그레이션을 자동 적용합니다.
-- 같은 데이터 디렉터리로 두 번째 인스턴스를 띄우면 기동을 거부합니다.
-- 매일 03시(로컬)에 `$QA_DATA_DIR/backups/`로 온라인 백업하고 최신 7개를 남깁니다.
+메타데이터 스키마를 바꾼 뒤에는 마이그레이션을 만들어 커밋합니다. 기동할 때 자동으로 적용됩니다.
 
 ```bash
-# 스키마 변경 후 마이그레이션 생성 (apps/api/drizzle/에 커밋)
-pnpm --filter @qa/api db:generate --name <변경-이름>
-
-# 수동 백업 (기본 위치 또는 --out 경로)
-QA_DATA_DIR=/data pnpm --filter @qa/api cli backup
-QA_DATA_DIR=/data pnpm --filter @qa/api cli backup --out /tmp/qa-backup.db
+pnpm --filter @qa/api db:generate --name <변경-이름>   # apps/api/drizzle/에 생성
 ```
-
-복원: 도구를 멈추고, 백업 파일을 `$QA_DATA_DIR/quartz-admin.db`로 복사한 뒤(남아 있는 `-wal`, `-shm` 파일은 삭제) 다시 기동합니다.
 
 ## 구조
 
