@@ -97,6 +97,8 @@ export interface SchedulerSummaryDto {
   /** 아직 한 번도 감시하지 않았으면 null */
   snapshot: SnapshotDto | null;
   openAlertCount: number;
+  /** 알림 음소거가 끝나는 시각. 음소거 중이 아니면 null (FR-ALT-10) */
+  mutedUntil: number | null;
 }
 
 export interface DashboardResponse {

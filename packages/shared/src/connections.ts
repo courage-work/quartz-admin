@@ -337,6 +337,22 @@ export interface SchedulerDetailDto extends SchedulerDto {
   connection: SchedulerConnectionSummary;
   snapshot: SnapshotDto | null;
   openAlertCount: number;
+  /** 알림 음소거가 끝나는 시각(epoch ms). 음소거 중이 아니면 null (FR-ALT-10) */
+  mutedUntil: number | null;
+}
+
+/** 알림 음소거의 최대 기간. 점검 시간용이라 길게 두지 않는다 (FR-ALT-10) */
+export const MUTE_MAX_MS = 7 * 86_400_000;
+
+/** `PUT /schedulers/:id/mute`. `until`은 음소거가 끝나는 시각(epoch ms)으로, 지금보다 뒤이고 7일 안이어야 한다 */
+export const schedulerMuteSchema = z.object({
+  until: z.number({ error: '음소거가 끝나는 시각이 필요합니다' }).int().positive(),
+});
+export type SchedulerMuteInput = z.infer<typeof schedulerMuteSchema>;
+
+/** 음소거 API 응답 */
+export interface SchedulerMuteDto {
+  mutedUntil: number | null;
 }
 
 /** 삭제 영향 미리보기 (FR-CON-05) */

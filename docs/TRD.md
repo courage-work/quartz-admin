@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.34 (B-23 스케줄러 전체 일시정지/재개) |
+| 문서 버전 | v0.35 (B-26 알림 음소거) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -48,6 +48,7 @@
 | v0.32 | 2026-11-12 | B-35 준비: §5.1에 사내 Oracle 점검 도구(`check:oracle`)와 점검 안내(`docs/oracle-legacy-check.md`) 연결 |
 | v0.33 | 2026-11-12 | B-22: §7.1에 일괄 제어 API(`/commands/batch/preview`, `/commands/batch`)와 규칙 추가. 항목마다 단건 절차로 따로 실행·기록하고, 한 항목이 실패해도 다음 항목을 실행하며, 연결할 수 없는 등 계속할 수 없는 오류면 남은 항목을 건너뜀 |
 | v0.34 | 2026-11-13 | B-23: §7.1 명령 형식에 `pauseAll`·`resumeAll`, 스케줄러 전체 규칙(트리거 수 상한 `TOO_MANY_TARGETS`, 트리거가 없는 그룹 행이 남는다는 경고 `PAUSED_GROUPS_KEPT`, 스케줄러 이름 입력 확인), 감사 작업 종류 `scheduler.pause`·`scheduler.resume`. §4.5 제어 명령 경로의 본문 상한 1MB(트리거 10,000개의 기대 상태가 약 680KB라 기본 100KB로는 413). §9.2 연체 판정의 재개 제외에 `scheduler.resume` |
+| v0.35 | 2026-11-13 | B-26: §9.3 음소거 구현(음소거 중에는 억제처럼 상태만 기록, 음소거 전에 보낸 알림의 해소는 끝나는 시각으로 미뤄 발송, 끝난 뒤 첫 회차에 열린 알림 `fire`·`reminder`, 일찍 풀면 미룬 발송을 바로). §5.7 음소거 API(`PUT`·`DELETE /schedulers/:id/mute`)와 감사 작업 종류 `scheduler.mute`·`scheduler.unmute`, 상세·대시보드의 `mutedUntil`. §9.4 인앱 읽지 않음은 넣은 시각이 지난 발송만 셈 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -482,6 +483,8 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 | GET | `/schedulers/:id` | 스케줄러 하나(설정과 감지 정보). 조회 화면용 필드는 B-14·B-16에서 늘린다 |
 | GET | `/schedulers/:id/snapshot` | 감시 루프의 마지막 스냅샷(§8.4). 대상 DB를 조회하지 않는다. 아직 감시하지 않았으면 `snapshot: null` |
 | PUT | `/schedulers/:id/settings` | 감시 설정(FR-CON-07) |
+| PUT | `/schedulers/:id/mute` | 알림 음소거(FR-ALT-10, B-26). `{ until }`(끝나는 시각, epoch ms)은 지금보다 뒤이고 7일(`MUTE_MAX_MS`) 안이어야 하며 아니면 400. `{ mutedUntil }`을 돌려준다 |
+| DELETE | `/schedulers/:id/mute` | 음소거 해제. 음소거 중이 아니면 바꾸지 않는다 |
 | GET | `/schedulers/:id/delete-impact` | 등록 해제 영향 |
 | DELETE | `/schedulers/:id` | 등록 해제. 대상 DB의 Quartz 데이터는 건드리지 않는다 |
 | GET | `/schedulers/:id/alert-rules` | 알림 규칙 목록(FR-ALT-06). 연결된 채널 id 포함 |
@@ -507,7 +510,7 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 - **감지와 재감지**: 결과를 그대로 돌려주면서, 이미 등록된 스케줄러(같은 prefix와 SCHED_NAME)는 테이블 이름·기능·불리언 형식·`detected_at`을 새 결과로 갱신합니다(`refreshedSchedulerIds`). 등록돼 있지만 찾지 못한 스케줄러는 `missingSchedulerIds`로 알리고 지우지 않습니다. 접속의 `write_capable`은 테이블 세트가 하나 이상이고 모두 쓰기 가능하면 true, 세트가 없으면 null입니다.
 - **등록**: 화면이 보낸 테이블 이름을 믿지 않고 서버가 다시 감지해 카탈로그로 확인한 이름만 저장합니다(NFR-SEC-02). 고른 후보가 결과에 없으면 409 `SCHEDULER_NOT_DETECTED`, 이미 등록됐으면 409 `SCHEDULER_ALREADY_REGISTERED`이며 한 요청의 등록은 모두 성공하거나 모두 실패합니다. 감지한 스키마(`table_schema`)도 함께 저장해 조회 SQL이 `"스키마"."테이블"`로 씁니다(재감지 때도 갱신). 기대 노드 수는 감지한 활성 노드 수, 표시 이름 기본값은 SCHED_NAME(같은 이름이 여러 prefix에 있으면 `이름 (prefix)`)입니다. 기본 알림 규칙 생성(§9.2)은 B-24에서 붙입니다.
 - **감시 설정 범위**: misfire 임계값과 연체 유예 1초~1시간(유예 ≥ 임계값, §9.2), 체크인 배수 2~20, 기대 노드 수 0~100, 감시 주기 15~3600초.
-- **감사 기록**: `connection.create/update/delete`는 접속 값(비밀번호 제외)을 before/after로, 수정은 `passwordChanged`를 남깁니다. `connection.detect`는 세트별 prefix·쓰기 가능 여부·후보 이름과 갱신·누락 ID를, `scheduler.register`는 등록한 스케줄러 목록을, `scheduler.update`는 설정 전후를 남깁니다. 대상 DB 오류로 실패하면 `error_code`에 `TARGET_*` 코드가 남습니다.
+- **감사 기록**: `connection.create/update/delete`는 접속 값(비밀번호 제외)을 before/after로, 수정은 `passwordChanged`를 남깁니다. `connection.detect`는 세트별 prefix·쓰기 가능 여부·후보 이름과 갱신·누락 ID를, `scheduler.register`는 등록한 스케줄러 목록을, `scheduler.update`는 설정 전후를, `scheduler.mute`·`scheduler.unmute`는 음소거가 끝나는 시각 전후(`mutedUntil`)를 남깁니다. 스케줄러 상세(`GET /schedulers/:id`)와 대시보드 항목의 `mutedUntil`은 음소거 중일 때만 끝나는 시각이고 아니면 null입니다. 대상 DB 오류로 실패하면 `error_code`에 `TARGET_*` 코드가 남습니다.
 - **화면**(`apps/web`): 목록 `/connections`, 추가 `/connections/new`, 상세 `/connection?id=`(정보, 등록한 스케줄러, 감지·등록 패널), 수정 `/connection/edit?id=`. 새 접속을 저장하면 상세 화면으로 가서 바로 감지합니다(`&detect=1`). 삭제와 등록 해제는 영향 범위를 보여 준 뒤 확인합니다.
 
 ## 6. Quartz 로직 이식 (`@qa/core`)
@@ -919,7 +922,12 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
 
 - **억제**: `CLUSTER_DOWN`이나 `MONITOR_UNREACHABLE`이 열려 있으면, 같은 스케줄러의 `OVERDUE`, `BLOCKED_LONG`, `NODE_MISSING`은 평가는 하되 발송하지 않습니다(FR-ALT-09).
 - **요약**: 한 회차에 같은 채널로 나갈 발송이 5건을 넘으면 요약 메시지 하나로 묶습니다.
-- **음소거**(P1): `muted_until`이 지나지 않았으면 알림 상태는 기록하되 발송하지 않습니다.
+- **음소거**(P1, B-26): `muted_until`이 지나지 않았으면 알림 상태는 기록하되 발송하지 않습니다.
+  - 음소거 중에는 모든 규칙(클러스터 다운·감시 불가 포함)을 억제와 같게 판정합니다. 열림·대상·해소는 기록하고 `fire`·`update`·`reminder`는 보내지 않습니다. 음소거 중에 열렸다가 음소거 중에 해소된 알림은 보내지 않습니다(점검 중 소음).
+  - 음소거 전에 보낸 알림이 음소거 중에 해소되면, 받는 사람이 해소를 알도록 해소 알림을 큐에 넣되 보낼 시각과 넣은 시각을 음소거가 끝나는 시각으로 둡니다. 인앱 읽지 않음도 그때부터 셉니다(§9.4).
+  - 음소거가 끝난 뒤 첫 회차: 음소거 중에 열려 아직 열린 알림은 억제가 풀릴 때처럼 `fire`를 보냅니다. 음소거 전에 보내고 아직 열린 알림(확인하지 않은 것)은 재알림 간격과 관계없이 `reminder`(계속됨)를 한 번 보냅니다(마지막 발송 시각이 음소거가 끝난 시각보다 앞인 것). 음소거 중에 대상이 늘어난 것은 따로 `update`로 보내지 않습니다.
+  - 음소거를 일찍 풀면 `muted_until`을 지금 시각으로 바꿔(비우지 않음) 음소거가 끝났음을 남기고, 미뤄 둔 첫 시도 전 발송을 지금으로 당깁니다. 음소거를 늘리면 미뤄 둔 발송을 새 끝나는 시각으로 옮깁니다. 재시도 대기 중인 발송은 건드리지 않습니다.
+  - 화면: 스케줄러 머리글의 음소거 아이콘 버튼 메뉴(30분·1시간·2시간·4시간, 끝나는 시각 지정, 해제), 머리글·대시보드 카드의 음소거 배지, 알림 탭 위 안내.
 - **재시작**: 알림 상태와 `trigger_observations`는 SQLite에 있으므로 재시작해도 그대로 이어집니다.
 - **구현** (B-24, `apps/api/src/alerts/`): `AlertEngine`이 감시 루프의 확장 지점(`MonitorHooks`)에 붙어, 스냅샷을 저장한 같은 SQLite 트랜잭션 안에서 판정·알림 갱신·발송 큐 적재를 합니다. 발송(큐 워커, 채널, 요약)은 B-25입니다.
   - 지문은 규칙 타입입니다(규칙 단위). 알림 시각(`first_seen_at`, `last_seen_at`, `last_notified_at`)은 도구 서버 시각입니다.
@@ -948,7 +956,7 @@ Quartz `triggerJob(jobKey)`과 같은 일회성 트리거를 INSERT합니다. �
   - **발송 오류 문구**: 큐의 `last_error`와 화면에 그대로 보이므로 웹훅 URL을 넣지 않습니다. Slack은 상태 코드와 응답 본문 앞 100자, SMTP는 서버 응답이나 오류 코드입니다.
   - **채널 설정 저장**: `config_enc`에 Slack은 `{ webhookUrl }`, 이메일은 `{ recipients }`, 인앱은 `{}`를 암호화해 둡니다(AAD `channels:<id>`). 감사 기록에는 가린 웹훅 URL만 남깁니다. 인앱 채널은 기동할 때 없으면 만듭니다.
   - **SMTP 미설정**: 이메일 채널은 만들 수 있지만 보내면 "SMTP를 설정하지 않았습니다"로 실패합니다. 화면은 채널 목록과 폼에서 미리 알립니다.
-  - **읽지 않음**: 사용자마다 셉니다. 인앱 채널로 들어간 발송 중 그 사용자가 마지막으로 읽은 뒤의 것이 있으면 읽지 않은 알림입니다. 억제돼 한 번도 보내지 않은 알림, 인앱 채널을 고르지 않은 규칙의 알림은 세지 않습니다. 대상이 늘거나(`update`) 해소되면 다시 읽지 않음이 됩니다.
+  - **읽지 않음**: 사용자마다 셉니다. 인앱 채널로 들어간 발송 중 넣은 시각이 지났고 그 사용자가 마지막으로 읽은 뒤의 것이 있으면 읽지 않은 알림입니다(음소거로 미룬 발송은 넣은 시각이 음소거가 끝나는 시각, B-26). 억제돼 한 번도 보내지 않은 알림, 인앱 채널을 고르지 않은 규칙의 알림은 세지 않습니다. 대상이 늘거나(`update`) 해소되면 다시 읽지 않음이 됩니다.
   - **확인(ack)**: `open` → `acked`, 확인한 사람과 시각을 남기고 읽음으로도 둡니다. 재알림만 멈추고 갱신·해소 발송은 그대로입니다(§9.3). 감사 기록(`alert.ack`)을 남깁니다.
   - **발송 실패 표시**: 끝내 `failed`가 된 발송은 최근 7일 것을 알림 센터 위에 경고로 보여 주고, 상단 바 알림 버튼에 점을 붙입니다.
   - **규칙의 채널**(`channelIds`): 추가에서 빼면 인앱 채널, 수정에서 빼면 지금 연결을 그대로 둡니다. 빈 목록이면 알림 상태만 기록합니다. 없는 채널은 400입니다.

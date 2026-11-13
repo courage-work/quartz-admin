@@ -11,6 +11,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import {
   ChevronRightIcon,
+  BellOffIcon,
   ClockAlertIcon,
   DatabaseIcon,
   LayoutDashboardIcon,
@@ -52,6 +53,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
+import { formatMuteUntil } from '@/lib/mute';
 import { DASHBOARD_KEY, formatAgo } from '@/lib/schedulers';
 import { setParam, type UrlCodec, useUrlState } from '@/lib/use-url-state';
 
@@ -125,6 +127,12 @@ function SchedulerCard({ item, now }: { item: SchedulerSummaryDto; now: number }
           <span className="flex flex-wrap items-center gap-2">
             <EnvBadge environment={item.connection.envLabel} />
             <span>{item.connection.name}</span>
+            {item.mutedUntil !== null ? (
+              <Badge variant="neutral">
+                <BellOffIcon aria-hidden />
+                음소거 ~ {formatMuteUntil(item.mutedUntil, now)}
+              </Badge>
+            ) : null}
             {item.schedName !== item.displayName ? (
               <span className="font-mono text-xs">{item.schedName}</span>
             ) : null}

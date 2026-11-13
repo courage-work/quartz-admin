@@ -1,4 +1,11 @@
-import type { AlertRuleDto, AuditLogPage } from '@qa/shared';
+import type {
+  AlertRuleDto,
+  AlertSummaryDto,
+  AuditLogPage,
+  DashboardResponse,
+  SchedulerDetailDto,
+  SchedulerMuteDto,
+} from '@qa/shared';
 import { TargetError } from '@qa/store';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TestApp } from '../auth/test-support.js';
@@ -238,6 +245,173 @@ describe('알림 엔진 (TRD §9.3)', () => {
     app.clock.advance(2 * MIN + 1);
     await poll(s.id);
     expect((await alerts(s.id)).open.map((a) => a.type)).toEqual(['OVERDUE']);
+  });
+});
+
+describe('알림 음소거 (FR-ALT-10)', () => {
+  const mute = async (a: Awaited<ReturnType<typeof start>>, id: number, until: number) =>
+    (await a.app.send('put', `/schedulers/${id}/mute`, { until }, await a.session()).expect(200))
+      .body as SchedulerMuteDto;
+  const unmute = async (a: Awaited<ReturnType<typeof start>>, id: number) =>
+    (await a.app.send('delete', `/schedulers/${id}/mute`, {}, await a.session()).expect(200))
+      .body as SchedulerMuteDto;
+  const unread = async (a: Awaited<ReturnType<typeof start>>) =>
+    ((await a.app.get('/alerts/summary', await a.session()).expect(200)).body as AlertSummaryDto)
+      .unread;
+
+  it('음소거 중에는 상태만 기록하고, 끝난 뒤 첫 회차에 열려 있는 알림을 보낸다', async () => {
+    const fake = new FakeTarget();
+    const a = await start(fake);
+    const s = await addScheduler(a.app, a.cookie);
+    await a.poll(s.id);
+    const until = a.app.clock.now + 30 * MIN;
+    expect(await mute(a, s.id, until)).toEqual({ mutedUntil: until });
+
+    fake.errors = [{ group: 'g', name: 'bad' }];
+    await a.poll(s.id);
+    expect((await a.alerts(s.id)).open[0]).toMatchObject({
+      type: 'TRIGGER_ERROR',
+      status: 'open',
+      notified: false,
+    });
+    expect(a.events()).toEqual([]);
+
+    // 음소거 중에 열렸다가 음소거 중에 해소된 알림은 보내지 않는다
+    fake.errors = [];
+    a.app.clock.advance(5 * MIN);
+    await a.poll(s.id);
+    expect((await a.alerts(s.id)).open).toEqual([]);
+    expect(a.events()).toEqual([]);
+
+    // 다시 열린 알림이 음소거가 끝날 때까지 열려 있으면 끝난 뒤 첫 회차에 보낸다
+    fake.errors = [{ group: 'g', name: 'again' }];
+    a.app.clock.advance(5 * MIN);
+    await a.poll(s.id);
+    expect(a.events()).toEqual([]);
+    a.app.clock.advance(21 * MIN);
+    await a.poll(s.id);
+    expect(a.events()).toEqual(['TRIGGER_ERROR:fire']);
+    expect((await a.alerts(s.id)).open[0]).toMatchObject({ notified: true });
+  });
+
+  it('음소거 전에 보낸 알림은 끝난 뒤 재알림 간격과 관계없이 계속됨을 한 번 보낸다', async () => {
+    const fake = new FakeTarget();
+    const a = await start(fake);
+    const s = await addScheduler(a.app, a.cookie);
+    fake.errors = [{ group: 'g', name: 'bad' }];
+    await a.poll(s.id);
+    expect(a.events()).toEqual(['TRIGGER_ERROR:fire']);
+
+    await mute(a, s.id, a.app.clock.now + 10 * MIN);
+    // 대상이 늘어도 음소거 중에는 보내지 않는다
+    fake.errors.push({ group: 'g', name: 'worse' });
+    await a.poll(s.id);
+    expect(a.events()).toEqual(['TRIGGER_ERROR:fire']);
+
+    // 재알림 간격(60분)은 아직이지만 음소거가 끝났으므로 계속됨을 보낸다. 다음 회차에는 다시 보내지 않는다
+    a.app.clock.advance(11 * MIN);
+    await a.poll(s.id);
+    expect(a.events()).toEqual(['TRIGGER_ERROR:fire', 'TRIGGER_ERROR:reminder']);
+    a.app.clock.advance(MIN);
+    await a.poll(s.id);
+    expect(a.events()).toHaveLength(2);
+  });
+
+  it('음소거 전에 보낸 알림이 음소거 중에 해소되면 해소 알림을 끝나는 시각으로 미루고, 일찍 풀면 바로 보낸다', async () => {
+    const fake = new FakeTarget();
+    const a = await start(fake);
+    const s = await addScheduler(a.app, a.cookie);
+    fake.errors = [{ group: 'g', name: 'bad' }];
+    await a.poll(s.id);
+    await a.tick();
+    await a.app.send('post', '/alerts/read-all', {}, await a.session()).expect(200);
+    expect(await unread(a)).toBe(0);
+
+    const until = a.app.clock.now + 60 * MIN;
+    await mute(a, s.id, until);
+    a.app.clock.advance(MIN);
+    fake.errors = [];
+    await a.poll(s.id);
+    expect((await a.alerts(s.id)).open).toEqual([]);
+    const deferred = () =>
+      a.sqlite
+        .prepare(
+          `SELECT n.status, n.next_attempt_at AS at FROM notifications n WHERE n.event = 'resolve'`,
+        )
+        .all() as { status: string; at: number }[];
+    expect(deferred()).toEqual([{ status: 'pending', at: until }]);
+    // 음소거가 끝날 때까지 보내지 않고, 인앱 읽지 않음으로도 세지 않는다
+    await a.tick();
+    expect(deferred()).toEqual([{ status: 'pending', at: until }]);
+    expect(await unread(a)).toBe(0);
+
+    // 음소거를 늘리면 미룬 알림도 옮기고, 풀면 바로 보낸다
+    const later = until + 30 * MIN;
+    await mute(a, s.id, later);
+    expect(deferred()).toEqual([{ status: 'pending', at: later }]);
+    expect(await unmute(a, s.id)).toEqual({ mutedUntil: null });
+    expect(deferred()).toEqual([{ status: 'pending', at: a.app.clock.now }]);
+    await a.tick();
+    expect(deferred().map((d) => d.status)).toEqual(['sent']);
+    expect(await unread(a)).toBe(1);
+  });
+
+  it('검증, 상세·대시보드의 음소거 표시, 감사 기록', async () => {
+    const fake = new FakeTarget();
+    const a = await start(fake);
+    const s = await addScheduler(a.app, a.cookie);
+    const now = a.app.clock.now;
+    const put = (until: number) =>
+      a.app.send('put', `/schedulers/${s.id}/mute`, { until }, a.cookie);
+    expect((await put(now)).status).toBe(400);
+    expect((await put(now + 7 * 24 * 60 * MIN + 1)).status).toBe(400);
+    expect((await a.app.send('put', `/schedulers/${s.id}/mute`, {}, a.cookie)).status).toBe(400);
+    expect(
+      (await a.app.send('put', '/schedulers/999/mute', { until: now + MIN }, a.cookie)).status,
+    ).toBe(404);
+
+    const until = now + 2 * 60 * MIN;
+    await mute(a, s.id, until);
+    const detail = async () =>
+      (
+        (await a.app.get(`/schedulers/${s.id}`, await a.session()).expect(200))
+          .body as SchedulerDetailDto
+      ).mutedUntil;
+    const dashboard = async () =>
+      ((await a.app.get('/schedulers', await a.session()).expect(200)).body as DashboardResponse)
+        .items[0]?.mutedUntil;
+    expect(await detail()).toBe(until);
+    expect(await dashboard()).toBe(until);
+    await unmute(a, s.id);
+    expect(await detail()).toBeNull();
+    expect(await dashboard()).toBeNull();
+
+    // 끝나는 시각이 지나도 음소거가 아니다
+    await mute(a, s.id, a.app.clock.now + MIN);
+    a.app.clock.advance(MIN);
+    expect(await detail()).toBeNull();
+
+    const logsOf = async (action: string) =>
+      (
+        (await a.app.get(`/audit-logs?action=${action}`, await a.session()).expect(200))
+          .body as AuditLogPage
+      ).items;
+    // 형식이 틀린 요청(빈 본문)은 남기지 않는다. 지난 시각·7일 초과·없는 스케줄러는 실패로 남긴다
+    expect((await logsOf('scheduler.mute')).map((l) => l.result).sort()).toEqual([
+      'failure',
+      'failure',
+      'failure',
+      'success',
+      'success',
+    ]);
+    const unmuted = await logsOf('scheduler.unmute');
+    expect(unmuted).toHaveLength(1);
+    expect(unmuted[0]).toMatchObject({
+      result: 'success',
+      targetType: 'scheduler',
+      before: { mutedUntil: until },
+      after: { mutedUntil: null },
+    });
   });
 });
 
