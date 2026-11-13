@@ -87,6 +87,20 @@ export const resumeJobGroupCommandSchema = z.object({
 });
 export type ResumeJobGroupCommand = z.infer<typeof resumeJobGroupCommandSchema>;
 
+/**
+ * 스케줄러 전체 일시정지 (FR-CTL-11, `pauseAll`, TRD §7.3). 트리거가 있는 그룹마다 그룹 일시정지를 하고
+ * 전체 일시정지 표시(`_$_ALL_GROUPS_PAUSED_$_`)를 넣는다. 이후 새로 생기는 그룹도 일시정지된 채로 시작한다
+ */
+export const pauseAllCommandSchema = z.object({ type: z.literal('pauseAll') });
+export type PauseAllCommand = z.infer<typeof pauseAllCommandSchema>;
+
+/**
+ * 스케줄러 전체 재개 (FR-CTL-11, `resumeAll`, TRD §7.3). 트리거가 있는 그룹마다 그룹 재개를 하고 전체 일시정지
+ * 표시를 지운다. 트리거가 없는 그룹의 `PAUSED_TRIGGER_GRPS` 행은 남는다
+ */
+export const resumeAllCommandSchema = z.object({ type: z.literal('resumeAll') });
+export type ResumeAllCommand = z.infer<typeof resumeAllCommandSchema>;
+
 /** 잡 즉시 실행 (FR-CTL-05, `triggerJob(jobKey)`, TRD §7.5): 지금 한 번 실행하는 일회성 SIMPLE 트리거를 넣는다 */
 export const triggerJobCommandSchema = z.object({
   type: z.literal('triggerJob'),
@@ -159,10 +173,7 @@ export const deleteJobCommandSchema = z.object({
 });
 export type DeleteJobCommand = z.infer<typeof deleteJobCommandSchema>;
 
-/**
- * 제어 명령. `type`으로 나눈다. 서버(`@qa/store`의 명령 핸들러)와 화면이 같은 목록을 쓴다.
- * 서버(`@qa/store`의 명령 핸들러)와 화면이 같은 목록을 쓴다.
- */
+/** 제어 명령. `type`으로 나눈다. 서버(`@qa/store`의 명령 핸들러)와 화면이 같은 목록을 쓴다 */
 export const commandSchema = z.discriminatedUnion('type', [
   pauseTriggerCommandSchema,
   resumeTriggerCommandSchema,
@@ -172,6 +183,8 @@ export const commandSchema = z.discriminatedUnion('type', [
   resumeTriggerGroupCommandSchema,
   pauseJobGroupCommandSchema,
   resumeJobGroupCommandSchema,
+  pauseAllCommandSchema,
+  resumeAllCommandSchema,
   triggerJobCommandSchema,
   updateCronScheduleCommandSchema,
   updateSimpleScheduleCommandSchema,
@@ -182,7 +195,7 @@ export type QuartzCommand = z.infer<typeof commandSchema>;
 export type CommandType = QuartzCommand['type'];
 
 /** 명령이 무엇을 대상으로 하는지. 감사 기록의 대상 종류와 화면 문구에 쓴다 */
-export type CommandScope = 'trigger' | 'job' | 'triggerGroup' | 'jobGroup';
+export type CommandScope = 'trigger' | 'job' | 'triggerGroup' | 'jobGroup' | 'scheduler';
 
 export function commandScope(command: QuartzCommand): CommandScope {
   switch (command.type) {
@@ -203,6 +216,9 @@ export function commandScope(command: QuartzCommand): CommandScope {
     case 'pauseJobGroup':
     case 'resumeJobGroup':
       return 'jobGroup';
+    case 'pauseAll':
+    case 'resumeAll':
+      return 'scheduler';
   }
 }
 
@@ -371,6 +387,10 @@ export const COMMAND_NOTICE_CODES = [
    * 실행되고 수정이 되돌아갈 수 있음 (409, TRD §7.2·§7.6)
    */
   'TRIGGER_ACQUIRED',
+  /** 스케줄러 전체 명령의 트리거 수가 한 명령의 상한(`COMMAND_TARGETS_MAX`)을 넘음 (409, FR-CTL-11) */
+  'TOO_MANY_TARGETS',
+  /** 트리거가 없는 그룹의 일시정지 기록은 전체 재개 뒤에도 남음 (`resumeAll`, 부록 A.4 G-13) */
+  'PAUSED_GROUPS_KEPT',
   /** ERROR 상태가 풀려 WAITING이 됨 (TRD §7.6) */
   'ERROR_CLEARED',
   /** 개별 일시정지는 수정 뒤에도 유지됨(Quartz `rescheduleJob`과 의도된 차이, TRD §7.6) */

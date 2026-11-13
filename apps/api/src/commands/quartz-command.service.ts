@@ -50,6 +50,8 @@ const AUDIT_ACTION: Record<CommandType, AuditAction> = {
   resumeTriggerGroup: 'trigger_group.resume',
   pauseJobGroup: 'job_group.pause',
   resumeJobGroup: 'job_group.resume',
+  pauseAll: 'scheduler.pause',
+  resumeAll: 'scheduler.resume',
   triggerJob: 'job.trigger',
   updateCronSchedule: 'trigger.reschedule',
   updateSimpleSchedule: 'trigger.reschedule',
@@ -63,6 +65,7 @@ const AUDIT_TARGET_TYPE: Record<CommandScope, AuditTargetType> = {
   job: 'job',
   triggerGroup: 'trigger_group',
   jobGroup: 'job_group',
+  scheduler: 'scheduler',
 };
 
 /** 실행할 수 없는 접속이면 이유를 돌려준다 (FR-CTL-00a, FR-CON-04) */
@@ -87,7 +90,8 @@ function auditTarget(scheduler: SchedulerRow, command: QuartzCommand): Record<st
   const { schedName } = scheduler;
   if ('trigger' in command) return { schedName, trigger: command.trigger };
   if ('job' in command) return { schedName, job: command.job };
-  return { schedName, group: command.group };
+  if ('group' in command) return { schedName, group: command.group };
+  return { schedName, displayName: scheduler.displayName };
 }
 
 function rejectionError(err: CommandRejection): ApiError {

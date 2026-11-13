@@ -7,6 +7,7 @@ import type {
   TriggerDto,
   TriggerListQuery,
 } from '@qa/shared';
+import { ALL_GROUPS_PAUSED } from '@qa/shared';
 import type { Row, TargetConn } from '../adapter.js';
 import type { QuartzDialect } from '../dialect.js';
 import { TargetError } from '../errors.js';
@@ -22,8 +23,8 @@ export interface SchedulerViewContext {
   schedName: string;
 }
 
-/** `pauseAll`이 남기는 표시 행 (`Constants.ALL_GROUPS_PAUSED`) */
-export const ALL_GROUPS_PAUSED = '_$_ALL_GROUPS_PAUSED_$_';
+/** `pauseAll`이 남기는 표시 행 (`Constants.ALL_GROUPS_PAUSED`). 화면도 쓰므로 `@qa/shared`에 둔다 */
+export { ALL_GROUPS_PAUSED };
 
 export interface PageResult<T> {
   items: T[];

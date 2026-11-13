@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { API_PREFIX } from '@qa/shared';
-import type { NextFunction, Request, Response } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { requestIdMiddleware } from './common/request-id.js';
 import type { AppConfig } from './config/env.js';
@@ -15,6 +15,12 @@ export interface ConfigureOptions {
   /** 개발 전용. 있으면 정적 파일 대신 이 Next 개발 서버로 화면을 서빙한다(`QA_WEB_DEV`) */
   webDev?: WebDevServer | null;
 }
+
+/**
+ * 제어 명령 요청 본문 상한. 실행 요청은 미리보기에서 본 대상 트리거마다의 상태(`expected`)를 담는다.
+ * 스케줄러 전체 명령은 트리거 10,000개(`COMMAND_TARGETS_MAX`)에 약 680KB라 기본 상한(100KB)으로는 받을 수 없다.
+ */
+export const COMMAND_BODY_LIMIT = '1mb';
 
 /**
  * HTTP 계층 설정. main.ts와 테스트가 같은 설정으로 앱을 띄우도록 한 곳에 둔다.
@@ -39,6 +45,10 @@ export function configureApp(
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
+  // 제어 명령 경로만 본문 상한을 올린다. 먼저 읽어 두면 뒤의 기본 파서(100KB)는 이미 읽은 본문을 건너뛴다.
+  // JSON 파서가 하나라도 등록돼 있으면 Nest가 기본 JSON 파서를 붙이지 않으므로 기본 파서도 직접 붙인다
+  app.use(`/${API_PREFIX}/schedulers/:id/commands`, express.json({ limit: COMMAND_BODY_LIMIT }));
+  app.useBodyParser('json');
 
   // 화면과 API를 같은 오리진에서 서빙한다 (TRD §2.2). Nest 라우터보다 먼저 등록된다
   if (options.webDev) {

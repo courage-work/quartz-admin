@@ -1,4 +1,4 @@
-import type { CommandExpected, QuartzCommand } from '@qa/shared';
+import { COMMAND_TARGETS_MAX, type CommandExpected, type QuartzCommand } from '@qa/shared';
 import { describe, expect, it } from 'vitest';
 import type { BindValue, Row, TargetConn } from '../adapter.js';
 import { TargetError } from '../errors.js';
@@ -251,6 +251,7 @@ class FakeConn implements TargetConn {
     if (sql.includes('QRTZ_TRIGGERS')) {
       const where = sql.slice(sql.indexOf(' WHERE '), sql.indexOf(' ORDER BY '));
       const match = (t: FakeTrigger): boolean => {
+        if (where.includes('1 = 1')) return true;
         if (where.includes('t.TRIGGER_NAME')) return t.group === binds[1] && t.name === binds[2];
         if (where.includes('t.JOB_NAME')) return t.jobGroup === binds[1] && t.jobName === binds[2];
         if (where.includes('t.TRIGGER_GROUP = ')) return t.group === binds[1];
@@ -827,6 +828,123 @@ describe('트리거 그룹 (부록 A.4)', () => {
     const preview = await previewCommand(conn, ctx, { type: 'resumeTriggerGroup', group: 'g' });
     expect(preview.plan.rejection?.code).toBe('RESUME_IN_PAUSED_GROUP');
     expect(preview.plan.groupChanges).toEqual([]);
+  });
+});
+
+describe('스케줄러 전체 (FR-CTL-11, 부록 A.4 G-11~G-13)', () => {
+  const PAUSE_ALL: QuartzCommand = { type: 'pauseAll' };
+  const RESUME_ALL: QuartzCommand = { type: 'resumeAll' };
+  const sorted = (groups: string[]) => [...groups].sort();
+
+  it('pauseAll: 트리거가 있는 그룹마다 그룹 일시정지를 하고 전체 표시를 넣는다 (G-11)', async () => {
+    const conn = new FakeConn({
+      triggers: [
+        trig('w', 'WAITING'),
+        trig('b', 'BLOCKED'),
+        trig('p', 'PAUSED'),
+        trig('e', 'ERROR'),
+        trig('hw', 'WAITING', { group: 'h' }),
+      ],
+      pausedGroups: ['h', 'empty'],
+    });
+    const preview = await previewCommand(conn, ctx, PAUSE_ALL);
+    expect(preview.subject.pausedGroups).toEqual(['empty', 'h']);
+    const out = await executeCommand(conn, ctx, PAUSE_ALL, expectedOf(preview.subject));
+    // h는 이미 일시정지 행이 있어 다시 넣지 않는다
+    expect(out.groupChanges).toEqual([
+      { group: 'g', paused: true },
+      { group: ALL_GROUPS_PAUSED, paused: true },
+    ]);
+    expect(conn.committed.triggers.map((t) => `${t.group}/${t.name}=${t.state}`)).toEqual([
+      'g/w=PAUSED',
+      'g/b=PAUSED_BLOCKED',
+      'g/p=PAUSED',
+      'g/e=ERROR',
+      'h/hw=PAUSED',
+    ]);
+    expect(sorted(conn.committed.pausedGroups)).toEqual(
+      sorted(['g', 'h', 'empty', ALL_GROUPS_PAUSED]),
+    );
+    expect(out.after.pausedGroups).toEqual(sorted(['g', 'h', 'empty', ALL_GROUPS_PAUSED]));
+  });
+
+  it('pauseAll: 트리거가 없어도 전체 표시는 넣고, 이미 전체 일시정지면 바뀌는 것이 없다', async () => {
+    const empty = new FakeConn({});
+    const out = await previewThenRun(empty, PAUSE_ALL);
+    expect(out.groupChanges).toEqual([{ group: ALL_GROUPS_PAUSED, paused: true }]);
+    expect(empty.committed.pausedGroups).toEqual([ALL_GROUPS_PAUSED]);
+
+    const already = new FakeConn({
+      triggers: [trig('p', 'PAUSED')],
+      pausedGroups: ['g', ALL_GROUPS_PAUSED],
+    });
+    const again = await previewThenRun(already, PAUSE_ALL);
+    expect(again.warnings.map((w) => w.code)).toEqual(['NO_CHANGE']);
+    expect(already.writes()).toEqual([]);
+  });
+
+  it('resumeAll: 트리거가 있는 그룹과 전체 표시를 지우고 모두 재개한다. 트리거 없는 그룹 행은 남는다 (G-13)', async () => {
+    const conn = new FakeConn({
+      triggers: [
+        trig('p', 'PAUSED', { jobName: 'free' }),
+        trig('pb', 'PAUSED_BLOCKED'),
+        trig('e', 'ERROR'),
+        trig('late', 'PAUSED', { group: 'h', jobName: 'free', nft: PAST }),
+      ],
+      pausedGroups: ['g', 'h', 'empty', ALL_GROUPS_PAUSED],
+      fired: [{ jobGroup: 'jg', jobName: 'j', nonConcurrent: true }],
+    });
+    const preview = await previewCommand(conn, ctx, RESUME_ALL);
+    // 전체 표시까지 지우므로 지난 트리거도 거부하지 않고 노드의 misfire 처리에 맡긴다
+    expect(preview.plan.rejection).toBeNull();
+    expect(preview.plan.warnings.map((w) => w.code)).toEqual([
+      'PAUSED_GROUPS_KEPT',
+      'MISFIRE_DELEGATED',
+    ]);
+    expect(preview.plan.warnings[0]?.message).toContain('그룹 1개(empty)');
+    const out = await executeCommand(conn, ctx, RESUME_ALL, expectedOf(preview.subject));
+    expect(out.groupChanges).toEqual([
+      { group: ALL_GROUPS_PAUSED, paused: false },
+      { group: 'g', paused: false },
+      { group: 'h', paused: false },
+    ]);
+    expect(conn.committed.triggers.map((t) => `${t.name}=${t.state}`)).toEqual([
+      'p=WAITING',
+      'pb=BLOCKED',
+      'e=ERROR',
+      'late=WAITING',
+    ]);
+    expect(conn.committed.pausedGroups).toEqual(['empty']);
+  });
+
+  it('resumeAll: 전체 일시정지가 아니고 일시정지된 트리거도 없으면 바뀌는 것이 없다', async () => {
+    const conn = new FakeConn({ triggers: [trig('w', 'WAITING')] });
+    const out = await previewThenRun(conn, RESUME_ALL);
+    expect(out.warnings.map((w) => w.code)).toEqual(['NO_CHANGE']);
+    expect(conn.writes()).toEqual([]);
+  });
+
+  it('미리보기 뒤 일시정지 그룹이 바뀌면 STATE_CONFLICT. 트리거가 없는 그룹도 본다', async () => {
+    const conn = new FakeConn({ triggers: [trig('w', 'WAITING')], pausedGroups: ['empty'] });
+    const preview = await previewCommand(conn, ctx, PAUSE_ALL);
+    const seen = { ...expectedOf(preview.subject), pausedGroups: [] };
+    const err = await rejected(executeCommand(conn, ctx, PAUSE_ALL, seen));
+    expect(err).toMatchObject({ code: 'STATE_CONFLICT' });
+    expect(conn.writes()).toEqual([]);
+  });
+
+  it(`트리거가 ${COMMAND_TARGETS_MAX}개를 넘으면 실행하지 않는다`, async () => {
+    const many = Array.from({ length: COMMAND_TARGETS_MAX + 1 }, (_, i) =>
+      trig(`t${String(i).padStart(5, '0')}`, 'WAITING'),
+    );
+    for (const command of [PAUSE_ALL, RESUME_ALL]) {
+      const conn = new FakeConn({ triggers: many });
+      const preview = await previewCommand(conn, ctx, command);
+      expect(preview.plan.rejection?.code).toBe('TOO_MANY_TARGETS');
+      const err = await rejected(executeCommand(conn, ctx, command, expectedOf(preview.subject)));
+      expect(err).toMatchObject({ code: 'TOO_MANY_TARGETS' });
+      expect(conn.writes()).toEqual([]);
+    }
   });
 });
 

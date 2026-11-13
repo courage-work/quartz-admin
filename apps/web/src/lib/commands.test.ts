@@ -66,6 +66,22 @@ describe('재개·잡·그룹 문구', () => {
   });
 });
 
+describe('스케줄러 전체 문구 (FR-CTL-11)', () => {
+  it('제목, 실행 버튼, 결과 알림', () => {
+    expect(commandTitle({ type: 'pauseAll' })).toBe('스케줄러 전체 일시정지');
+    expect(commandTitle({ type: 'resumeAll' })).toBe('스케줄러 전체 재개');
+    expect(commandConfirmLabel({ type: 'pauseAll' })).toBe('전체 일시정지하기');
+    expect(commandConfirmLabel({ type: 'resumeAll' })).toBe('전체 재개하기');
+    expect(isDestructive({ type: 'pauseAll' })).toBe(false);
+    expect(commandResultMessage({ command: { type: 'pauseAll' }, changed: true })).toBe(
+      '스케줄러 전체를 일시정지했습니다',
+    );
+    expect(commandResultMessage({ command: { type: 'resumeAll' }, changed: false })).toBe(
+      '스케줄러 전체는 바뀐 것이 없습니다. 일시정지된 트리거가 없습니다',
+    );
+  });
+});
+
 describe('즉시 실행 문구 (TRD §7.5)', () => {
   const TRIGGER: QuartzCommand = { type: 'triggerJob', job: { group: 'jg', name: 'report' } };
   const ins = (state: string) => [

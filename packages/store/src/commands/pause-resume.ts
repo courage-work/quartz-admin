@@ -1,3 +1,10 @@
+import {
+  COMMAND_TARGETS_LISTED,
+  COMMAND_TARGETS_MAX,
+  type CommandNoticeDto,
+  type PauseAllCommand,
+  type ResumeAllCommand,
+} from '@qa/shared';
 import type {
   PauseJobCommand,
   PauseJobGroupCommand,
@@ -10,7 +17,7 @@ import type {
 } from '@qa/shared';
 import type { TargetConn } from '../adapter.js';
 import type { Binds } from '../views/sql.js';
-import { ALL_GROUPS_PAUSED } from '../views/views.js';
+import { ALL_GROUPS_PAUSED, listPausedGroups } from '../views/views.js';
 import {
   jobExists,
   noChangeWarning,
@@ -30,8 +37,8 @@ import {
 } from './types.js';
 
 /*
- * 일시정지와 재개 (FR-CTL-01~04, TRD §7.3·§7.4, 부록 A.2~A.4).
- * 트리거·잡·트리거 그룹·잡 그룹 네 단위가 같은 상태 전이를 쓰고, 대상을 고르는 조건과
+ * 일시정지와 재개 (FR-CTL-01~04·11, TRD §7.3·§7.4, 부록 A.2~A.4).
+ * 트리거·잡·트리거 그룹·잡 그룹·스케줄러 전체 다섯 단위가 같은 상태 전이를 쓰고, 대상을 고르는 조건과
  * `PAUSED_TRIGGER_GRPS`를 다루는 방식만 다르다.
  */
 
@@ -348,6 +355,131 @@ export const resumeJobGroupHandler: CommandHandler<ResumeJobGroupCommand> = {
     return noChangeWarning(
       resumePlanOf(resume, { groupChanges: [] }),
       '일시정지된 트리거가 없어 바뀌는 것이 없습니다',
+    );
+  },
+};
+
+// ── 스케줄러 전체 (FR-CTL-11, 부록 A.4 G-11~G-13) ─────────────────────
+
+const allTriggersWhere: Where = () => '1 = 1';
+
+/**
+ * 스케줄러의 모든 트리거와 `PAUSED_TRIGGER_GRPS`의 모든 행. 트리거가 없는 그룹의 행은 명령이 바꾸지 않지만
+ * 전체 재개 뒤에도 남는다고 알리려고 함께 읽는다
+ */
+async function readAll(
+  conn: TargetConn,
+  ctx: SchedulerCommandContext,
+  lockWaitSec: number | undefined,
+  blocking: boolean,
+): Promise<CommandSubject> {
+  const triggers = await selectTriggerTargets(conn, ctx, allTriggersWhere, lockWaitSec);
+  return {
+    triggers,
+    pausedGroups: [...new Set(await listPausedGroups(conn, ctx))].sort(),
+    blockingJobs: blocking ? await selectBlockingJobs(conn, ctx) : NO_JOBS,
+  };
+}
+
+/** 트리거가 있는 그룹 (`JSS.getTriggerGroupNames`: `SELECT DISTINCT TRIGGER_GROUP FROM TRIGGERS`). 이름순 */
+function triggerGroupsOf(triggers: readonly CommandTarget[]): string[] {
+  return [...new Set(triggers.map((t) => t.group))].sort();
+}
+
+/** 한 명령이 다루는 트리거 수 상한(`COMMAND_TARGETS_MAX`)을 넘으면 실행하지 않는다 */
+function tooManyTargets(subject: CommandSubject): CommandNoticeDto | null {
+  if (subject.triggers.length <= COMMAND_TARGETS_MAX) return null;
+  return {
+    code: 'TOO_MANY_TARGETS',
+    message:
+      `트리거가 ${subject.triggers.length.toLocaleString('ko-KR')}개라 한 번에 다룰 수 있는 ` +
+      `${COMMAND_TARGETS_MAX.toLocaleString('ko-KR')}개를 넘습니다. 트리거 그룹별로 나눠 실행하세요`,
+  };
+}
+
+/** 트리거가 없는 그룹의 일시정지 기록은 `resumeAll` 뒤에도 남는다(G-13). 그 그룹에 트리거를 추가하면 일시정지된 채로 시작한다 */
+function pausedGroupsKept(groups: readonly string[]): CommandNoticeDto {
+  const listed = groups.slice(0, COMMAND_TARGETS_LISTED);
+  const more = groups.length - listed.length;
+  return {
+    code: 'PAUSED_GROUPS_KEPT',
+    message:
+      `트리거가 없는 그룹 ${groups.length}개(${listed.join(', ')}${more > 0 ? ` 외 ${more}개` : ''})의 ` +
+      '일시정지 기록은 Quartz와 같이 그대로 남습니다. 이 그룹에 트리거를 추가하면 일시정지된 채로 시작합니다',
+  };
+}
+
+const rejected = (rejection: CommandNoticeDto) => ({
+  changes: [],
+  groupChanges: [],
+  inserts: [],
+  scheduleChanges: [],
+  warnings: [],
+  rejection,
+});
+
+/**
+ * 스케줄러 전체 일시정지 (`JSS.pauseAll`). 트리거가 있는 그룹마다 `pauseTriggerGroup`을 하고(그룹 행이 없으면 넣음),
+ * 전체 일시정지 표시가 없으면 넣는다. 트리거가 없는 스케줄러여도 표시는 넣는다(G-11).
+ */
+export const pauseAllHandler: CommandHandler<PauseAllCommand> = {
+  type: 'pauseAll',
+
+  async readSubject(conn, ctx, _command, lockWaitSec) {
+    return readAll(conn, ctx, lockWaitSec, false);
+  },
+
+  plan(_command, subject) {
+    const tooMany = tooManyTargets(subject);
+    if (tooMany) return rejected(tooMany);
+    const paused = new Set(subject.pausedGroups);
+    const groups = [...triggerGroupsOf(subject.triggers), ALL_GROUPS_PAUSED];
+    return noChangeWarning(
+      {
+        changes: pauseChanges(subject.triggers),
+        groupChanges: groups
+          .filter((g) => !paused.has(g))
+          .map((group) => ({ group, paused: true })),
+        inserts: [],
+        scheduleChanges: [],
+        warnings: [],
+        rejection: null,
+      },
+      '이미 전체 일시정지 상태이고 일시정지할 트리거도 없어 바뀌는 것이 없습니다',
+    );
+  },
+};
+
+/**
+ * 스케줄러 전체 재개 (`JSS.resumeAll`). 트리거가 있는 그룹마다 `resumeTriggerGroup`을 하고(그룹 행을 지우고 트리거 재개),
+ * 전체 일시정지 표시를 지운다. 트리거가 없는 그룹의 행은 남는다(G-13). 실행 뒤 트리거의 그룹과 전체 표시가 모두 풀리므로
+ * 지난 트리거도 거부하지 않고 노드의 misfire 처리에 맡긴다(TRD §7.4).
+ */
+export const resumeAllHandler: CommandHandler<ResumeAllCommand> = {
+  type: 'resumeAll',
+
+  async readSubject(conn, ctx, _command, lockWaitSec) {
+    return readAll(conn, ctx, lockWaitSec, true);
+  },
+
+  plan(_command, subject, { dbNow }) {
+    const tooMany = tooManyTargets(subject);
+    if (tooMany) return rejected(tooMany);
+    const resume = resumeChanges(subject.triggers, {
+      dbNow,
+      blockingJobs: subject.blockingJobs,
+      pausedAfter: new Set(),
+    });
+    const resumed = new Set([...triggerGroupsOf(subject.triggers), ALL_GROUPS_PAUSED]);
+    const kept = subject.pausedGroups.filter((g) => !resumed.has(g));
+    return noChangeWarning(
+      resumePlanOf(resume, {
+        groupChanges: subject.pausedGroups
+          .filter((g) => resumed.has(g))
+          .map((group) => ({ group, paused: false })),
+        warnings: kept.length > 0 ? [pausedGroupsKept(kept)] : [],
+      }),
+      '전체 일시정지 상태가 아니고 일시정지된 트리거도 없어 바뀌는 것이 없습니다',
     );
   },
 };

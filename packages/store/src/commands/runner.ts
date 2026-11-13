@@ -15,10 +15,12 @@ import type { TargetConn } from '../adapter.js';
 import { queryDbNowMillis } from '../dialect.js';
 import { LOCK_WAIT_SEC, acquireTriggerAccess, type LockAcquisition } from './lock.js';
 import {
+  pauseAllHandler,
   pauseJobGroupHandler,
   pauseJobHandler,
   pauseTriggerGroupHandler,
   pauseTriggerHandler,
+  resumeAllHandler,
   resumeJobGroupHandler,
   resumeJobHandler,
   resumeTriggerGroupHandler,
@@ -51,6 +53,8 @@ const HANDLERS: HandlerMap = {
   resumeTriggerGroup: resumeTriggerGroupHandler,
   pauseJobGroup: pauseJobGroupHandler,
   resumeJobGroup: resumeJobGroupHandler,
+  pauseAll: pauseAllHandler,
+  resumeAll: resumeAllHandler,
   triggerJob: triggerJobHandler,
   updateCronSchedule: updateCronScheduleHandler,
   updateSimpleSchedule: updateSimpleScheduleHandler,

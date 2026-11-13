@@ -31,6 +31,8 @@ export const AUDIT_ACTIONS = [
   'trigger_group.resume',
   'job_group.pause',
   'job_group.resume',
+  'scheduler.pause',
+  'scheduler.resume',
   'job.trigger',
   'trigger.reschedule',
   'trigger.delete',

@@ -97,6 +97,9 @@ export interface NodesResponse {
   nodes: NodeDto[];
 }
 
+/** `pauseAll`이 `PAUSED_TRIGGER_GRPS`에 남기는 표시 행 (Quartz `Constants.ALL_GROUPS_PAUSED`) */
+export const ALL_GROUPS_PAUSED = '_$_ALL_GROUPS_PAUSED_$_';
+
 export interface PausedGroupsResponse {
   dbNow: number;
   /** `_$_ALL_GROUPS_PAUSED_$_`는 pauseAll 표시이며 `allPaused`로 따로 알린다 */

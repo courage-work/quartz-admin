@@ -42,6 +42,7 @@ const RESUME_ACTIONS: AuditAction[] = [
   'job.resume',
   'trigger_group.resume',
   'job_group.resume',
+  'scheduler.resume',
 ];
 
 const isSuppressing = (t: AlertRuleType) =>
