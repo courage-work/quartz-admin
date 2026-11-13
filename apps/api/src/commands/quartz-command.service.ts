@@ -1,6 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import {
   commandScope,
+  type BatchCommand,
+  type BatchPreviewItemDto,
+  type BatchPreviewResponse,
+  type BatchRequest,
+  type BatchResultItemDto,
+  type BatchResultResponse,
   type AuditAction,
   type AuditTargetType,
   type CommandNoticeDto,
@@ -18,6 +25,7 @@ import {
   previewCommand,
   type CommandRejection,
   type SchedulerCommandContext,
+  TargetError,
 } from '@qa/store';
 import {
   AuditService,
@@ -102,6 +110,24 @@ function rejectionAfter(err: CommandRejection): Record<string, unknown> {
   return Array.isArray(err.current) ? { triggers: err.current } : { ...err.current };
 }
 
+/** 일괄 실행에서 이 항목이 몇 번째인지. 감사 기록 `before.batch`에 남겨 같은 일괄 실행의 기록을 묶어 본다 */
+export interface BatchMeta {
+  id: string;
+  /** 1부터 */
+  index: number;
+  total: number;
+}
+
+/**
+ * 일괄 실행을 멈출 오류인지. 명령 거부(상태 충돌, 없는 대상 등)와 읽기 전용, 그 항목의 대상 DB 오류는 그 항목만의 실패라 다음 항목을 실행한다.
+ * 연결할 수 없거나 잠금을 기다리다 멈춘 것처럼 다음 항목도 같을 오류는 멈춘다. 항목마다 제한 시간까지 기다리지 않게 하기 위해서다
+ */
+function stopsBatch(err: unknown): boolean {
+  if (err instanceof ApiError) return false;
+  if (err instanceof TargetError) return err.code !== 'TARGET_ERROR';
+  return true;
+}
+
 interface Scope {
   scheduler: SchedulerRow;
   connection: ConnectionRow;
@@ -179,9 +205,11 @@ export class QuartzCommandService {
     schedulerId: number,
     request: CommandRequest,
     actor: AuditActor,
+    batch?: BatchMeta,
   ): Promise<CommandResultDto> {
     const { scheduler, connection, ctx } = this.scope(schedulerId);
     const { command, expected } = request;
+    const requested = { command, expected, ...(batch ? { batch } : {}) };
     const entry: AuditEntry = {
       actor,
       action: AUDIT_ACTION[command.type],
@@ -189,7 +217,7 @@ export class QuartzCommandService {
       target: auditTarget(scheduler, command),
       connectionId: connection.id,
       schedulerId: scheduler.id,
-      before: { command, expected },
+      before: requested,
     };
 
     const blocked = blockedReason(connection);
@@ -217,7 +245,7 @@ export class QuartzCommandService {
         const deleted = out.deletions.triggers.length + out.deletions.jobs.length > 0;
         pending.succeed({
           // 삭제는 잠금 안에서 읽은 삭제 전 정의를 남긴다(자동 복원은 범위 밖, FR-CTL-09)
-          ...(out.snapshot ? { before: { command, expected, snapshot: out.snapshot } } : {}),
+          ...(out.snapshot ? { before: { ...requested, snapshot: out.snapshot } } : {}),
           after: {
             ...after,
             changes: out.changes,
@@ -261,6 +289,110 @@ export class QuartzCommandService {
         throw failure;
       }
     });
+  }
+
+  /**
+   * 일괄 미리보기 (FR-CTL-10). 커넥션 하나로 항목마다 단건 미리보기를 읽는다.
+   * 없어진 대상처럼 그 항목만의 거부는 항목의 `error`로 돌려주고, 대상 DB에 연결할 수 없으면 요청 전체가 실패한다
+   */
+  async batchPreview(
+    schedulerId: number,
+    commands: BatchCommand[],
+    actor?: AuditActor,
+  ): Promise<BatchPreviewResponse> {
+    const { scheduler, connection, ctx } = this.scope(schedulerId);
+    const { dbNow, items } = await this.targets.withConnection(connection, async (conn) => {
+      let dbNow = 0;
+      const items: BatchPreviewItemDto[] = [];
+      // 항목 순서대로 읽는다. 한 커넥션이라 동시에 보낼 수 없다
+      for (const command of commands) {
+        try {
+          const p = await previewCommand(conn, ctx, command, { actor: actor?.username });
+          dbNow = p.dbNow;
+          items.push({
+            command,
+            preview: {
+              targets: p.subject.triggers,
+              expected: expectedOf(p.subject),
+              changes: p.plan.changes,
+              warnings: p.plan.warnings,
+              blocked: p.plan.rejection,
+            },
+            error: null,
+          });
+        } catch (err) {
+          if (!isCommandRejection(err)) throw err;
+          items.push({ command, preview: null, error: { code: err.code, message: err.message } });
+        }
+      }
+      return { dbNow, items };
+    });
+    return {
+      dbNow,
+      scheduler: {
+        id: scheduler.id,
+        displayName: scheduler.displayName,
+        schedName: scheduler.schedName,
+        connectionName: connection.name,
+        envLabel: connection.envLabel,
+      },
+      blocked: blockedReason(connection),
+      items,
+    };
+  }
+
+  /**
+   * 일괄 실행 (FR-CTL-10). 항목마다 `execute`와 같은 절차(뮤텍스, 트랜잭션, 감사 기록)로 하나씩 실행한다.
+   * 항목마다 잠금을 잡았다 풀어 Quartz 노드를 오래 기다리게 하지 않는다. 한 항목이 실패해도 다음 항목을 실행하고,
+   * 계속할 수 없는 오류(`stopsBatch`)가 나면 남은 항목은 실행하지 않고 `skipped`로 돌려준다
+   */
+  async batchExecute(
+    schedulerId: number,
+    request: BatchRequest,
+    actor: AuditActor,
+  ): Promise<BatchResultResponse> {
+    // 없는 스케줄러면 감사 기록 없이 404
+    this.scope(schedulerId);
+    const batchId = randomUUID();
+    const total = request.items.length;
+    const items: BatchResultItemDto[] = [];
+    let stopped = false;
+    for (const [i, { command, expected }] of request.items.entries()) {
+      if (stopped) {
+        items.push({
+          command,
+          status: 'skipped',
+          error: {
+            code: 'BATCH_STOPPED',
+            message: '앞 항목에서 계속할 수 없는 오류가 나 실행하지 않았습니다',
+          },
+        });
+        continue;
+      }
+      try {
+        const out = await this.execute(schedulerId, { command, expected }, actor, {
+          id: batchId,
+          index: i + 1,
+          total,
+        });
+        items.push({
+          command,
+          status: 'success',
+          changed: out.changed,
+          changes: out.changes,
+          warnings: out.warnings,
+          auditId: out.auditId,
+        });
+      } catch (err) {
+        items.push({ command, status: 'failure', error: describeError(err) });
+        stopped = stopsBatch(err);
+      }
+    }
+    const failed = items.filter((it) => it.status !== 'success').length;
+    this.logger.log(
+      `일괄 제어 (스케줄러 ${schedulerId}, ${batchId}): ${total}건 중 실패·건너뜀 ${failed}건`,
+    );
+    return { batchId, items };
   }
 
   private scope(schedulerId: number): Scope {

@@ -31,6 +31,8 @@ import {
 } from 'lucide-react';
 import { type FormEvent, useId, useState } from 'react';
 
+import { BatchBar } from '@/components/commands/batch-dialog';
+import { useBatchSelection } from '@/components/commands/use-batch-selection';
 import { useCommandDialog } from '@/components/commands/use-command-dialog';
 import { FormAlert } from '@/components/form/form-alert';
 import { LinkRow, RowChevronCell, RowChevronHead, RowLink } from '@/components/links';
@@ -48,6 +50,7 @@ import { type StatusMeta, TRIGGER_STATE_META } from '@/components/status/tones';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { FieldGroup } from '@/components/ui/field';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -297,6 +300,10 @@ export function JobsTab({ schedulerId, refreshMs, blockedReason }: TabProps & Co
   const groups = useGroups(schedulerId);
   const groupId = useId();
   const yesNo = (v: boolean | null) => (v === null ? '-' : v ? '예' : '아니요');
+  // 제어할 수 없는 접속이면 고를 칸을 두지 않는다. 줄 메뉴가 이유를 보여 준다
+  const selection = useBatchSelection(JSON.stringify(query), res.data?.items);
+  const selectable = !blockedReason;
+  const columns = selectable ? 10 : 9;
 
   return (
     <div className="flex flex-col gap-3">
@@ -323,11 +330,28 @@ export function JobsTab({ schedulerId, refreshMs, blockedReason }: TabProps & Co
         ) : null}
       </div>
       {res.isError ? <FormAlert error={res.error} /> : null}
-      <DbTime dbNow={res.data?.dbNow} />
+      <BatchBar
+        schedulerId={schedulerId}
+        kind="job"
+        selected={selection.selected}
+        onClear={selection.clear}
+      >
+        <DbTime dbNow={res.data?.dbNow} />
+      </BatchBar>
       <TableFrame>
         <Table>
           <TableHeader>
             <TableRow>
+              {selectable ? (
+                <TableHead className="w-0">
+                  <Checkbox
+                    checked={selection.all}
+                    onCheckedChange={selection.toggleAll}
+                    disabled={!res.data?.items.length}
+                    aria-label="이 쪽의 잡 모두 선택"
+                  />
+                </TableHead>
+              ) : null}
               <TableHead>그룹 / 이름</TableHead>
               <TableHead>잡 클래스</TableHead>
               <TableHead>설명</TableHead>
@@ -343,11 +367,11 @@ export function JobsTab({ schedulerId, refreshMs, blockedReason }: TabProps & Co
           </TableHeader>
           <TableBody>
             {!res.data ? (
-              <LoadingRows columns={9} />
+              <LoadingRows columns={columns} />
             ) : res.data.items.length === 0 ? (
               filter.group || filter.q ? (
                 <TableEmpty
-                  colSpan={9}
+                  colSpan={columns}
                   icon={SearchXIcon}
                   title="조건에 맞는 잡이 없습니다"
                   action={
@@ -357,11 +381,24 @@ export function JobsTab({ schedulerId, refreshMs, blockedReason }: TabProps & Co
                   }
                 />
               ) : (
-                <TableEmpty colSpan={9} icon={BriefcaseIcon} title="등록된 잡이 없습니다" />
+                <TableEmpty colSpan={columns} icon={BriefcaseIcon} title="등록된 잡이 없습니다" />
               )
             ) : (
               res.data.items.map((j) => (
-                <LinkRow key={`${j.group}\u0000${j.name}`}>
+                <LinkRow
+                  key={`${j.group}\u0000${j.name}`}
+                  data-state={selection.isSelected(j) ? 'selected' : undefined}
+                >
+                  {selectable ? (
+                    // 줄 전체를 덮는 링크(RowLink) 위에 올려 체크박스를 누르면 상세로 가지 않게 한다
+                    <TableCell className="relative z-10">
+                      <Checkbox
+                        checked={selection.isSelected(j)}
+                        onCheckedChange={() => selection.toggle(j)}
+                        aria-label={`${j.group} / ${j.name} 선택`}
+                      />
+                    </TableCell>
+                  ) : null}
                   <TableCell>
                     <span className="flex flex-col">
                       <span className="text-xs text-muted-foreground">{j.group}</span>
@@ -563,6 +600,7 @@ export function TriggersTab({ schedulerId, refreshMs, blockedReason }: TabProps 
     size: PAGE_SIZE,
   };
   const res = useView<Page<TriggerDto>>(schedulerId, 'triggers', 'triggers', refreshMs, query);
+  const selection = useBatchSelection(JSON.stringify(query), res.data?.items);
   const filtered = states.length > 0 || types.length > 0 || !!text.group || !!text.q;
   const clearFilters = () =>
     update({ states: [], types: [], group: undefined, q: undefined, page: 1 });
@@ -613,13 +651,22 @@ export function TriggersTab({ schedulerId, refreshMs, blockedReason }: TabProps 
       </div>
       <FilterChips chips={chips} onClearAll={clearFilters} />
       {res.isError ? <FormAlert error={res.error} /> : null}
-      <DbTime dbNow={res.data?.dbNow} />
+      <BatchBar
+        schedulerId={schedulerId}
+        kind="trigger"
+        selected={selection.selected}
+        onClear={selection.clear}
+      >
+        <DbTime dbNow={res.data?.dbNow} />
+      </BatchBar>
       <TableFrame>
         <TriggerTable
           schedulerId={schedulerId}
           triggers={res.data?.items}
           loading={res.isFetching}
           sort={{ value: sort, onChange: setSort }}
+          // 제어할 수 없는 접속이면 고를 칸을 두지 않는다. 줄 메뉴가 이유를 보여 준다
+          selection={blockedReason ? undefined : selection}
           empty={
             filtered
               ? {

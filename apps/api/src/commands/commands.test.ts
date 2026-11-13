@@ -1,10 +1,13 @@
-import type {
-  AuditLogPage,
-  CommandPreviewResponse,
-  CommandResultDto,
-  CronPreviewResponse,
-  QuartzCommand,
-  TimeZonesResponse,
+import {
+  BATCH_ITEMS_MAX,
+  type AuditLogPage,
+  type BatchPreviewResponse,
+  type BatchResultResponse,
+  type CommandPreviewResponse,
+  type CommandResultDto,
+  type CronPreviewResponse,
+  type QuartzCommand,
+  type TimeZonesResponse,
 } from '@qa/shared';
 import {
   TargetError,
@@ -751,6 +754,140 @@ describe('제어 명령 API (TRD §7.1)', () => {
         snapshot: { trigger: { group: 'g', name: 't', type: 'SIMPLE' } },
       },
       after: { deletions: result.deletions },
+    });
+  });
+
+  describe('일괄 제어 (FR-CTL-10)', () => {
+    const pauseAudits = async () =>
+      (await t.get('/audit-logs?action=trigger.pause', cookie).expect(200)).body as AuditLogPage;
+    const batchPreview = (id: number, commands: QuartzCommand[]) =>
+      t.send('post', `/schedulers/${id}/commands/batch/preview`, { commands }, cookie);
+    const batch = (id: number, items: unknown[]) =>
+      t.send('post', `/schedulers/${id}/commands/batch`, { items }, cookie);
+
+    it('미리보기는 항목마다 영향 범위와 기대 상태를 주고 대상 DB를 바꾸지 않는다', async () => {
+      const id = await register('c');
+      const body = (await batchPreview(id, [PAUSE, RESUME]).expect(200))
+        .body as BatchPreviewResponse;
+      expect(body).toMatchObject({
+        dbNow: DB_NOW,
+        scheduler: { id, schedName: 'S', envLabel: 'prod' },
+        blocked: null,
+      });
+      expect(body.items).toHaveLength(2);
+      expect(body.items[0]).toMatchObject({
+        command: PAUSE,
+        error: null,
+        preview: {
+          expected: expected('WAITING'),
+          changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
+          blocked: null,
+        },
+      });
+      // 일시정지되지 않은 트리거의 재개는 바뀌는 것이 없다
+      expect(body.items[1]!.preview!.changes).toEqual([]);
+      expect(body.items[1]!.preview!.warnings.map((w) => w.code)).toContain('NO_CHANGE');
+      expect(fake.writes).toBe(0);
+      expect((await pauseAudits()).items).toEqual([]);
+    });
+
+    it('대상이 없는 항목은 그 항목의 오류로 알린다', async () => {
+      const id = await register('c');
+      fake.committed = null;
+      const body = (await batchPreview(id, [PAUSE]).expect(200)).body as BatchPreviewResponse;
+      expect(body.items[0]).toMatchObject({ preview: null, error: { code: 'NOT_FOUND' } });
+    });
+
+    it('일부가 실패해도 나머지를 실행하고 항목마다 결과와 감사 기록을 남긴다', async () => {
+      const id = await register('c');
+      const body = (
+        await batch(id, [
+          // 화면에서 본 상태와 달라 실패한다
+          { command: PAUSE, expected: expected('PAUSED') },
+          { command: PAUSE, expected: expected('WAITING') },
+        ]).expect(200)
+      ).body as BatchResultResponse;
+      expect(body.items).toMatchObject([
+        { command: PAUSE, status: 'failure', error: { code: 'STATE_CONFLICT' } },
+        {
+          command: PAUSE,
+          status: 'success',
+          changed: true,
+          changes: [{ group: 'g', name: 't', from: 'WAITING', to: 'PAUSED' }],
+        },
+      ]);
+      expect(fake.committed).toBe('PAUSED');
+
+      const logs = (await pauseAudits()).items;
+      expect(logs).toHaveLength(2);
+      const byIndex = (i: number) =>
+        logs.find((l) => (l.before as { batch: { index: number } }).batch.index === i);
+      expect(byIndex(1)).toMatchObject({
+        action: 'trigger.pause',
+        result: 'failure',
+        errorCode: 'STATE_CONFLICT',
+        before: { command: PAUSE, batch: { id: body.batchId, total: 2 } },
+      });
+      expect(byIndex(2)).toMatchObject({
+        id: (body.items[1] as { auditId: number }).auditId,
+        result: 'success',
+        before: { command: PAUSE, expected: expected('WAITING'), batch: { id: body.batchId } },
+      });
+    });
+
+    it('항목의 대상 DB 오류는 다음 항목을 실행하고, 연결할 수 없으면 남은 항목을 건너뛴다', async () => {
+      const id = await register('c');
+      const items = [
+        { command: PAUSE, expected: expected('WAITING') },
+        { command: PAUSE, expected: expected('WAITING') },
+      ];
+      fake.lockError = new TargetError('TARGET_ERROR');
+      let body = (await batch(id, items).expect(200)).body as BatchResultResponse;
+      expect(body.items.map((it) => it.status)).toEqual(['failure', 'failure']);
+
+      fake.lockError = new TargetError('TARGET_UNREACHABLE');
+      body = (await batch(id, items).expect(200)).body as BatchResultResponse;
+      expect(body.items).toMatchObject([
+        { status: 'failure', error: { code: 'TARGET_UNREACHABLE' } },
+        { status: 'skipped', error: { code: 'BATCH_STOPPED' } },
+      ]);
+      // 건너뛴 항목은 실행하지 않았으므로 감사 기록이 없다
+      expect((await pauseAudits()).items).toHaveLength(3);
+      expect(fake.committed).toBe('WAITING');
+    });
+
+    it('읽기 전용 접속은 미리보기에 차단 사유를 주고 실행은 항목마다 거부해 기록한다', async () => {
+      const id = await register('ro', true);
+      const preview = (await batchPreview(id, [PAUSE]).expect(200)).body as BatchPreviewResponse;
+      expect(preview.blocked?.code).toBe('READ_ONLY');
+      const body = (
+        await batch(id, [{ command: PAUSE, expected: expected('WAITING') }]).expect(200)
+      ).body as BatchResultResponse;
+      expect(body.items).toMatchObject([{ status: 'failure', error: { code: 'READ_ONLY' } }]);
+      expect(fake.writes).toBe(0);
+      expect((await pauseAudits()).items).toMatchObject([
+        { result: 'failure', errorCode: 'READ_ONLY' },
+      ]);
+    });
+
+    it('항목 수 상한, 일괄로 할 수 없는 명령, 빈 목록은 400, 없는 스케줄러는 404이고 기록하지 않는다', async () => {
+      const id = await register('c');
+      const item = { command: PAUSE, expected: expected('WAITING') };
+      const deleting = {
+        command: { type: 'deleteTrigger', trigger: { group: 'g', name: 't' } },
+        expected: expected('WAITING'),
+      };
+      for (const items of [
+        Array.from({ length: BATCH_ITEMS_MAX + 1 }, () => item),
+        [deleting],
+        [],
+      ]) {
+        await batch(id, items).expect(400);
+      }
+      await batchPreview(id, []).expect(400);
+      await batch(999, [item]).expect(404);
+      expect((await pauseAudits()).items).toEqual([]);
+      expect(fake.writes).toBe(0);
     });
   });
 });

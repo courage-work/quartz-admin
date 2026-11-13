@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.32 (B-35 사내 Oracle 점검 도구) |
+| 문서 버전 | v0.33 (B-22 일괄 제어) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -46,6 +46,7 @@
 | v0.30 | 2026-11-12 | B-31: §12.4 성능·규모 검증 추가. 합성 데이터(스케줄러 100 × 트리거 10,000) 측정 도구와 4종 DB 결과(NFR-PERF-01~04 모두 만족), 화면 첫 렌더 기록. 접속 감지가 대량 데이터에서 느려(MariaDB 5.2초) §5.5의 불리언 형식 판정을 앞쪽 1,000행 표본으로, SCHED_NAME 목록을 개수 집계 결과에서 모으도록 바꿈(MariaDB 2.2초, MySQL 0.51초) |
 | v0.31 | 2026-11-12 | B-32: §4.5 보안 점검 결과 추가. 라우트 전체의 인증·권한·CSRF, 비밀값 노출, 보안 헤더 자동 테스트. SQLite WAL·SHM·백업 파일 권한, API 응답 `Cache-Control: no-store`, Slack 미리보기 문구 이스케이프를 고침. 개발 의존성 취약점 등 위험 수용 5건 기록, CI에 `pnpm audit --prod` |
 | v0.32 | 2026-11-12 | B-35 준비: §5.1에 사내 Oracle 점검 도구(`check:oracle`)와 점검 안내(`docs/oracle-legacy-check.md`) 연결 |
+| v0.33 | 2026-11-12 | B-22: §7.1에 일괄 제어 API(`/commands/batch/preview`, `/commands/batch`)와 규칙 추가. 항목마다 단건 절차로 따로 실행·기록하고, 한 항목이 실패해도 다음 항목을 실행하며, 연결할 수 없는 등 계속할 수 없는 오류면 남은 항목을 건너뜀 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -581,6 +582,8 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 | --- | --- | --- |
 | POST | `/schedulers/:id/commands/preview` | `{ command }`. 잠금 없이 대상을 읽어 대상(스케줄러·접속·환경, 트리거와 잡), 바뀔 트리거 상태(`changes`), 바뀔 그룹 일시정지 행(`groupChanges`), 경고, 차단 사유(`blocked`), 실행에 붙일 `expected`를 돌려준다. 대상 DB를 바꾸지 않고 감사 로그도 남기지 않는다 |
 | POST | `/schedulers/:id/commands` | `{ command, expected }`. 위 절차로 실행하고 `{ dbNow, changed, changes, groupChanges, inserts, warnings, before, after, auditId }`를 돌려준다 |
+| POST | `/schedulers/:id/commands/batch/preview` | `{ commands }`(B-22). 항목마다 미리보기를 읽어 `{ dbNow, scheduler, blocked, items: [{ command, preview, error }] }`를 돌려준다. 대상 DB를 바꾸지 않는다 |
+| POST | `/schedulers/:id/commands/batch` | `{ items: [{ command, expected }] }`(B-22). 항목마다 위 절차로 실행하고 `{ batchId, items: [{ command, status, … }] }`를 돌려준다. 일부가 실패해도 200이다 |
 
 - **명령 형식**: `command`는 `type`으로 나누는 zod 판별 유니온(`commandSchema`)입니다. 일시정지와 재개(B-17, B-18)는 `pauseTrigger`·`resumeTrigger { trigger: { group, name } }`, `pauseJob`·`resumeJob { job: { group, name } }`, `pauseTriggerGroup`·`resumeTriggerGroup`·`pauseJobGroup`·`resumeJobGroup { group }`이고, 즉시 실행(B-19)은 `triggerJob { job: { group, name } }`, 스케줄 수정(B-20)은 `updateCronSchedule { trigger, cronExpression, timeZone }`·`updateSimpleSchedule { trigger, repeatIntervalMs, repeatCount, startAt? }`입니다. 삭제(B-21)는 `deleteTrigger { trigger }`·`deleteJob { job }`입니다. 서버는 명령 종류마다 핸들러(`@qa/store` `CommandHandler`: 대상 읽기 `readSubject`, 계획 `plan`)를 하나씩 두고, 적용(`applyPlan`)은 공통입니다. 계획은 대상 DB를 읽지 않는 순수 함수라, 대상 읽기가 계획에 필요한 주변 상태(관련 그룹의 일시정지 여부, 동시 실행 금지로 실행 중인 잡)를 함께 읽습니다.
 - **계획과 적용**: 계획은 트리거 상태 변경(`changes`), `PAUSED_TRIGGER_GRPS` 행 변경(`groupChanges`), 새 트리거(`inserts`, 즉시 실행), 스케줄 변경(`scheduleChanges`, 스케줄 수정)을 담습니다. 삭제(`deletions`: 지울 트리거와 잡)도 담습니다. 적용 순서는 그룹 행 → 스케줄 → 상태 변경 → 새 트리거 → 삭제입니다. 스케줄 UPDATE가 바꾸기 전 상태를 조건으로 쓰므로 상태 변경보다 먼저 합니다. 바뀐 행 수(다섯 가지 합. 스케줄은 TRIGGERS 행, 삭제는 지운 TRIGGERS·JOB_DETAILS 행 기준)가 계획과 다르면 ROLLBACK합니다. 새 트리거의 이름은 적용할 때 정하므로 미리보기에서는 `name`이 null입니다.
@@ -592,6 +595,12 @@ Oracle에서는 DML이 행 잠금을 무기한 기다립니다. 그래서 대상
 - **직렬화(2단계)**: 프로세스 안 키별 뮤텍스(`KeyedMutex`)입니다. 같은 스케줄러의 명령은 들어온 순서대로 하나씩 실행하고, 앞 명령이 실패해도 다음 명령은 실행합니다.
 - **명령별 거부와 경고**: 계획이 실행하면 안 되는 이유(`rejection`)를 내면 미리보기는 `blocked`로 보여 주고, 실행은 대상 DB를 바꾸지 않고 거부합니다. 코드는 `RESUME_IN_PAUSED_GROUP`(409, §7.4, 본문 `current`에 해당 트리거 키), 스케줄 수정의 `INVALID_SCHEDULE`(400: cron 문법·타임존·반복 값·시작·종료 시각·더 이상 발화하지 않음), `CALENDAR_ATTACHED`·`TRIGGER_COMPLETE`·`TRIGGER_TYPE_MISMATCH`·`TRIGGER_ACQUIRED`(409, §7.6)입니다. 경고 코드는 `NO_CHANGE`, `MISFIRE_DELEGATED`(재개한 트리거 중 실행 시각이 지난 것, §7.4), `NO_NEXT_FIRE_TIME`(재개해도 바뀌지 않는 트리거, 부록 A.3 R-08), `JOB_GROUP_NOT_STORED`(잡 그룹 일시정지는 저장되지 않음, §7.3), 즉시 실행의 `JOB_RUNNING_NONCONCURRENT`·`NO_ACTIVE_NODE`·`INSERTED_PAUSED`(§7.5), 스케줄 수정의 `ERROR_CLEARED`·`PAUSE_KEPT`(§7.6), 삭제의 `JOB_ALSO_DELETED`(durable이 아닌 잡의 마지막 트리거라 잡도 지움, FR-CTL-08)·`DELETING_EXECUTING`(실행 중, FR-CTL-09)이고, 해당 트리거를 앞쪽 20개까지 붙입니다.
 - **감사 기록**: 작업 종류는 명령마다 하나(`trigger.pause`·`trigger.resume`, `job.pause`·`job.resume`, `trigger_group.pause`·`trigger_group.resume`, `job_group.pause`·`job_group.resume`, `job.trigger`, `trigger.reschedule`, `trigger.delete`, `job.delete`), 대상 종류는 `trigger`·`job`·`trigger_group`·`job_group`, 대상은 SCHED_NAME과 트리거·잡 키 또는 그룹 이름, `before`는 요청(`command`, `expected`), `after`는 변경 후 상태(`triggers`, `pausedGroups`)와 바뀐 목록(`changes`, `groupChanges`, 즉시 실행이면 넣은 트리거 `inserts`, 스케줄 수정이면 전·후 스케줄 `scheduleChanges`, 삭제면 지운 대상 `deletions`)입니다. 삭제는 잠금 안에서 읽은 삭제 전 정의를 `before.snapshot`에 덧붙입니다(§7.3). `STATE_CONFLICT`면 `after`에 최신 상태를, `RESUME_IN_PAUSED_GROUP`이면 해당 트리거를 남깁니다. 사전 검사에서 거부한 요청도 실패로 남깁니다. 요청 형식 검증(400)에서 막힌 요청은 남기지 않습니다(§10).
+- **일괄 제어**(B-22, FR-CTL-10): 목록에서 고른 트리거나 잡을 한꺼번에 일시정지·재개합니다. 명령은 `pauseTrigger`·`resumeTrigger`·`pauseJob`·`resumeJob`(`batchCommandSchema`)이고, 한 번에 50개(`BATCH_ITEMS_MAX`, 목록 한 쪽)까지입니다. 넘거나 비었거나 다른 명령이 섞이면 400이고 기록하지 않습니다.
+  - **미리보기**: 커넥션 하나로 항목마다 단건 미리보기를 차례로 읽습니다. 없어진 대상처럼 그 항목만의 거부는 항목의 `error`(코드·문구)로, 계획의 거부(`RESUME_IN_PAUSED_GROUP` 등)는 항목 미리보기의 `blocked`로 알립니다. 접속 때문에 어떤 항목도 실행할 수 없으면(읽기 전용 등) 응답의 `blocked`입니다. 대상 DB에 연결할 수 없으면 요청 전체가 실패합니다.
+  - **실행**: 항목마다 단건과 같은 절차(1~5단계: 사전 검사, 뮤텍스, 감사 기록, 트랜잭션)로 하나씩 실행합니다. 잠금은 항목마다 잡았다 풀어 Quartz 노드를 오래 기다리게 하지 않습니다(PRD R3). 항목끼리 원자적이지 않아서, 앞 항목의 변경은 뒤 항목이 실패해도 그대로 남습니다. 한 항목이 거부되거나(`STATE_CONFLICT`, `NOT_FOUND`, `READ_ONLY` 등) 그 항목의 대상 DB 오류(`TARGET_ERROR`)가 나도 다음 항목을 실행합니다. 연결할 수 없거나 잠금 대기를 넘기는 등 다음 항목도 같을 오류(`TARGET_ERROR` 밖의 대상 DB 오류, 처리하지 못한 오류)가 나면 남은 항목은 실행하지 않고 `skipped`(`BATCH_STOPPED`)로 돌려줍니다. 항목마다 제한 시간까지 기다리지 않게 하기 위해서입니다.
+  - **항목 결과**: `success`(`changed`, `changes`, `warnings`, `auditId`), `failure`(오류 코드·문구), `skipped`입니다.
+  - **감사 기록**: 항목마다 단건과 같은 기록을 남기고, `before.batch`에 `{ id, index, total }`(일괄 실행 ID, 1부터 센 순번, 전체 수)을 덧붙여 같은 일괄 실행의 기록을 묶어 봅니다. 건너뛴 항목은 실행하지 않았으므로 남기지 않습니다.
+  - **화면**: 바뀌는 것이 있는 항목만 보냅니다. 바뀌는 것이 없는 항목과 미리보기에서 막힌 항목은 보내지 않습니다.
 - **화면 갱신**: 실행이 성공하면 화면은 결과를 알림(toast)으로 알리고 그 스케줄러의 조회를 모두 다시 읽습니다. 서버는 상태가 바뀌었으면 감시 루프에 즉시 감시를 요청해 대시보드 카드도 갱신합니다(NFR-UX-03).
 - **구현**: 실행 절차 4단계는 `@qa/store`의 `commands/`(`executeCommand`, `previewCommand`, `acquireTriggerAccess`, 핸들러 `pause-resume.ts`·`trigger-job.ts`·`reschedule.ts`·`delete.ts`, 공통 읽기·계획·적용 `triggers.ts`), 1·2·3·5단계는 `apps/api/src/commands/`(`QuartzCommandService`)입니다. 화면은 공통 확인 대화상자(`components/commands/command-dialog.tsx`)와 제어 메뉴(`components/commands/control-menu.tsx`, 트리거·잡·그룹용은 `components/schedulers/trigger-actions.tsx`)입니다. 제어 메뉴는 트리거 표의 줄, 잡 목록의 줄, 잡 상세 머리, 트리거·잡 탭에서 그룹 필터를 골랐을 때 필터 옆에 있고, 일시정지 그룹 탭은 줄마다 재개 버튼을 둡니다.
 

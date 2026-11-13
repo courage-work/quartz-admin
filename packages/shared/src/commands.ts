@@ -443,3 +443,84 @@ export interface CommandResultDto {
   /** 남긴 감사 기록 ID */
   auditId: number;
 }
+
+/**
+ * 일괄 제어 (FR-CTL-10, TRD §7.1 일괄 제어). 목록에서 고른 트리거나 잡을 한꺼번에 일시정지·재개한다.
+ * 서버는 항목마다 단건 명령과 같은 절차(트랜잭션, 잠금, 감사 기록)로 하나씩 실행하고, 한 항목이 실패해도 다음 항목을 실행한다.
+ */
+export const batchCommandSchema = z.discriminatedUnion('type', [
+  pauseTriggerCommandSchema,
+  resumeTriggerCommandSchema,
+  pauseJobCommandSchema,
+  resumeJobCommandSchema,
+]);
+export type BatchCommand = z.infer<typeof batchCommandSchema>;
+export type BatchCommandType = BatchCommand['type'];
+
+/** 일괄 제어 한 번에 보낼 수 있는 항목 수. 목록 한 쪽(50개)을 모두 고를 수 있다 */
+export const BATCH_ITEMS_MAX = 50;
+
+/** `POST /schedulers/:id/commands/batch/preview` */
+export const batchPreviewRequestSchema = z.object({
+  commands: z.array(batchCommandSchema).min(1).max(BATCH_ITEMS_MAX),
+});
+export type BatchPreviewRequest = z.infer<typeof batchPreviewRequestSchema>;
+
+/** `POST /schedulers/:id/commands/batch`. 항목마다 미리보기 응답의 `expected`를 붙인다 */
+export const batchRequestSchema = z.object({
+  items: z
+    .array(z.object({ command: batchCommandSchema, expected: commandExpectedSchema }))
+    .min(1)
+    .max(BATCH_ITEMS_MAX),
+});
+export type BatchRequest = z.infer<typeof batchRequestSchema>;
+
+/** 일괄 제어 항목 하나의 오류. 코드는 단건 명령의 오류 코드와 같다 */
+export interface BatchItemErrorDto {
+  code: string;
+  message: string;
+}
+
+/** 항목 하나의 미리보기. 단건 미리보기에서 일시정지·재개에 필요한 부분이다 */
+export interface BatchPreviewItemDto {
+  command: BatchCommand;
+  /** 대상을 읽었으면 그 결과. 읽지 못했으면(없어진 트리거 등) null이고 `error`에 이유가 있다 */
+  preview: Pick<
+    CommandPreviewResponse,
+    'targets' | 'expected' | 'changes' | 'warnings' | 'blocked'
+  > | null;
+  error: BatchItemErrorDto | null;
+}
+
+export interface BatchPreviewResponse {
+  dbNow: number;
+  scheduler: CommandSchedulerDto;
+  /** 접속 때문에 어떤 항목도 실행할 수 없는 이유(읽기 전용 등). 있으면 화면은 실행 버튼을 끈다 */
+  blocked: CommandNoticeDto | null;
+  /** 요청한 순서대로 */
+  items: BatchPreviewItemDto[];
+}
+
+/**
+ * 항목 하나의 실행 결과.
+ * - `success`: 실행했다(바뀐 것이 없으면 `changed: false`)
+ * - `failure`: 실행하지 못했다. 대상 DB는 바뀌지 않았고 감사 로그에 실패로 남았다
+ * - `skipped`: 앞 항목에서 대상 DB에 연결할 수 없는 등 계속할 수 없는 오류가 나 실행하지 않았다(`BATCH_STOPPED`)
+ */
+export type BatchResultItemDto =
+  | {
+      command: BatchCommand;
+      status: 'success';
+      changed: boolean;
+      changes: CommandChangeDto[];
+      warnings: CommandNoticeDto[];
+      auditId: number;
+    }
+  | { command: BatchCommand; status: 'failure' | 'skipped'; error: BatchItemErrorDto };
+
+export interface BatchResultResponse {
+  /** 이 일괄 실행의 ID. 항목별 감사 기록의 `before.batch.id`와 같다 */
+  batchId: string;
+  /** 요청한 순서대로 */
+  items: BatchResultItemDto[];
+}
