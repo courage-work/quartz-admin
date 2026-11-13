@@ -80,6 +80,27 @@ describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, 
       return executeCommand(c, ctx, command, expected ?? expectedOf(preview.subject));
     });
 
+  /**
+   * 계속 발화하는 트리거가 있는 스케줄러에 대상이 많은 명령(전체 일시정지 등)을 실행한다. 미리보기와 실행 사이에
+   * 동시 실행 금지 잡이 끝나 BLOCKED가 WAITING이 되거나 COMPLETE 트리거가 지워지면 `STATE_CONFLICT`로 멈추므로
+   * (FR-CTL-00e), 화면에서 다시 실행하듯 미리보기부터 다시 한다. 다른 거부와 오류는 그대로 던진다
+   */
+  async function toolRunSettled(
+    schedName: string,
+    command: QuartzCommand,
+    attempts = 5,
+  ): Promise<CommandOutcome> {
+    for (let i = 1; ; i++) {
+      try {
+        return await toolRun(schedName, command);
+      } catch (err) {
+        if (!(err instanceof CommandRejection) || err.code !== 'STATE_CONFLICT' || i >= attempts) {
+          throw err;
+        }
+      }
+    }
+  }
+
   const toolError = (schedName: string, command: QuartzCommand) =>
     toolRun(schedName, command).then(
       () => null,
@@ -955,9 +976,10 @@ describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, 
       );
     }, 120_000);
 
-    // 클러스터 스케줄러 전체를 멈추므로 클러스터 테스트 중 맨 뒤에 둔다
+    // 클러스터 스케줄러 전체를 멈추므로 클러스터 테스트 중 맨 뒤에 둔다. 앞 테스트가 남긴 트리거가 계속 발화해
+    // 미리보기 뒤 상태가 바뀔 수 있어 상태 충돌이면 다시 실행한다(main CI, Oracle XE 21 × Quartz 2.5.2)
     it('G-12 전체 일시정지 중 새 그룹에 추가한 트리거도 일시정지되고, 전체 재개하면 발화한다 (통합)', async () => {
-      await toolRun(sched(), { type: 'pauseAll' });
+      await toolRunSettled(sched(), { type: 'pauseAll' });
       await node1.client.scheduleJob({
         job: { name: 'job-g12', group: 'g12', type: 'RecordingJob', durable: true },
         trigger: { name: 'added', group: 'g12', intervalMs: 1_000 },
@@ -970,7 +992,7 @@ describe(`일시정지와 재개 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, 
       await sleep(2_000);
       expect(await firedAfter('g12', 0)).toEqual([]);
 
-      const resumed = await toolRun(sched(), { type: 'resumeAll' });
+      const resumed = await toolRunSettled(sched(), { type: 'resumeAll' });
       await waitFor(async () => (await firedAfter('g12', resumed.dbNow)).length >= 1, {
         timeoutMs: 20_000,
         message: '전체 재개 뒤 발화',
