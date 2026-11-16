@@ -4,22 +4,24 @@ Oracle 12.1, 18c, 19c는 공식 컨테이너가 없어 CI에서 검증하지 못
 
 ## 1. 준비
 
-**점검을 돌리는 PC**(사내망에서 대상 DB에 접속할 수 있어야 함)
+사내망 PC에는 **Docker만** 있으면 됩니다. 점검 스크립트, Node, JRE, 테스트베드(Quartz 2.3.2·2.5.2)를 이미지 하나(`quartz-admin-oracle-check`)에 담아 인터넷이 되는 PC에서 만들고 옮깁니다. 샌드박스 점검의 테스트베드 노드도 그 컨테이너 안에서 Java 프로세스로 돌므로 Docker 소켓, 다른 이미지, 인터넷이 필요 없습니다.
 
-- Node 24, pnpm, 이 저장소(`pnpm install`이 npm 레지스트리나 사내 미러에 접근할 수 있어야 합니다)
-- 샌드박스 점검(제어·알림)을 하려면 Docker도 필요합니다. 테스트베드 노드(Quartz)를 컨테이너로 띄워 대상 DB에 붙입니다.
-  - Docker 컨테이너에서 대상 DB 호스트·포트로 접속할 수 있어야 합니다.
-  - 테스트베드 이미지는 처음 실행할 때 Maven으로 빌드합니다(인터넷 필요). 사내망에 인터넷이 없으면 인터넷이 되는 PC에서 만든 이미지를 옮깁니다.
+**점검 이미지 만들기**(인터넷이 되는 PC, 저장소 루트)
 
-    ```bash
-    docker save quartz-admin-testbed:2.3.2-local -o testbed-2.3.2.tar
-    ```
+```bash
+git checkout <점검할 커밋이나 태그>
+docker build -f docker/oracle-check/Dockerfile -t quartz-admin-oracle-check:<버전> .
+docker save quartz-admin-oracle-check:<버전> -o quartz-admin-oracle-check.tar
+```
 
-    ```bash
-    docker load -i testbed-2.3.2.tar
-    ```
+- 이미지는 약 670MB(tar를 gzip으로 묶으면 약 260MB)입니다.
+- 사내 PC가 x86-64인데 Apple Silicon Mac에서 만든다면 `docker build`에 `--platform linux/amd64`를 붙입니다.
 
-    그리고 `QA_IT_TESTBED_IMAGE=quartz-admin-testbed:2.3.2-local`로 실행합니다.
+**사내 PC로 옮기기**(사내망에서 대상 DB에 접속할 수 있는 PC)
+
+```bash
+docker load -i quartz-admin-oracle-check.tar
+```
 
 **대상 DB 계정**
 
@@ -32,7 +34,7 @@ Oracle 12.1, 18c, 19c는 공식 컨테이너가 없어 CI에서 검증하지 못
 
 ## 2. 실행
 
-`packages/store/.check-target.json`(git 제외)을 만듭니다. 비밀번호가 들어가므로 점검이 끝나면 지웁니다.
+빈 폴더(예: `check`)를 만들고 그 안에 `target.json`을 둡니다. 비밀번호가 들어가므로 점검이 끝나면 지웁니다.
 
 ```json
 {
@@ -54,16 +56,56 @@ Oracle 12.1, 18c, 19c는 공식 컨테이너가 없어 CI에서 검증하지 못
 | `serviceName` / `sid` | 둘 중 하나 | Oracle 서비스 이름 또는 SID |
 | `schema` | | Quartz 테이블 소유 스키마. 비우면 접속 계정 |
 | `schedulers` | | 읽기 점검할 SCHED_NAME. 비우면 감지한 후보 전부(최대 6개) |
-| `sandbox` | | `true`면 제어·알림까지 점검(Docker 필요). 기본 `false` |
+| `sandbox` | | `true`면 제어·알림까지 점검. 기본 `false` |
 | `sandboxPrefix` | | 샌드박스 테이블 prefix. 기본 `QACHK_`. 이미 있으면 샌드박스를 건너뜁니다 |
-| `jdbcHost` | | 테스트베드 컨테이너가 DB에 붙을 호스트. 기본 `host`(`localhost`면 `host.docker.internal`) |
-| `quartzVersion` | | 테스트베드 Quartz 버전. 기본 `2.3.2` |
+| `jdbcHost` | | 테스트베드 노드가 DB에 붙을 호스트. 기본 `host`(보통 둘 필요 없음) |
+| `quartzVersion` | | 테스트베드 Quartz 버전. `2.3.2`(기본) 또는 `2.5.2` |
+
+그 폴더를 `/check`에 붙여 실행합니다.
 
 ```bash
-pnpm --filter @qa/store check:oracle
+docker run --rm -v "$PWD/check:/check" quartz-admin-oracle-check:<버전>
 ```
 
-결과는 레포 루트 `check-results/oracle-<시각>.md`(git 제외)에 남습니다. 실패한 항목이 있으면 명령이 실패로 끝납니다. 보고서에는 호스트·계정·비밀번호가 들어가지 않으니(스키마와 SCHED_NAME은 들어감) 그대로 공유하면 됩니다. 설정 파일이 없으면 로컬 Oracle 컨테이너(Free 23, `QA_IT_ORACLE_VERSION=21`이면 XE 21)로 같은 점검을 돌립니다(도구 자체 검증용).
+Windows PowerShell에서는 `-v "${PWD}\check:/check"`로 씁니다.
+
+- 결과는 `check/results/oracle-<시각>.md`에 남습니다. 실패한 항목이 있으면 종료 코드 1, 설정 파일이 없으면 2로 끝납니다.
+- 보고서에는 호스트·계정·비밀번호가 들어가지 않으니(스키마와 SCHED_NAME은 들어감) 그대로 공유하면 됩니다.
+- Linux에서 결과 파일을 내 계정 소유로 만들려면 `--user "$(id -u):$(id -g)"`를 붙입니다.
+- 접속이 안 되면 2.1을 봅니다.
+
+### 2.1 대상 DB 네트워크
+
+컨테이너는 기본 bridge 네트워크로 나가며, 연결은 호스트의 라우팅(VPN 포함)을 따르고 출발지 IP가 호스트 IP로 바뀝니다(NAT). 그래서 **호스트에서 닿는 DB IP는 컨테이너에서도 닿고**, DB 방화벽·리스너 ACL에는 호스트 IP가 열려 있으면 됩니다. 샌드박스 노드도 같은 컨테이너에서 돌아 같은 경로로 붙습니다.
+
+점검 전에 같은 이미지로 TCP 접속만 먼저 시험할 수 있습니다(IP와 포트를 바꿉니다).
+
+```bash
+docker run --rm --entrypoint node quartz-admin-oracle-check:<버전> -e "require('net').connect(1521,'10.1.2.3').setTimeout(5000,()=>{console.log('실패: 5초 안에 응답 없음');process.exit(1)}).on('connect',()=>{console.log('접속됨');process.exit(0)}).on('error',(e)=>{console.log('실패:',e.message);process.exit(1)})"
+```
+
+호스트에서는 닿는데 컨테이너에서 실패하면 다음을 봅니다.
+
+| 원인 | 증상 | 조치 |
+| --- | --- | --- |
+| DB IP가 Docker 내부 대역과 겹침 | DB가 `172.17.0.0/16`(기본 브리지)이나 `172.18~31.x`(추가 네트워크) 대역에 있음. 시간 초과 | Linux는 `--network host`를 붙입니다. 또는 Docker 설정(`daemon.json`의 `bip`, `default-address-pools`)에서 Docker 대역을 사내에서 쓰지 않는 대역으로 옮깁니다 |
+| 호스트의 hosts 파일·VPN DNS에만 있는 이름 | `host`에 이름을 적었는데 `ENOTFOUND` | `host`에 IP를 씁니다. 또는 `--add-host <이름>:<IP>`를 붙입니다 |
+| Oracle RAC(SCAN) 리다이렉트 | TCP 시험은 되는데 점검의 L-01이 `TARGET_UNREACHABLE`(NJS-503 등) | SCAN 리스너가 노드 VIP의 **호스트 이름**으로 다시 붙게 하는데 컨테이너가 그 이름을 못 풉니다. VIP 이름마다 `--add-host rac1-vip:10.x.x.x`를 붙이거나 노드 하나의 IP로 직접 접속합니다 |
+| PC의 VPN 클라이언트·보안 프로그램 | Windows·Mac Docker Desktop에서만 시간 초과 | Docker Desktop(VM)에서 나가는 연결을 막는 정책입니다. 보안 담당자에게 예외를 받거나 Linux PC에서 돌립니다 |
+| 대상 DB가 이 PC 자신 | `localhost`로 적으면 컨테이너 자신을 가리킴 | `host`를 `host.docker.internal`로 둡니다(Linux는 `--add-host host.docker.internal:host-gateway`도 붙임) |
+
+### 2.2 저장소에서 직접 돌리기(개발 PC)
+
+Node 24, pnpm, Docker가 있는 PC에서는 이미지 없이 돌릴 수도 있습니다. 이때 테스트베드 노드는 컨테이너로 뜹니다(처음에 Maven으로 이미지를 빌드하므로 인터넷 필요).
+
+1. `packages/store/.check-target.json`(git 제외)에 위와 같은 설정을 둡니다. `host`가 `localhost`면 노드 컨테이너는 `host.docker.internal`로 붙습니다.
+2. 실행합니다.
+
+   ```bash
+   pnpm --filter @qa/store check:oracle
+   ```
+
+결과는 레포 루트 `check-results/`(git 제외)에 남습니다. 설정 파일이 없으면 로컬 Oracle 컨테이너(Free 23, `QA_IT_ORACLE_VERSION=21`이면 XE 21)로 같은 점검을 돌립니다(도구 자체 검증용). 점검 이미지는 이 로컬 검증을 하지 않습니다.
 
 ## 3. 점검표
 
@@ -92,7 +134,7 @@ pnpm --filter @qa/store check:oracle
 
 **수동**(도구 화면, 사내 19c에서 한 번)
 
-도구를 띄우고(`docker compose` 또는 `pnpm dev:hmr`) 사내 19c의 테스트 스케줄러로 확인합니다.
+도구를 띄우고(`docker compose` 또는 `pnpm dev:hmr`) 사내 19c의 테스트 스케줄러로 확인합니다. 사내망에서 도구 이미지를 빌드할 수 없으면 점검 이미지처럼 인터넷이 되는 PC에서 빌드해(`docker build -f docker/Dockerfile -t quartz-admin:<버전> .`, [운영 런북](operations.md) 3장) `docker save`·`docker load`로 옮기고, `docker/.env`의 `QA_IMAGE`로 가리킵니다.
 
 | ID | 항목 | 통과 기준 |
 | --- | --- | --- |

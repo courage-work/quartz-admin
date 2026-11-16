@@ -13,4 +13,5 @@ export * from './quartz-schema.js';
 export * from './testbed-client.js';
 export * from './tcp-proxy.js';
 export * from './testbed.js';
+export * from './testbed-process.js';
 export * from './wait.js';

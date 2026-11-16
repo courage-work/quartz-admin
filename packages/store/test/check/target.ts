@@ -26,7 +26,7 @@ export interface CheckTargetFile {
   sandbox?: boolean;
   /** 기본 `QACHK_`. 이미 이 prefix의 테이블이 있으면 샌드박스를 건너뛴다 */
   sandboxPrefix?: string;
-  /** 테스트베드 컨테이너가 DB에 붙을 때 쓰는 호스트. 기본 `host`(`localhost`면 `host.docker.internal`) */
+  /** 테스트베드 노드가 DB에 붙을 때 쓰는 호스트. 기본 `host`(컨테이너 노드이고 `localhost`면 `host.docker.internal`) */
   jdbcHost?: string;
   /** 테스트베드 Quartz 버전. 기본 `2.3.2`(사내 주력) */
   quartzVersion?: string;
@@ -54,8 +54,19 @@ export interface CheckTarget {
 export const CHECK_TARGET_FILE =
   process.env.QA_CHECK_TARGET ?? path.resolve(process.cwd(), '.check-target.json');
 
+/**
+ * 테스트베드 jar 폴더. 있으면 샌드박스 노드를 컨테이너 대신 Java 프로세스로 띄운다(점검 이미지, `docker/oracle-check`).
+ * 이 모드에서는 Docker를 쓰지 않으므로 로컬 Oracle 컨테이너 검증도 할 수 없다
+ */
+export const TESTBED_JAR_DIR = process.env.QA_CHECK_TESTBED_JAR_DIR || undefined;
+
 export async function openCheckTarget(): Promise<CheckTarget> {
   if (existsSync(CHECK_TARGET_FILE)) return externalTarget(readTargetFile(CHECK_TARGET_FILE));
+  if (TESTBED_JAR_DIR) {
+    throw new Error(
+      `설정 파일이 없습니다: ${CHECK_TARGET_FILE}. 점검 이미지는 설정 파일의 Oracle만 점검합니다(docs/oracle-legacy-check.md)`,
+    );
+  }
   return localTarget();
 }
 
@@ -81,9 +92,13 @@ function externalTarget(file: CheckTargetFile): CheckTarget {
     password: file.password,
     ...(file.serviceName ? { oracleServiceName: file.serviceName } : { oracleSid: file.sid }),
   };
+  // 컨테이너 노드는 호스트의 localhost에 닿지 못하므로 host.docker.internal로 바꾼다.
+  // 프로세스 노드(점검 이미지)는 점검 스크립트와 같은 곳에서 돌므로 같은 호스트를 쓴다
   const jdbcHost =
     file.jdbcHost ??
-    (['localhost', '127.0.0.1'].includes(file.host) ? 'host.docker.internal' : file.host);
+    (!TESTBED_JAR_DIR && ['localhost', '127.0.0.1'].includes(file.host)
+      ? 'host.docker.internal'
+      : file.host);
   let network: StartedNetwork | undefined;
   return {
     // 보고서를 공유할 때 사내 호스트·계정이 섞이지 않게 접속 방식만 적는다

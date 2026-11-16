@@ -32,14 +32,15 @@ import {
   initQuartzSchema,
   quartzTableName,
   startTestbedNode,
+  startTestbedProcess,
   testbedImage,
   triggerAccessIsFree,
   waitForCheckedInNodes,
   waitForExecutions,
   type TestConnection,
-  type TestbedNode,
+  type TestbedHandle,
 } from '../support/index.js';
-import { CHECK_TARGET_FILE, openCheckTarget, type CheckTarget } from './target.js';
+import { CHECK_TARGET_FILE, TESTBED_JAR_DIR, openCheckTarget, type CheckTarget } from './target.js';
 
 /**
  * 사내 Oracle 구버전 점검 (B-35, TRD §5.1). `pnpm --filter @qa/store check:oracle`로 손으로 돌린다.
@@ -145,7 +146,7 @@ describe('사내 Oracle 점검', () => {
   let target: CheckTarget | undefined;
   let conn: TargetConn | undefined;
   let sql: TestConnection | undefined;
-  const nodes: TestbedNode[] = [];
+  const nodes: TestbedHandle[] = [];
   let sandboxCreated = false;
   let sandboxReady = false;
   const SCHED = 'QACHK_SCHED';
@@ -197,6 +198,7 @@ describe('사내 Oracle 점검', () => {
     const phase = '1. 환경';
     env.push(
       `설정 파일: ${target!.local ? `없음(${CHECK_TARGET_FILE}) → 로컬 컨테이너` : CHECK_TARGET_FILE}`,
+      `테스트베드 노드: ${TESTBED_JAR_DIR ? 'Java 프로세스(점검 이미지)' : '컨테이너'}`,
     );
     const adapter = createDriverAdapters().find((a) => a.kind === 'oracle')!;
     const ok = await check(phase, '제품 어댑터로 접속(oracledb Thin)', async () => {
@@ -284,35 +286,38 @@ describe('사내 Oracle 점검', () => {
       phase,
       `테스트베드 노드 2개 + 기준 인스턴스(Quartz ${target!.quartzVersion})`,
       async () => {
-        const image = await testbedImage(target!.quartzVersion);
-        const network = await target!.network();
         const db = {
           jdbcUrl: target!.jdbcUrl,
           user: target!.info.username,
           password: target!.info.password,
         };
-        const common = {
-          network,
-          db,
-          image,
-          tablePrefix: P(),
-          executionsTable: `${P()}EXECUTIONS`,
-        };
+        const tables = { tablePrefix: P(), executionsTable: `${P()}EXECUTIONS` };
+        // 점검 이미지는 노드를 같은 컨테이너의 Java 프로세스로, 그 밖에는 테스트베드 컨테이너로 띄운다
+        let start: (n: {
+          schedulerName: string;
+          instanceId: string;
+          start?: boolean;
+        }) => Promise<TestbedHandle>;
+        if (TESTBED_JAR_DIR) {
+          start = (n) =>
+            startTestbedProcess({
+              ...n,
+              ...tables,
+              db,
+              jarDir: TESTBED_JAR_DIR!,
+              quartzVersion: target!.quartzVersion,
+            });
+        } else {
+          const image = await testbedImage(target!.quartzVersion);
+          const network = await target!.network();
+          start = (n) => startTestbedNode({ ...n, ...tables, db, image, network });
+        }
         nodes.push(
           ...(await Promise.all(
-            ['node-1', 'node-2'].map((instanceId) =>
-              startTestbedNode({ ...common, schedulerName: SCHED, instanceId }),
-            ),
+            ['node-1', 'node-2'].map((instanceId) => start({ schedulerName: SCHED, instanceId })),
           )),
         );
-        nodes.push(
-          await startTestbedNode({
-            ...common,
-            schedulerName: REF,
-            instanceId: 'reference',
-            start: false,
-          }),
-        );
+        nodes.push(await start({ schedulerName: REF, instanceId: 'reference', start: false }));
         await waitForCheckedInNodes(sql!, {
           schedulerName: SCHED,
           schema: { prefix: P(), db: 'oracle' },

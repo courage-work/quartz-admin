@@ -24,3 +24,8 @@ tools/quartz-testbed/target
 
 docs
 docker/compose.yaml
+
+# 점검 설정(비밀번호)과 결과
+**/.check-target.json
+check-results
+perf-results
