@@ -2,9 +2,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.45 |
+| 문서 버전 | v0.46 |
 | 작성일 | 2026-11-05 |
-| 상위 문서 | PRD v0.5(`docs/PRD.md`), TRD v0.38(`docs/TRD.md`) |
+| 상위 문서 | PRD v0.5(`docs/PRD.md`), TRD v0.39(`docs/TRD.md`) |
 | 작업 단위 | 기능 단위. 작업 하나는 API, 화면, 테스트를 모두 포함한 하나의 PR |
 | 추정 | 하지 않음. 순서와 의존성만 관리 |
 | 저장소·CI | GitHub(`courage-work/quartz-admin`, 공개), GitHub Actions |
@@ -60,6 +60,7 @@
 | v0.43 | 2026-11-13 | B-34 완료. 상위 문서를 TRD v0.37로 갱신(§10 CSV 내보내기) |
 | v0.44 | 2026-11-13 | B-36 진행(문서 1부): B-35 결과를 기다리는 동안 B-35와 무관한 운영 런북, 배포 보안 설정, DB 계정 SQL, 운영 CLI `reset-password`를 먼저 함. 상위 문서를 TRD v0.38로 갱신 |
 | v0.45 | 2026-11-16 | B-36 진행(문서 2부): 파일럿 안내(`docs/pilot.md`: 인벤토리 찾기와 양식, 지원 범위 밖, 파일럿 선정 단계, 등록 점검표, 중단, 성공 지표 4개 측정 방법과 월간 보고), B-35 결과에 따른 TRD §5.1 문구 초안(`docs/oracle-legacy-check.md` 4장) |
+| v0.46 | 2026-11-16 | B-35 점검 이미지: 사내망 PC에 Docker만 있으면 되게 점검 스크립트·JRE·테스트베드(2.3.2·2.5.2)를 이미지 하나로 묶음(`docker/oracle-check`). 상위 문서를 TRD v0.39로 갱신 |
 
 ---
 
@@ -592,7 +593,7 @@ M1의 B-08과 B-09는 서로 의존하지 않아 M0 작업과 함께 AI 세션 �
 
 - **참조**: TRD §5.1
 - **범위**: 사내 Oracle 19c(가능하면 12c)의 테스트용 Quartz 스키마로 자동 감지, 조회, 제어, 알림 점검표 수행
-- **점검 도구**: `pnpm --filter @qa/store check:oracle`, 점검표와 실행 방법은 `docs/oracle-legacy-check.md`(L-01~L-18 자동, L-21~L-25 화면 수동)
+- **점검 도구**: 점검 이미지 `docker/oracle-check`(사내망 PC는 Docker만 필요) 또는 `pnpm --filter @qa/store check:oracle`, 점검표와 실행 방법은 `docs/oracle-legacy-check.md`(L-01~L-18 자동, L-21~L-25 화면 수동)
 - **완료 기준**: 점검표 전 항목 통과. 실패 항목은 수정하거나 지원 범위 제외로 문서화한다
 
 #### B-36 운영 문서와 파일럿 출시

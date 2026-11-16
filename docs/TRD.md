@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 버전 | v0.38 (B-36 운영 문서) |
+| 문서 버전 | v0.39 (B-35 점검 이미지) |
 | 작성일 | 2026-11-06 |
 | 상태 | 검토 중 |
 | 상위 문서 | PRD(`docs/PRD.md`) v0.5 |
@@ -52,6 +52,7 @@
 | v0.36 | 2026-11-13 | B-33: §12 E2E 표에 즉시 실행·브라우저 3종을 반영하고 §12.5 E2E(구성, 시나리오, 실행 방법, CI 잡) 추가 |
 | v0.37 | 2026-11-13 | B-34: §10 감사 로그 CSV 내보내기(`GET /audit-logs/export.csv`) 확정. 목록과 같은 필터, 1,000건씩 키셋으로 읽어 응답이 비워질 때까지 기다리며 쓰기, 열 구성, BOM, 수식 주입 방지, 메모리 측정(10만 건 68MB에서 살아 있는 힙 증가 2.5MB) |
 | v0.38 | 2026-11-13 | B-36(문서 1부): §11에 운영 런북(`docs/operations.md`)과 운영 CLI `reset-password` 연결, §5.5에 DB 계정 SQL(`docs/db-accounts/`)과 CI 검증 연결 |
+| v0.39 | 2026-11-16 | B-35: §5.1 사내망용 점검 이미지(`docker/oracle-check`). 테스트베드 노드를 컨테이너 대신 같은 컨테이너의 Java 프로세스로 띄워 Docker만으로 점검 |
 
 Quartz 클래스와 메서드를 근거로 적을 때는 다음 약칭을 씁니다. `JSS` = `org.quartz.impl.jdbcjobstore.JobStoreSupport`, `Delegate` = `StdJDBCDelegate`(SQL 문은 `StdJDBCConstants`), `QS` = `org.quartz.core.QuartzScheduler`(`StdScheduler`는 이 클래스에 그대로 위임), `QST` = `QuartzSchedulerThread`. 별도 표시가 없으면 2.3.2와 2.5.2의 동작이 같습니다.
 
@@ -291,7 +292,7 @@ PRD §7.1과 §4.1~4.4의 규칙이 실제로 지켜지는지 확인한 결과�
 | MariaDB | 10.3 | `mysql2` | 10.3, 11.4 |
 
 - Quartz 테스트 기준 버전은 **2.3.2**(사내 주력)와 **2.5.x 최신**입니다.
-- Oracle 12.1, 18c, 19c용 공식 컨테이너가 없어 CI에서는 검증하지 못합니다. 대신 SQL을 12.1 문법(`OFFSET … FETCH`, `FOR UPDATE WAIT n`) 안에서만 쓰고, 출시 전에 사내 19c(가능하면 12c) 인스턴스로 수동 점검합니다. 점검은 `packages/store/test/check/`(`pnpm --filter @qa/store check:oracle`)가 자동으로 하고, 점검표와 실행 방법은 `docs/oracle-legacy-check.md`에 있습니다(B-35). 읽기 점검은 기존 Quartz 스키마에 SELECT만 실행하고, 샌드박스 점검은 같은 계정에 `QACHK_` 테이블을 만들어 테스트베드 노드를 붙인 뒤 제어 명령과 알림 판정까지 확인하고 지웁니다. 로컬 Oracle Free 23·XE 21에서 도구 자체를 검증했습니다.
+- Oracle 12.1, 18c, 19c용 공식 컨테이너가 없어 CI에서는 검증하지 못합니다. 대신 SQL을 12.1 문법(`OFFSET … FETCH`, `FOR UPDATE WAIT n`) 안에서만 쓰고, 출시 전에 사내 19c(가능하면 12c) 인스턴스로 수동 점검합니다. 점검은 `packages/store/test/check/`(`pnpm --filter @qa/store check:oracle`)가 자동으로 하고, 점검표와 실행 방법은 `docs/oracle-legacy-check.md`에 있습니다(B-35). 읽기 점검은 기존 Quartz 스키마에 SELECT만 실행하고, 샌드박스 점검은 같은 계정에 `QACHK_` 테이블을 만들어 테스트베드 노드를 붙인 뒤 제어 명령과 알림 판정까지 확인하고 지웁니다. 로컬 Oracle Free 23·XE 21에서 도구 자체를 검증했습니다. 사내망 PC에는 Node·pnpm·Maven이 없을 수 있어 점검 스크립트, JRE, 테스트베드 jar(2.3.2·2.5.2)를 점검 이미지 하나(`docker/oracle-check/Dockerfile`)로 묶습니다. 이 이미지는 테스트베드 노드를 컨테이너 대신 같은 컨테이너의 Java 프로세스로 띄우므로(`QA_CHECK_TESTBED_JAR_DIR`, `test/support/testbed-process.ts`) Docker 소켓이나 다른 이미지 없이 `docker run` 한 번으로 점검합니다.
 - MySQL 5.7을 지원하므로 CTE, 윈도 함수, `SKIP LOCKED`/`NOWAIT`(8.0 이상)를 쓰지 않습니다.
 - `mysql2`는 MariaDB 전용 인증 플러그인 `ed25519`를 지원하지 않습니다. 이 플러그인을 쓰는 계정으로 접속하면 `TARGET_AUTH_FAILED`로 실패하고, 메시지가 "이 인증 방식은 지원하지 않으니 `mysql_native_password` 계정을 쓰라"고 안내합니다(B-29, 연결 테스트 화면에 그대로 보임). `authPlugins`로 직접 붙이지 않은 이유: MariaDB `ed25519`는 비밀번호의 SHA-512를 서명 키로 바로 쓰는 변형이라 Node의 표준 Ed25519(32바이트 시드에서 키를 만듦)로는 서명할 수 없습니다. 필요하면 `mariadb` 커넥터용 어댑터를 따로 추가합니다.
 
