@@ -68,7 +68,7 @@ curl -fsS http://127.0.0.1:3000/readyz
 1. `QA_PUBLIC_URL`로 접속해 첫 관리자로 로그인하고, 오른쪽 위 계정 메뉴에서 비밀번호를 바꿉니다.
 2. `docker/.env`에서 `QA_ADMIN_PASSWORD` 줄을 지웁니다(이미 계정이 있으면 쓰이지 않습니다).
 3. 관리자를 한 명 더 만들어 둡니다(사용자 → 사용자 추가, 관리자 권한). 한 명이 잠기거나 비밀번호를 잊어도 다른 관리자가 초기화할 수 있습니다.
-4. 접속 → 접속 추가로 대상 DB를 등록하고 스케줄러를 감지·등록합니다([db-accounts.md](db-accounts.md) "접속 등록").
+4. 접속 → 접속 추가로 대상 DB를 등록하고 스케줄러를 감지·등록합니다([db-accounts.md](db-accounts.md) "접속 등록"). 사내 스케줄러를 차례로 들일 때는 [파일럿 안내](pilot.md)의 등록 점검표를 따릅니다.
 5. 알림 채널(Slack, 이메일)을 만들고 "테스트 발송"으로 확인합니다.
 
 > 이후 예시의 `docker compose`는 모두 `docker compose -f docker/compose.yaml`의 줄임입니다. 쉘에 `alias qa='docker compose -f docker/compose.yaml'`처럼 두면 편합니다.
