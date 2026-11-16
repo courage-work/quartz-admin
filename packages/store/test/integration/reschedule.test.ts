@@ -470,13 +470,17 @@ describe(`스케줄 수정 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => 
 
     it('C-05·C-14 집힌 트리거: 옛 발화 직후로 고치면 거부, 그 밖이면 WAITING이 되고 옛 시각에 발화하지 않으며 새 식의 시각에 발화한다 (통합)', async () => {
       await node().addJob({ name: 'job-c05', group: 'c05', type: 'RecordingJob', durable: true });
-      // 매분 0초. 노드는 발화 최대 30초 전에 집는다
+      // 약 15초 뒤의 초(S)에 발화하는 매분 트리거. 등록하면 노드가 바로 깨어 idleWaitTime(30초) 안의 트리거를 집으므로
+      // 발화 15초쯤 전에 ACQUIRED가 된다. 매분 0초로 두면 집는 시점이 노드의 임의 대기(24~30초)에 달려
+      // 발화 직전에 집는 일이 이어질 수 있다(MariaDB 10.3 CI에서 90초 안에 5초 넘게 앞서 집지 못함, D-05와 같은 원인)
+      const fireSecond = Math.floor(((await dbNow()) + 15_000) / 1_000) % 60;
+      const newSecond = (fireSecond + 45) % 60;
       await node().scheduleJob({
         trigger: {
           type: 'cron',
           name: 't',
           group: 'c05',
-          cron: '0 * * * * ?',
+          cron: `${fireSecond} * * * * ?`,
           timeZone: 'UTC',
           forJob: { name: 'job-c05', group: 'c05' },
         },
@@ -493,27 +497,27 @@ describe(`스케줄 수정 (${TEST_DB_LABEL}, Quartz ${QUARTZ_VERSION})`, () => 
       expect(err).toMatchObject({ code: 'TRIGGER_ACQUIRED' });
       expect((await row(sched(), 'c05', 't'))?.state).toBe('ACQUIRED');
 
-      // C-05: 매분 45초는 옛 발화(0초) 뒤 첫 실행이 45초 뒤라 경합 구간(35초) 밖이다
+      // C-05: 매분 S+45초는 옛 발화(S초) 뒤 첫 실행이 45초 뒤라 경합 구간(35초) 밖이다
       const out = await toolRun(sched(), {
         type: 'updateCronSchedule',
         trigger: { group: 'c05', name: 't' },
-        cronExpression: '45 * * * * ?',
+        cronExpression: `${newSecond} * * * * ?`,
         timeZone: 'UTC',
       });
       expect(out.changes).toEqual([{ group: 'c05', name: 't', from: 'ACQUIRED', to: 'WAITING' }]);
       const newFire = out.scheduleChanges[0]!.to.nextFireTime!;
-      expect(new Date(newFire).getUTCSeconds()).toBe(45);
+      expect(new Date(newFire).getUTCSeconds()).toBe(newSecond);
 
       // 옛 시각이 지나도 발화하지 않는다
       await waitFor(async () => (await dbNow()) > oldFire + 3_000, { timeoutMs: 40_000 });
       expect((await runsOf('c05')).filter((r) => r.scheduledFireTime === oldFire)).toEqual([]);
-      // 새 시각에 발화하고 다음 실행 시각이 옛 식(0초)으로 돌아가지 않는다
+      // 새 시각에 발화하고 다음 실행 시각이 옛 식(S초)으로 돌아가지 않는다
       await waitFor(
         async () => (await runsOf('c05')).some((r) => r.scheduledFireTime === newFire),
         { timeoutMs: 120_000, message: '새 식의 시각에 발화' },
       );
       const after = await row(sched(), 'c05', 't');
-      expect(new Date(after!.nft!).getUTCSeconds()).toBe(45);
+      expect(new Date(after!.nft!).getUTCSeconds()).toBe(newSecond);
     }, 240_000);
 
     it('S-07·S-08 SIMPLE 집힌 트리거: 옛 발화 직후 시작은 거부, 35초 밖이면 WAITING이 되고 옛 시각에 발화하지 않는다 (통합)', async () => {
