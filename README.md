@@ -8,6 +8,7 @@
 | ------------------------------- | -------------------------------------------------------------------- |
 | [운영 런북](docs/operations.md) | 설치, 리버스 프록시, 배포 보안, 업그레이드, 백업·복원, 키, 장애 대응 |
 | [DB 계정](docs/db-accounts.md)  | 대상 DB 4종의 읽기 전용·쓰기 계정 만들기와 접속 등록                 |
+| [파일럿 안내](docs/pilot.md)    | 사내 스케줄러 인벤토리, 파일럿 선정·등록·중단, 성공 지표 측정        |
 | [PRD](docs/PRD.md)              | 사용자, 범위, 기능·비기능 요구사항, 성공 지표                        |
 | [TRD](docs/TRD.md)              | 아키텍처, 저장소 스키마, 제어·감시 설계, 테스트                      |
 | [BACKLOG](docs/BACKLOG.md)      | 마일스톤과 작업(B-xx), 진행 규칙, 요구사항 추적                      |
@@ -66,7 +67,7 @@ Windows에 Visual Studio C++ 빌드 도구가 없으면 `pnpm install`이 better
 
 ## 운영
 
-운영 배포는 Docker Compose 한 서비스입니다(NFR-OPS-01). 설치부터 업그레이드, 백업·복원, 키 교체, 관리자 비밀번호 되살리기, 장애 대응까지 [운영 런북](docs/operations.md)에 있고, 대상 DB 계정은 [DB 계정](docs/db-accounts.md)을 보세요.
+운영 배포는 Docker Compose 한 서비스입니다(NFR-OPS-01). 설치부터 업그레이드, 백업·복원, 키 교체, 관리자 비밀번호 되살리기, 장애 대응까지 [운영 런북](docs/operations.md)에 있고, 대상 DB 계정은 [DB 계정](docs/db-accounts.md)을 보세요. 사내 스케줄러를 등록하고 성공 지표를 재는 방법은 [파일럿 안내](docs/pilot.md)에 있습니다.
 
 ```bash
 docker build -f docker/Dockerfile -t quartz-admin:local .
